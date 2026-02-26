@@ -1,0 +1,52 @@
+[package]
+name = "signalk-server"
+description = "SignalK server: REST API, WebSocket streaming, plugin bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "signalk-server"
+path = "src/main.rs"
+
+[lib]
+name = "signalk_server"
+path = "src/lib.rs"
+
+[dependencies]
+signalk-types.workspace = true
+signalk-store.workspace = true
+signalk-internal.workspace = true
+tokio.workspace = true
+axum.workspace = true
+axum-extra.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+jsonwebtoken.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+config.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true
+jsonschema.workspace = true
+tokio = { workspace = true, features = ["full"] }
+criterion.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+signalk-types.workspace = true
+signalk-store.workspace = true
+
+[[bench]]
+name = "api_throughput"
+harness = false
+
+[[bench]]
+name = "store_throughput"
+harness = false

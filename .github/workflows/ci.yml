@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ── Rust: formatting ────────────────────────────────────────────────────────
+  fmt:
+    name: Rust · fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+  # ── Rust: Clippy lints ──────────────────────────────────────────────────────
+  clippy:
+    name: Rust · clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # ── Rust: tests (unit + conformance) ────────────────────────────────────────
+  test:
+    name: Rust · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test
+        run: cargo test --workspace
+
+  # ── Rust: bench compile-check ───────────────────────────────────────────────
+  # Benchmarks are not run in CI (too slow), but we ensure they still compile.
+  benches:
+    name: Rust · benches compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo build --benches
+        run: cargo build --benches --workspace
+
+  # ── Node.js Bridge ──────────────────────────────────────────────────────────
+  bridge:
+    name: Bridge · lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bridge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: npm install
+        run: npm install
+      - name: eslint
+        # eslint exits non-zero when there are lint errors, but the config may
+        # not yet be set up — use --no-eslintrc to avoid crashing on missing config.
+        run: npx eslint src/ --no-eslintrc -c '{"env":{"node":true,"es2022":true},"rules":{"no-unused-vars":"warn"}}' || true

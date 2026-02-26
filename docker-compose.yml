@@ -1,0 +1,38 @@
+version: '3.9'
+
+services:
+  signalk-rs:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.rs
+    ports:
+      - "3000:3000"
+    volumes:
+      - signalk-sockets:/run/signalk
+      - signalk-data:/etc/signalk-rs
+    environment:
+      - RUST_LOG=signalk_server=info,signalk_store=info
+    restart: unless-stopped
+
+  signalk-bridge:
+    build:
+      context: bridge
+      dockerfile: ../docker/Dockerfile.bridge
+    depends_on:
+      - signalk-rs
+    volumes:
+      - signalk-sockets:/run/signalk
+      - signalk-data:/data
+      - ./bridge:/app
+    environment:
+      - SIGNALK_BRIDGE_TOKEN=${SIGNALK_BRIDGE_TOKEN:-changeme}
+      - SIGNALK_RS_SOCKET=/run/signalk/rs.sock
+      - SIGNALK_BRIDGE_SOCKET=/run/signalk/bridge.sock
+      - SIGNALK_WS_URL=ws://signalk-rs:3000/signalk/v1/stream?subscribe=none
+      - SIGNALK_DATA_DIR=/data
+      - SIGNALK_PLUGINS_DIR=/app/node_modules
+    restart: unless-stopped
+
+volumes:
+  signalk-sockets:   # shared between rs + bridge (UDS sockets)
+  signalk-data:      # persistent config + plugin data

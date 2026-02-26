@@ -1,0 +1,20 @@
+[server]
+port = 3000
+host = "0.0.0.0"
+name = "signalk-rs-test"
+
+[vessel]
+uuid = "urn:mrn:signalk:uuid:00000000-0000-4000-8000-000000000001"
+name = "Test Vessel"
+mmsi = "123456789"
+
+[auth]
+jwt_secret = "test-secret-for-conformance-testing"
+token_ttl_secs = 3600
+admin_user = "admin"
+admin_password_hash = ""
+
+[internal]
+transport = "uds"
+uds_rs_socket = "/run/signalk/rs.sock"
+uds_bridge_socket = "/run/signalk/bridge.sock"

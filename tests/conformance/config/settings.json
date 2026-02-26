@@ -1,0 +1,15 @@
+{
+  "vessel": {
+    "name": "Test Vessel",
+    "uuid": "urn:mrn:signalk:uuid:00000000-0000-4000-8000-000000000001",
+    "mmsi": "123456789"
+  },
+  "interfaces": {
+    "plugins": false,
+    "appstore": false
+  },
+  "security": {
+    "strategy": "@signalk/signalk-server/dist/tokensecurity",
+    "allowReadOnly": true
+  }
+}

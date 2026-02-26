@@ -1,0 +1,268 @@
+// Conformance tests for the SignalK REST API.
+//
+// These tests run in-process using axum's `oneshot` pattern — no ports, no Docker.
+// They verify:
+//   1. Correct HTTP status codes
+//   2. Correct JSON structure (field names, types)
+//   3. JSON Schema conformance against official SignalK schemas
+//   4. Spec-mandated behaviour (e.g. 404 on missing path, 501 on snapshot)
+//
+// To compare against the original SignalK server, see tests/conformance/compare.js.
+
+mod helpers;
+use helpers::{assert_valid_schema, get, post_json, test_app};
+use serde_json::json;
+
+// ─── GET /signalk — Discovery ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn discovery_returns_200() {
+    let (status, _) = get(test_app(), "/signalk").await;
+    assert_eq!(status, 200, "Discovery endpoint must return HTTP 200");
+}
+
+#[tokio::test]
+async fn discovery_has_endpoints_field() {
+    let (_, body) = get(test_app(), "/signalk").await;
+    assert!(
+        body["endpoints"].is_object(),
+        "Discovery response must have 'endpoints' object, got: {}",
+        body
+    );
+}
+
+#[tokio::test]
+async fn discovery_has_v1_endpoint() {
+    let (_, body) = get(test_app(), "/signalk").await;
+    assert!(
+        body["endpoints"]["v1"].is_object(),
+        "Discovery must expose 'v1' endpoint, got endpoints: {}",
+        body["endpoints"]
+    );
+}
+
+#[tokio::test]
+async fn discovery_v1_has_required_fields() {
+    let (_, body) = get(test_app(), "/signalk").await;
+    let v1 = &body["endpoints"]["v1"];
+    assert!(v1["version"].is_string(), "v1 endpoint must have 'version' string");
+    assert!(v1["signalk-http"].is_string(), "v1 endpoint must have 'signalk-http' string");
+    assert!(v1["signalk-ws"].is_string(), "v1 endpoint must have 'signalk-ws' string");
+}
+
+#[tokio::test]
+async fn discovery_version_is_correct() {
+    let (_, body) = get(test_app(), "/signalk").await;
+    let version = body["endpoints"]["v1"]["version"].as_str().unwrap();
+    assert_eq!(version, "1.7.0", "SignalK version must be 1.7.0");
+}
+
+#[tokio::test]
+async fn discovery_has_server_field() {
+    let (_, body) = get(test_app(), "/signalk").await;
+    assert!(body["server"]["id"].is_string(), "Discovery must have server.id");
+    assert!(body["server"]["version"].is_string(), "Discovery must have server.version");
+}
+
+// ─── GET /signalk/v1/api — Full model ────────────────────────────────────────
+
+#[tokio::test]
+async fn full_model_returns_200() {
+    let (status, _) = get(test_app(), "/signalk/v1/api").await;
+    assert_eq!(status, 200, "Full model endpoint must return HTTP 200");
+}
+
+#[tokio::test]
+async fn full_model_has_version() {
+    let (_, body) = get(test_app(), "/signalk/v1/api").await;
+    assert_eq!(
+        body["version"].as_str().unwrap_or(""),
+        "1.7.0",
+        "Full model must include 'version' field"
+    );
+}
+
+#[tokio::test]
+async fn full_model_has_self_field() {
+    let (_, body) = get(test_app(), "/signalk/v1/api").await;
+    assert!(
+        body["self"].is_string(),
+        "Full model must have 'self' string field"
+    );
+}
+
+#[tokio::test]
+async fn full_model_self_is_valid_urn() {
+    let (_, body) = get(test_app(), "/signalk/v1/api").await;
+    let self_uri = body["self"].as_str().unwrap();
+    assert!(
+        self_uri.starts_with("urn:mrn:signalk:uuid:"),
+        "Self URI must be a SignalK UUID URN, got: {}",
+        self_uri
+    );
+}
+
+#[tokio::test]
+async fn full_model_has_vessels_object() {
+    let (_, body) = get(test_app(), "/signalk/v1/api").await;
+    assert!(
+        body["vessels"].is_object(),
+        "Full model must have 'vessels' object"
+    );
+}
+
+#[tokio::test]
+async fn full_model_trailing_slash() {
+    // Spec requires both /signalk/v1/api and /signalk/v1/api/ to work
+    let (status, body) = get(test_app(), "/signalk/v1/api/").await;
+    assert_eq!(status, 200);
+    assert!(body["version"].is_string());
+}
+
+// ─── GET /signalk/v1/api/{path} — Path traversal ─────────────────────────────
+
+#[tokio::test]
+async fn path_traversal_vessels_returns_200() {
+    let (status, body) = get(test_app(), "/signalk/v1/api/vessels").await;
+    assert_eq!(status, 200, "GET /vessels must return 200, got: {}", body);
+}
+
+#[tokio::test]
+async fn path_traversal_missing_path_returns_404() {
+    let (status, _) = get(test_app(), "/signalk/v1/api/does/not/exist").await;
+    assert_eq!(status, 404, "Missing path must return 404");
+}
+
+#[tokio::test]
+async fn path_traversal_vessels_self_returns_200() {
+    let (status, _) = get(test_app(), "/signalk/v1/api/vessels/self").await;
+    assert_eq!(status, 200, "GET /vessels/self must return 200 when vessel exists");
+}
+
+// ─── GET /signalk/v1/snapshot — History ──────────────────────────────────────
+
+#[tokio::test]
+async fn snapshot_returns_501() {
+    let (status, body) = get(test_app(), "/signalk/v1/snapshot").await;
+    assert_eq!(
+        status, 501,
+        "Snapshot endpoint must return 501 Not Implemented, got: {} {}",
+        status, body
+    );
+}
+
+// ─── POST /signalk/v1/auth/login — Authentication ────────────────────────────
+
+#[tokio::test]
+async fn login_valid_credentials_returns_200() {
+    let (status, body) = post_json(
+        test_app(),
+        "/signalk/v1/auth/login",
+        json!({"username": "admin", "password": "anything"}),
+    )
+    .await;
+    // Dev mode: empty password hash accepts any password
+    assert_eq!(status, 200, "Login with valid username must succeed in dev mode, got: {}", body);
+}
+
+#[tokio::test]
+async fn login_response_has_token() {
+    let (_, body) = post_json(
+        test_app(),
+        "/signalk/v1/auth/login",
+        json!({"username": "admin", "password": "anything"}),
+    )
+    .await;
+    assert!(
+        body["token"].is_string(),
+        "Login response must contain 'token' string, got: {}",
+        body
+    );
+}
+
+#[tokio::test]
+async fn login_response_token_is_jwt() {
+    let (_, body) = post_json(
+        test_app(),
+        "/signalk/v1/auth/login",
+        json!({"username": "admin", "password": "x"}),
+    )
+    .await;
+    let token = body["token"].as_str().unwrap_or("");
+    // JWT format: three dot-separated base64url segments
+    let parts: Vec<&str> = token.split('.').collect();
+    assert_eq!(parts.len(), 3, "Token must be a JWT (3 dot-separated parts), got: {}", token);
+}
+
+#[tokio::test]
+async fn login_wrong_username_returns_401() {
+    let (status, _) = post_json(
+        test_app(),
+        "/signalk/v1/auth/login",
+        json!({"username": "hacker", "password": "anything"}),
+    )
+    .await;
+    assert_eq!(status, 401, "Wrong username must return 401");
+}
+
+#[tokio::test]
+async fn login_response_has_time_to_live() {
+    let (_, body) = post_json(
+        test_app(),
+        "/signalk/v1/auth/login",
+        json!({"username": "admin", "password": "x"}),
+    )
+    .await;
+    // timeToLive is optional per spec but we always include it
+    assert!(
+        body["timeToLive"].is_number() || body["time_to_live"].is_number(),
+        "Login response should include timeToLive, got: {}",
+        body
+    );
+}
+
+// ─── JSON Schema conformance ─────────────────────────────────────────────────
+
+#[test]
+fn delta_schema_validates_sample_delta() {
+    // Validate a known-good delta against the spec schema.
+    // Plain #[test] (not async) to avoid tokio runtime conflicts with jsonschema.
+    let delta = json!({
+        "context": "vessels.urn:mrn:signalk:uuid:test",
+        "updates": [{
+            "source": { "label": "ttyUSB0", "type": "NMEA0183", "talker": "GP" },
+            "timestamp": "2024-02-26T12:34:56.000Z",
+            "values": [
+                { "path": "navigation.speedOverGround", "value": 3.85 }
+            ]
+        }]
+    });
+    assert_valid_schema("delta", &delta);
+}
+
+#[tokio::test]
+async fn signalk_schema_validates_full_model_response() {
+    let (_, body) = get(test_app(), "/signalk/v1/api").await;
+    // Run schema validation on a plain OS thread — jsonschema may create its own
+    // runtime internally which would panic if called from within tokio's executor.
+    std::thread::spawn(move || {
+        assert_valid_schema("signalk", &body);
+    })
+    .join()
+    .unwrap();
+}
+
+// ─── HTTP method conformance ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn unknown_route_returns_404() {
+    let (status, _) = get(test_app(), "/this/does/not/exist").await;
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn signalk_route_exists() {
+    // The root /signalk MUST be accessible — it's the entry point
+    let (status, _) = get(test_app(), "/signalk").await;
+    assert_ne!(status, 404, "/signalk discovery endpoint must exist");
+}
