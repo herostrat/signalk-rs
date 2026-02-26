@@ -38,6 +38,13 @@ pub struct AuthSettings {
     pub admin_password_hash: String,
 }
 
+fn default_http_rs_port() -> u16 {
+    3001
+}
+fn default_http_bridge_port() -> u16 {
+    3002
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InternalSettings {
     /// Transport backend: "uds" or "http"
@@ -47,8 +54,10 @@ pub struct InternalSettings {
     /// Path for bridge's UDS socket
     pub uds_bridge_socket: String,
     /// Internal HTTP port (if transport = "http")
+    #[serde(default = "default_http_rs_port")]
     pub http_rs_port: u16,
     /// Bridge HTTP port (if transport = "http")
+    #[serde(default = "default_http_bridge_port")]
     pub http_bridge_port: u16,
 }
 
