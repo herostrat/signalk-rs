@@ -3,7 +3,7 @@ use signalk_internal::{
     protocol::PathQueryResponse,
     server::{Callbacks, InternalState, serve_internal_api},
 };
-use signalk_nmea0183::provider::NmeaTcpProvider;
+use signalk_nmea0183::{provider::NmeaTcpProvider, serial_provider::NmeaSerialProvider};
 use signalk_server::{ServerState, build_router, config::{InputConfig, ServerConfig}};
 use signalk_store::store::SignalKStore;
 use std::collections::HashMap;
@@ -133,6 +133,15 @@ async fn main() -> Result<()> {
                 tokio::spawn(async move {
                     if let Err(e) = provider.run(tx).await {
                         tracing::error!("NMEA TCP provider error: {e}");
+                    }
+                });
+            }
+            InputConfig::Nmea0183Serial { path, baud_rate, source_label } => {
+                let provider = NmeaSerialProvider::new(path.clone(), *baud_rate, source_label.clone());
+                let tx = input_tx.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = provider.run(tx).await {
+                        tracing::error!("NMEA serial provider error: {e}");
                     }
                 });
             }

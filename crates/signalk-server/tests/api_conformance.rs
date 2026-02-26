@@ -10,7 +10,7 @@
 // To compare against the original SignalK server, see tests/conformance/compare.js.
 
 mod helpers;
-use helpers::{assert_valid_schema, get, post_json, test_app};
+use helpers::{assert_valid_schema, get, post_json, put_json, test_app, test_app_with_handler};
 use serde_json::json;
 
 // ─── GET /signalk — Discovery ────────────────────────────────────────────────
@@ -292,4 +292,59 @@ async fn signalk_route_exists() {
     // The root /signalk MUST be accessible — it's the entry point
     let (status, _) = get(test_app(), "/signalk").await;
     assert_ne!(status, 404, "/signalk discovery endpoint must exist");
+}
+
+// ─── PUT forwarding ───────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn put_path_no_handler_returns_404() {
+    let (status, _) = put_json(
+        test_app(),
+        "/signalk/v1/api/vessels/self/navigation/speedOverGround",
+        json!({"value": 3.5}),
+    )
+    .await;
+    assert_eq!(status, 404, "PUT with no registered handler must return 404");
+}
+
+#[tokio::test]
+async fn put_path_bridge_unreachable_returns_503() {
+    // Register a handler but point to a non-existent bridge socket.
+    let app = test_app_with_handler(
+        "steering.autopilot.target.headingTrue",
+        "test-plugin",
+        "/tmp/signalk-rs-nonexistent-bridge.sock",
+    );
+    let (status, body) = put_json(
+        app,
+        "/signalk/v1/api/vessels/self/steering/autopilot/target/headingTrue",
+        json!({"value": 2.618}),
+    )
+    .await;
+    assert_eq!(
+        status, 503,
+        "PUT with unreachable bridge must return 503, body: {}",
+        body
+    );
+}
+
+#[tokio::test]
+async fn put_path_wildcard_handler_bridge_unreachable() {
+    // Wildcard patterns: "steering.autopilot.target.*" matches the last segment.
+    // (The `*` wildcard matches exactly one segment per the matches_pattern implementation.)
+    let app = test_app_with_handler(
+        "steering.autopilot.target.*",
+        "autopilot-plugin",
+        "/tmp/signalk-rs-nonexistent-bridge.sock",
+    );
+    let (status, _) = put_json(
+        app,
+        "/signalk/v1/api/vessels/self/steering/autopilot/target/headingTrue",
+        json!({"value": 2.618}),
+    )
+    .await;
+    assert_eq!(
+        status, 503,
+        "PUT matching a wildcard handler must attempt forwarding (→ 503 when bridge absent)"
+    );
 }

@@ -1,0 +1,149 @@
+# signalk-rs configuration file
+#
+# Copy this file to signalk-rs.toml and edit to match your setup.
+# Pass the config path at startup: signalk-rs --config /etc/signalk-rs/signalk-rs.toml
+
+# ---------------------------------------------------------------------------
+# [server] — Public HTTP + WebSocket server
+# ---------------------------------------------------------------------------
+[server]
+
+# TCP port for the public REST API and WebSocket stream.
+# REST:      http://<host>:<port>/signalk/v1/api/
+# WebSocket: ws://<host>:<port>/signalk/v1/stream
+port = 3000
+
+# Address to bind on. Use "0.0.0.0" to listen on all interfaces,
+# "127.0.0.1" to restrict to localhost only.
+host = "0.0.0.0"
+
+# Human-readable server name reported in the SignalK discovery response
+# (GET /signalk).
+name = "My Boat"
+
+# ---------------------------------------------------------------------------
+# [vessel] — Self-vessel identity
+# ---------------------------------------------------------------------------
+[vessel]
+
+# Vessel UUID in SignalK URN format. Must be unique per vessel.
+# Generate once with: uuidgen | tr '[:upper:]' '[:lower:]'
+# and prefix with "urn:mrn:signalk:uuid:".
+uuid = "urn:mrn:signalk:uuid:xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
+
+# Optional vessel name (shown in WebSocket hello message and full model).
+name = "My Boat"
+
+# Optional MMSI (Maritime Mobile Service Identity), 9 digits.
+# mmsi = "123456789"
+
+# Optional IMO number.
+# imo = "IMO1234567"
+
+# Optional vessel callsign.
+# callsign = "MYCALL"
+
+# ---------------------------------------------------------------------------
+# [auth] — Authentication
+# ---------------------------------------------------------------------------
+[auth]
+
+# Secret used to sign JWT tokens. Set this to a long random string.
+# Generate one with: openssl rand -hex 32
+jwt_secret = "change-me-to-a-long-random-secret"
+
+# JWT token validity in seconds. Default: 604800 (7 days).
+token_ttl_secs = 604800
+
+# Admin username for POST /signalk/v1/auth/login.
+admin_user = "admin"
+
+# Bcrypt hash of the admin password.
+# Generate with: htpasswd -bnBC 10 "" mypassword | tr -d ':\n'
+# Leave empty to disable password auth (not recommended for production).
+admin_password_hash = ""
+
+# ---------------------------------------------------------------------------
+# [internal] — Internal signalk-rs ↔ bridge IPC
+# ---------------------------------------------------------------------------
+[internal]
+
+# Transport backend for the internal API between signalk-rs and the bridge.
+# "uds" — Unix Domain Sockets (default, recommended; zero TCP overhead)
+# "http" — Plain HTTP (useful for debugging or remote bridge deployments)
+transport = "uds"
+
+# Unix socket path where signalk-rs listens for bridge requests.
+# The bridge sends deltas, queries, and handler registrations here.
+uds_rs_socket = "/run/signalk/rs.sock"
+
+# Unix socket path where the bridge listens for requests from signalk-rs.
+# signalk-rs forwards PUT commands and plugin lifecycle events here.
+uds_bridge_socket = "/run/signalk/bridge.sock"
+
+# Shared secret between signalk-rs and the bridge.
+# If left empty, a random token is generated at startup and printed to stderr.
+# Set this to a fixed value so the bridge can be restarted independently.
+# Generate with: openssl rand -hex 32
+# bridge_token = "change-me"
+
+# Internal HTTP port used when transport = "http" (default: 3001).
+# http_rs_port = 3001
+
+# Bridge HTTP port used when transport = "http" (default: 3002).
+# http_bridge_port = 3002
+
+# ---------------------------------------------------------------------------
+# [[inputs]] — Data input providers (zero or more, order does not matter)
+#
+# Each [[inputs]] block defines one data source. The `type` field selects
+# the provider. All other fields depend on the type.
+# ---------------------------------------------------------------------------
+
+# --- NMEA 0183 over TCP ---------------------------------------------------
+#
+# Listens on a TCP port and reads NMEA 0183 sentences from any connecting
+# client. Typical use: NMEA multiplexer (e.g. Yacht Devices YDWG-02,
+# OpenCPN acting as NMEA server, or Victron GX device).
+#
+# [[inputs]]
+# type = "nmea0183-tcp"
+#
+# # Address and port to listen on.
+# addr = "0.0.0.0:10110"
+#
+# # Source label used in SignalK deltas (identifies this input in the data).
+# source_label = "gps"
+
+# --- NMEA 0183 over serial port -------------------------------------------
+#
+# Reads NMEA 0183 sentences from a local serial / USB device. Automatically
+# retries after 5 seconds if the device is unplugged and reconnected.
+#
+# [[inputs]]
+# type = "nmea0183-serial"
+#
+# # Device path.
+# path = "/dev/ttyUSB0"
+#
+# # Baud rate. Standard NMEA 0183 is 4800; high-speed muxes often use 38400.
+# # Default: 4800
+# baud_rate = 4800
+#
+# # Source label used in SignalK deltas.
+# source_label = "depth-sensor"
+
+# ---------------------------------------------------------------------------
+# Full example with two inputs
+# ---------------------------------------------------------------------------
+#
+# [[inputs]]
+# type = "nmea0183-tcp"
+# addr = "0.0.0.0:10110"
+# source_label = "mux"
+#
+# [[inputs]]
+# type = "nmea0183-serial"
+# path = "/dev/ttyUSB0"
+# baud_rate = 4800
+# source_label = "gps"

@@ -93,7 +93,7 @@ async fn handle_connection(
 
 /// Parse a raw NMEA sentence string and convert to a SignalK Delta.
 /// Returns `None` if the sentence type is unsupported or fails to parse.
-fn sentence_to_delta(raw: &str, source_label: &str) -> Option<Delta> {
+pub(crate) fn sentence_to_delta(raw: &str, source_label: &str) -> Option<Delta> {
     let parsed = nmea::parse_str(raw)
         .map_err(|e| debug!(sentence = %raw, "NMEA parse error: {e:?}"))
         .ok()?;

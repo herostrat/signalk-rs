@@ -10,6 +10,7 @@ description = "NMEA 0183 input provider for signalk-rs"
 signalk-types.workspace = true
 tokio = { workspace = true }
 nmea.workspace = true
+tokio-serial = { workspace = true }
 tracing.workspace = true
 anyhow.workspace = true
 chrono.workspace = true

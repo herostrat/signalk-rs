@@ -24,10 +24,25 @@ pub enum InputConfig {
         #[serde(default = "default_source_label")]
         source_label: String,
     },
+    /// NMEA 0183 sentences from a local serial port.
+    Nmea0183Serial {
+        /// Serial device path, e.g. "/dev/ttyUSB0" or "/dev/ttyS0"
+        path: String,
+        /// Baud rate — standard NMEA 0183 is 4800; high-speed muxes use 38400
+        #[serde(default = "default_baud_rate")]
+        baud_rate: u32,
+        /// Source label reported in SignalK deltas
+        #[serde(default = "default_source_label")]
+        source_label: String,
+    },
 }
 
 fn default_source_label() -> String {
     "nmea0183".to_string()
+}
+
+fn default_baud_rate() -> u32 {
+    4800
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

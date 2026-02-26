@@ -69,6 +69,59 @@ pub async fn post_json(
     response_json(response).await
 }
 
+/// Make a PUT request with JSON body.
+#[allow(dead_code)]
+pub async fn put_json(
+    app: Router,
+    uri: &str,
+    body: serde_json::Value,
+) -> (u16, serde_json::Value) {
+    let response = app
+        .oneshot(
+            Request::put(uri)
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    response_json(response).await
+}
+
+/// Build a test app with a pre-registered PUT handler pointing to a given plugin.
+///
+/// `handler_path` is a dot-notation path pattern, e.g. `"steering.autopilot.target.*"`.
+/// `plugin_id` is the plugin identifier, e.g. `"test-plugin"`.
+/// `bridge_socket` is the UDS socket path the server will try to forward to.
+#[allow(dead_code)]
+pub fn test_app_with_handler(handler_path: &str, plugin_id: &str, bridge_socket: &str) -> Router {
+    use signalk_server::config::InternalSettings;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    let config = ServerConfig {
+        internal: InternalSettings {
+            transport: "uds".to_string(),
+            uds_rs_socket: "/tmp/test-rs.sock".to_string(),
+            uds_bridge_socket: bridge_socket.to_string(),
+            http_rs_port: 3001,
+            http_bridge_port: 3002,
+            bridge_token: String::new(),
+        },
+        ..ServerConfig::default()
+    };
+    let (store, _rx) = SignalKStore::new(config.vessel.uuid.clone());
+    let put_handlers = Arc::new(RwLock::new(HashMap::from([(
+        handler_path.to_string(),
+        plugin_id.to_string(),
+    )])));
+    let plugin_routes: Arc<RwLock<HashMap<String, String>>> =
+        Arc::new(RwLock::new(HashMap::new()));
+    let state = signalk_server::ServerState::new_shared(config, store, put_handlers, plugin_routes);
+    build_router(state)
+}
+
 /// Make a GET request with a Bearer token.
 #[allow(dead_code)]
 pub async fn get_auth(app: Router, uri: &str, token: &str) -> (u16, serde_json::Value) {

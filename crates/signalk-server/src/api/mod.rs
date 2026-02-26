@@ -7,8 +7,9 @@
 /// - GET /signalk/v1/snapshot          → historical (501)
 use axum::{
     Json,
+    body::Body,
     extract::{Path, State},
-    http::StatusCode,
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde_json::Value;
@@ -127,11 +128,12 @@ pub async fn snapshot() -> Response {
 
 /// PUT /signalk/v1/api/{*path} — send a command/write request.
 ///
-/// Delegates to registered PUT handlers. Returns 404 if no handler is registered.
+/// Delegates to registered PUT handlers. Forwards to the bridge via UDS.
+/// Returns 404 if no handler is registered, 503 if the bridge is unreachable.
 pub async fn put_path(
     State(state): State<Arc<ServerState>>,
     Path(url_path): Path<String>,
-    Json(_body): Json<Value>,
+    Json(body): Json<Value>,
 ) -> Response {
     let parts: Vec<&str> = url_path.split('/').filter(|s| !s.is_empty()).collect();
 
@@ -147,29 +149,154 @@ pub async fn put_path(
 
     let handlers = state.put_handlers.read().await;
 
-    // Find a registered handler for this path
-    let handler_url = handlers.iter().find_map(|(pattern, url)| {
+    // Find a registered handler for this path (map: pattern → plugin_id)
+    let plugin_id = handlers.iter().find_map(|(pattern, id)| {
         if signalk_types::matches_pattern(pattern, &sk_path) {
-            Some(url.clone())
+            Some(id.clone())
         } else {
             None
         }
     });
+    drop(handlers);
 
-    match handler_url {
-        Some(_url) => {
-            // TODO M5: forward to bridge via internal transport
-            (
-                StatusCode::OK,
-                Json(serde_json::json!({"state": "COMPLETED", "statusCode": 200})),
-            )
-                .into_response()
+    match plugin_id {
+        Some(plugin_id) => {
+            let request_id = uuid::Uuid::new_v4().to_string();
+            // SignalK PUT body is { "value": X }; extract the inner value to forward.
+            let sk_value = body.get("value").cloned().unwrap_or(body);
+            let bridge_path = format!("/put/{}/{}", plugin_id, sk_path.replace('.', "/"));
+            let bridge_socket = std::path::Path::new(&state.config.internal.uds_bridge_socket);
+            let payload = serde_json::json!({
+                "requestId": request_id,
+                "value": sk_value,
+            });
+
+            match signalk_internal::uds::uds_post(bridge_socket, &bridge_path, &payload).await {
+                Ok(resp) => {
+                    let put_state = resp["state"].as_str().unwrap_or("FAILED");
+                    let put_code = resp["statusCode"].as_u64().unwrap_or(500) as u16;
+                    let http_status = if put_state == "COMPLETED" {
+                        StatusCode::OK
+                    } else {
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    };
+                    (
+                        http_status,
+                        Json(serde_json::json!({
+                            "state": put_state,
+                            "statusCode": put_code,
+                        })),
+                    )
+                        .into_response()
+                }
+                Err(e) => (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({"message": format!("Bridge unreachable: {e}")})),
+                )
+                    .into_response(),
+            }
         }
         None => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({
                 "message": format!("No handler registered for path: {}", sk_path)
             })),
+        )
+            .into_response(),
+    }
+}
+
+/// ANY /plugins/{plugin_id}[/{*rest}] — reverse-proxy to the bridge plugin router.
+///
+/// Plugins register their REST routes via `registerWithRouter()`. signalk-rs proxies
+/// all requests under `/plugins/{plugin_id}/` to the bridge, which dispatches to the
+/// plugin's Express router.
+///
+/// Returns 404 if the plugin has no registered route prefix, 503 if the bridge is
+/// unreachable.
+pub async fn proxy_plugin_route(
+    State(state): State<Arc<ServerState>>,
+    request: axum::extract::Request,
+) -> Response {
+    // Extract plugin_id from URI: /plugins/{plugin_id}[/{rest}]
+    let uri = request.uri().clone();
+    let path = uri.path();
+    let plugin_id = path
+        .strip_prefix("/plugins/")
+        .unwrap_or("")
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .to_string();
+
+    if plugin_id.is_empty() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"message": "Missing plugin id in path"})),
+        )
+            .into_response();
+    }
+
+    {
+        let routes = state.plugin_routes.read().await;
+        if !routes.contains_key(&plugin_id) {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "message": format!("No route registered for plugin: {}", plugin_id)
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    let method = request.method().as_str().to_string();
+    let path_and_query = uri
+        .path_and_query()
+        .map(|pq| pq.as_str().to_string())
+        .unwrap_or_else(|| path.to_string());
+
+    let content_type = request
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+
+    let body_bytes = match axum::body::to_bytes(request.into_body(), 10 * 1024 * 1024).await {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"message": format!("Failed to read request body: {e}")})),
+            )
+                .into_response();
+        }
+    };
+
+    let bridge_socket = std::path::Path::new(&state.config.internal.uds_bridge_socket);
+
+    match signalk_internal::uds::uds_proxy(
+        bridge_socket,
+        &method,
+        &path_and_query,
+        content_type.as_deref(),
+        &body_bytes,
+    )
+    .await
+    {
+        Ok((status, body, resp_ct)) => {
+            let mut builder =
+                axum::response::Response::builder().status(status);
+            if let Some(ct) = resp_ct {
+                builder = builder.header(header::CONTENT_TYPE, ct);
+            }
+            builder
+                .body(Body::from(body))
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        }
+        Err(e) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"message": format!("Bridge unreachable: {e}")})),
         )
             .into_response(),
     }

@@ -49,7 +49,7 @@ impl ServerState {
 
 /// Build the axum router with all public API routes.
 pub fn build_router(state: Arc<ServerState>) -> axum::Router {
-    use axum::routing::{get, post, put};
+    use axum::routing::{any, get, post, put};
     use tower_http::cors::CorsLayer;
 
     axum::Router::new()
@@ -68,6 +68,9 @@ pub fn build_router(state: Arc<ServerState>) -> axum::Router {
         .route("/signalk/v1/auth/logout", put(auth::logout))
         // WebSocket streaming
         .route("/signalk/v1/stream", get(ws::handler))
+        // Plugin routes — proxied to the bridge
+        .route("/plugins/{plugin_id}", any(api::proxy_plugin_route))
+        .route("/plugins/{plugin_id}/{*rest}", any(api::proxy_plugin_route))
         // CORS for browser clients
         .layer(CorsLayer::permissive())
         .with_state(state)
