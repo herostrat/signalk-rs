@@ -4,6 +4,7 @@ members = [
     "crates/signalk-store",
     "crates/signalk-server",
     "crates/signalk-internal",
+    "crates/signalk-nmea0183",
 ]
 resolver = "2"
 
@@ -55,10 +56,14 @@ async-trait = { version = "0.1" }
 # UUID
 uuid = { version = "1", features = ["v4", "serde"] }
 
+# NMEA parsing
+nmea = { version = "0.7" }
+
 # Internal crates
 signalk-types = { path = "crates/signalk-types" }
 signalk-store = { path = "crates/signalk-store" }
 signalk-internal = { path = "crates/signalk-internal" }
+signalk-nmea0183 = { path = "crates/signalk-nmea0183" }
 
 # Testing & Benchmarking (dev only)
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }

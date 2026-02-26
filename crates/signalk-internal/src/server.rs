@@ -31,10 +31,17 @@ use crate::protocol::{
 };
 use crate::uds::bind_unix_socket;
 
+/// Async query function type: maps a PathQuery to an optional response.
+pub type AsyncQueryFn = Box<
+    dyn Fn(PathQuery) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<PathQueryResponse>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// Callbacks from the main server injected when creating InternalState.
 pub struct Callbacks {
     pub on_delta: Box<dyn Fn(DeltaIngest) + Send + Sync>,
-    pub on_query: Box<dyn Fn(PathQuery) -> Option<PathQueryResponse> + Send + Sync>,
+    pub on_query: AsyncQueryFn,
 }
 
 /// State shared across all internal API handlers.
@@ -54,6 +61,23 @@ impl InternalState {
             bridge_version: Arc::new(RwLock::new(None)),
             put_handlers: Arc::new(RwLock::new(HashMap::new())),
             plugin_routes: Arc::new(RwLock::new(HashMap::new())),
+            callbacks: Arc::new(callbacks),
+        }
+    }
+
+    /// Create with externally-provided maps so they can be shared with ServerState.
+    /// The caller creates the maps once and clones the Arcs into both states.
+    pub fn new_shared(
+        bridge_token: String,
+        callbacks: Callbacks,
+        put_handlers: Arc<RwLock<HashMap<String, String>>>,
+        plugin_routes: Arc<RwLock<HashMap<String, String>>>,
+    ) -> Self {
+        InternalState {
+            bridge_token: Arc::new(bridge_token),
+            bridge_version: Arc::new(RwLock::new(None)),
+            put_handlers,
+            plugin_routes,
             callbacks: Arc::new(callbacks),
         }
     }
@@ -137,7 +161,7 @@ async fn query_path(
         return unauthorized();
     }
     let query = PathQuery::self_path(url_to_sk_path(&url_path));
-    match (state.callbacks.on_query)(query) {
+    match (state.callbacks.on_query)(query).await {
         Some(resp) => Json(resp).into_response(),
         None => (
             StatusCode::NOT_FOUND,
@@ -233,7 +257,7 @@ mod tests {
             "secret".to_string(),
             Callbacks {
                 on_delta: Box::new(|_| {}),
-                on_query: Box::new(|_| None),
+                on_query: Box::new(|_| Box::pin(async { None })),
             },
         )
     }

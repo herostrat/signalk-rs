@@ -7,6 +7,27 @@ pub struct ServerConfig {
     pub vessel: VesselSettings,
     pub auth: AuthSettings,
     pub internal: InternalSettings,
+    /// Input provider configurations (NMEA 0183, etc.)
+    #[serde(default)]
+    pub inputs: Vec<InputConfig>,
+}
+
+/// One input source (e.g. NMEA 0183 over TCP or serial port).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum InputConfig {
+    /// NMEA 0183 sentences arriving over a TCP connection.
+    Nmea0183Tcp {
+        /// Bind address + port to listen on, e.g. "0.0.0.0:10110"
+        addr: String,
+        /// Source label reported in SignalK deltas (e.g. "gps", "ais-mux")
+        #[serde(default = "default_source_label")]
+        source_label: String,
+    },
+}
+
+fn default_source_label() -> String {
+    "nmea0183".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +80,10 @@ pub struct InternalSettings {
     /// Bridge HTTP port (if transport = "http")
     #[serde(default = "default_http_bridge_port")]
     pub http_bridge_port: u16,
+    /// Shared secret between signalk-rs and bridge.
+    /// If empty, a random token is generated at startup and printed to stderr.
+    #[serde(default)]
+    pub bridge_token: String,
 }
 
 impl Default for ServerConfig {
@@ -86,7 +111,9 @@ impl Default for ServerConfig {
                 uds_bridge_socket: "/run/signalk/bridge.sock".to_string(),
                 http_rs_port: 3001,
                 http_bridge_port: 3002,
+                bridge_token: String::new(),
             },
+            inputs: Vec::new(),
         }
     }
 }

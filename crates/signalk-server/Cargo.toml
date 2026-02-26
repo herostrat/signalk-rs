@@ -17,6 +17,7 @@ path = "src/lib.rs"
 signalk-types.workspace = true
 signalk-store.workspace = true
 signalk-internal.workspace = true
+signalk-nmea0183.workspace = true
 tokio.workspace = true
 axum.workspace = true
 axum-extra.workspace = true

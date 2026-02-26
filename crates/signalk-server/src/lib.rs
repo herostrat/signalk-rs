@@ -30,6 +30,21 @@ impl ServerState {
             plugin_routes: Arc::new(RwLock::new(HashMap::new())),
         })
     }
+
+    /// Create with externally-provided maps shared with InternalState.
+    pub fn new_shared(
+        config: ServerConfig,
+        store: Arc<RwLock<SignalKStore>>,
+        put_handlers: Arc<RwLock<HashMap<String, String>>>,
+        plugin_routes: Arc<RwLock<HashMap<String, String>>>,
+    ) -> Arc<Self> {
+        Arc::new(ServerState {
+            config,
+            store,
+            put_handlers,
+            plugin_routes,
+        })
+    }
 }
 
 /// Build the axum router with all public API routes.

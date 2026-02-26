@@ -43,6 +43,7 @@ pub struct PathQueryResponse {
 
 /// Bridge registers a PUT handler for a path pattern (plugin's registerPutHandler).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HandlerRegistration {
     pub plugin_id: String,
     /// Path or pattern: "steering.autopilot.target.*"
@@ -51,6 +52,7 @@ pub struct HandlerRegistration {
 
 /// Bridge registers custom REST routes (plugin's registerWithRouter).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginRouteRegistration {
     pub plugin_id: String,
     /// URL prefix that the bridge handles: "/plugins/my-plugin"
@@ -59,6 +61,7 @@ pub struct PluginRouteRegistration {
 
 /// Bridge registers itself on startup.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BridgeRegistration {
     /// Shared secret token for authenticating bridge ↔ rs calls
     pub bridge_token: String,
