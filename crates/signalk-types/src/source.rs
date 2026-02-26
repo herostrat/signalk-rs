@@ -24,7 +24,10 @@ pub struct Source {
 impl Source {
     pub fn nmea0183(label: impl Into<String>, talker: impl Into<String>) -> Self {
         let mut extra = HashMap::new();
-        extra.insert("talker".to_string(), serde_json::Value::String(talker.into()));
+        extra.insert(
+            "talker".to_string(),
+            serde_json::Value::String(talker.into()),
+        );
         Source {
             label: label.into(),
             type_: "NMEA0183".to_string(),
@@ -34,7 +37,10 @@ impl Source {
 
     pub fn nmea2000(label: impl Into<String>, src: u8, pgn: u32) -> Self {
         let mut extra = HashMap::new();
-        extra.insert("src".to_string(), serde_json::Value::String(src.to_string()));
+        extra.insert(
+            "src".to_string(),
+            serde_json::Value::String(src.to_string()),
+        );
         extra.insert("pgn".to_string(), serde_json::Value::Number(pgn.into()));
         Source {
             label: label.into(),

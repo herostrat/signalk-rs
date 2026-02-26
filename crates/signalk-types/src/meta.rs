@@ -75,9 +75,24 @@ mod tests {
             min_value: Some(0.0),
             max_value: Some(30.0),
             zones: vec![
-                Zone { lower: None, upper: Some(20.0), state: ZoneState::Nominal, message: None },
-                Zone { lower: Some(20.0), upper: Some(25.0), state: ZoneState::Alert, message: None },
-                Zone { lower: Some(25.0), upper: None, state: ZoneState::Alarm, message: Some("Over speed!".to_string()) },
+                Zone {
+                    lower: None,
+                    upper: Some(20.0),
+                    state: ZoneState::Nominal,
+                    message: None,
+                },
+                Zone {
+                    lower: Some(20.0),
+                    upper: Some(25.0),
+                    state: ZoneState::Alert,
+                    message: None,
+                },
+                Zone {
+                    lower: Some(25.0),
+                    upper: None,
+                    state: ZoneState::Alarm,
+                    message: Some("Over speed!".to_string()),
+                },
             ],
             ..Default::default()
         };
@@ -88,7 +103,13 @@ mod tests {
 
     #[test]
     fn zone_state_serializes_lowercase() {
-        assert_eq!(serde_json::to_string(&ZoneState::Nominal).unwrap(), "\"nominal\"");
-        assert_eq!(serde_json::to_string(&ZoneState::Emergency).unwrap(), "\"emergency\"");
+        assert_eq!(
+            serde_json::to_string(&ZoneState::Nominal).unwrap(),
+            "\"nominal\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ZoneState::Emergency).unwrap(),
+            "\"emergency\""
+        );
     }
 }

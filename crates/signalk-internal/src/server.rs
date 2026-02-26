@@ -8,12 +8,12 @@
 ///   POST /internal/v1/plugin-routes   — bridge registers REST routes
 ///   POST /internal/v1/bridge/register — bridge registers itself on startup
 use axum::{
+    Json, Router,
     body::Body,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post, put},
-    Json, Router,
 };
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -60,10 +60,7 @@ impl InternalState {
 }
 
 /// Start the internal API HTTP server on a Unix Domain Socket.
-pub async fn serve_internal_api(
-    socket_path: PathBuf,
-    state: InternalState,
-) -> anyhow::Result<()> {
+pub async fn serve_internal_api(socket_path: PathBuf, state: InternalState) -> anyhow::Result<()> {
     let listener = bind_unix_socket(&socket_path)?;
     info!(socket = %socket_path.display(), "Internal API listening");
 
@@ -124,7 +121,9 @@ async fn ingest_delta(
     headers: axum::http::HeaderMap,
     Json(delta): Json<DeltaIngest>,
 ) -> Response {
-    if !check_token(&headers, &state) { return unauthorized(); }
+    if !check_token(&headers, &state) {
+        return unauthorized();
+    }
     (state.callbacks.on_delta)(delta);
     StatusCode::NO_CONTENT.into_response()
 }
@@ -134,7 +133,9 @@ async fn query_path(
     headers: axum::http::HeaderMap,
     Path(url_path): Path<String>,
 ) -> Response {
-    if !check_token(&headers, &state) { return unauthorized(); }
+    if !check_token(&headers, &state) {
+        return unauthorized();
+    }
     let query = PathQuery::self_path(url_to_sk_path(&url_path));
     match (state.callbacks.on_query)(query) {
         Some(resp) => Json(resp).into_response(),
@@ -152,11 +153,16 @@ async fn write_path(
     Path(url_path): Path<String>,
     Json(body): Json<serde_json::Value>,
 ) -> Response {
-    if !check_token(&headers, &state) { return unauthorized(); }
+    if !check_token(&headers, &state) {
+        return unauthorized();
+    }
     use signalk_types::{PathValue, Source, Update};
     let delta = DeltaIngest::self_vessel(vec![Update::new(
         Source::plugin("bridge"),
-        vec![PathValue::new(url_to_sk_path(&url_path), body["value"].clone())],
+        vec![PathValue::new(
+            url_to_sk_path(&url_path),
+            body["value"].clone(),
+        )],
     )]);
     (state.callbacks.on_delta)(delta);
     StatusCode::NO_CONTENT.into_response()
@@ -167,8 +173,14 @@ async fn register_handler(
     headers: axum::http::HeaderMap,
     Json(reg): Json<HandlerRegistration>,
 ) -> Response {
-    if !check_token(&headers, &state) { return unauthorized(); }
-    state.put_handlers.write().await.insert(reg.path.clone(), reg.plugin_id.clone());
+    if !check_token(&headers, &state) {
+        return unauthorized();
+    }
+    state
+        .put_handlers
+        .write()
+        .await
+        .insert(reg.path.clone(), reg.plugin_id.clone());
     info!(plugin = %reg.plugin_id, path = %reg.path, "PUT handler registered");
     StatusCode::NO_CONTENT.into_response()
 }
@@ -178,8 +190,14 @@ async fn register_plugin_routes(
     headers: axum::http::HeaderMap,
     Json(reg): Json<PluginRouteRegistration>,
 ) -> Response {
-    if !check_token(&headers, &state) { return unauthorized(); }
-    state.plugin_routes.write().await.insert(reg.plugin_id.clone(), reg.path_prefix.clone());
+    if !check_token(&headers, &state) {
+        return unauthorized();
+    }
+    state
+        .plugin_routes
+        .write()
+        .await
+        .insert(reg.plugin_id.clone(), reg.path_prefix.clone());
     info!(plugin = %reg.plugin_id, prefix = %reg.path_prefix, "Plugin route registered");
     StatusCode::NO_CONTENT.into_response()
 }
@@ -189,7 +207,9 @@ async fn register_bridge(
     headers: axum::http::HeaderMap,
     Json(reg): Json<BridgeRegistration>,
 ) -> Response {
-    if !check_token(&headers, &state) { return unauthorized(); }
+    if !check_token(&headers, &state) {
+        return unauthorized();
+    }
     *state.bridge_version.write().await = Some(reg.version.clone());
     info!(version = %reg.version, "Bridge registered");
     StatusCode::NO_CONTENT.into_response()
@@ -197,7 +217,11 @@ async fn register_bridge(
 
 fn url_to_sk_path(url_path: &str) -> String {
     let parts: Vec<&str> = url_path.split('/').filter(|s| !s.is_empty()).collect();
-    if parts.len() >= 2 && parts[0] == "vessels" { parts[2..].join(".") } else { parts.join(".") }
+    if parts.len() >= 2 && parts[0] == "vessels" {
+        parts[2..].join(".")
+    } else {
+        parts.join(".")
+    }
 }
 
 #[cfg(test)]
@@ -205,25 +229,37 @@ mod tests {
     use super::*;
 
     fn make_state() -> InternalState {
-        InternalState::new("secret".to_string(), Callbacks {
-            on_delta: Box::new(|_| {}),
-            on_query: Box::new(|_| None),
-        })
+        InternalState::new(
+            "secret".to_string(),
+            Callbacks {
+                on_delta: Box::new(|_| {}),
+                on_query: Box::new(|_| None),
+            },
+        )
     }
 
     #[test]
     fn url_to_sk_path_strips_vessels_self() {
-        assert_eq!(url_to_sk_path("vessels/self/navigation/speedOverGround"), "navigation.speedOverGround");
+        assert_eq!(
+            url_to_sk_path("vessels/self/navigation/speedOverGround"),
+            "navigation.speedOverGround"
+        );
     }
 
     #[test]
     fn url_to_sk_path_without_prefix() {
-        assert_eq!(url_to_sk_path("navigation/speedOverGround"), "navigation.speedOverGround");
+        assert_eq!(
+            url_to_sk_path("navigation/speedOverGround"),
+            "navigation.speedOverGround"
+        );
     }
 
     #[test]
     fn url_to_sk_path_nested() {
-        assert_eq!(url_to_sk_path("vessels/self/navigation/position/latitude"), "navigation.position.latitude");
+        assert_eq!(
+            url_to_sk_path("vessels/self/navigation/position/latitude"),
+            "navigation.position.latitude"
+        );
     }
 
     #[test]

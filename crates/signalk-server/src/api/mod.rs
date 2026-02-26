@@ -6,10 +6,10 @@
 /// - PUT /signalk/v1/api/*             → PUT command (delegated to handlers)
 /// - GET /signalk/v1/snapshot          → historical (501)
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde_json::Value;
 use signalk_types::{DiscoveryResponse, EndpointInfo, ServerInfo};
@@ -101,7 +101,7 @@ pub async fn get_path(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"message": e.to_string()})),
             )
-                .into_response()
+                .into_response();
         }
     };
 

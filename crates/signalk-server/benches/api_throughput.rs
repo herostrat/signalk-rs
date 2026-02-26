@@ -3,8 +3,8 @@
 /// Measures end-to-end HTTP handler latency using axum's in-process `oneshot`.
 /// Baseline: how fast are our handlers without any network overhead?
 use axum::{body::Body, http::Request};
-use criterion::{criterion_group, criterion_main, Criterion};
-use signalk_server::{build_router, config::ServerConfig, ServerState};
+use criterion::{Criterion, criterion_group, criterion_main};
+use signalk_server::{ServerState, build_router, config::ServerConfig};
 use signalk_store::store::SignalKStore;
 use signalk_types::{Delta, PathValue, Source, Update};
 use tower::ServiceExt;
@@ -53,13 +53,9 @@ fn bench_full_model(c: &mut Criterion) {
     c.bench_function("GET /signalk/v1/api full model", |b| {
         b.to_async(&rt).iter(|| async {
             let (app, _) = make_app();
-            app.oneshot(
-                Request::get("/signalk/v1/api")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap()
+            app.oneshot(Request::get("/signalk/v1/api").body(Body::empty()).unwrap())
+                .await
+                .unwrap()
         })
     });
 }
@@ -72,11 +68,9 @@ fn bench_path_traversal(c: &mut Criterion) {
         b.to_async(&rt).iter(|| async {
             let (app, _) = make_app();
             app.oneshot(
-                Request::get(
-                    "/signalk/v1/api/vessels/self/navigation/speedOverGround",
-                )
-                .body(Body::empty())
-                .unwrap(),
+                Request::get("/signalk/v1/api/vessels/self/navigation/speedOverGround")
+                    .body(Body::empty())
+                    .unwrap(),
             )
             .await
             .unwrap()

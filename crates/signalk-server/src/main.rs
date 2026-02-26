@@ -1,5 +1,5 @@
 use anyhow::Result;
-use signalk_server::{build_router, config::ServerConfig, ServerState};
+use signalk_server::{ServerState, build_router, config::ServerConfig};
 use signalk_store::store::SignalKStore;
 use std::net::SocketAddr;
 use tracing::{info, warn};

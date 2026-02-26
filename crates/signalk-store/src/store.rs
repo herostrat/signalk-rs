@@ -1,9 +1,7 @@
-use signalk_types::{
-    Delta, FullModel, SignalKValue, Source, SourceRef, VesselData,
-};
+use signalk_types::{Delta, FullModel, SignalKValue, Source, SourceRef, VesselData};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 use tracing::debug;
 
 /// Capacity of the broadcast channel for delta fanout
@@ -40,7 +38,10 @@ impl SignalKStore {
         let mut vessels = HashMap::new();
         vessels.insert(
             self_uri.clone(),
-            VesselData { uuid: Some(self_uri.clone()), ..Default::default() },
+            VesselData {
+                uuid: Some(self_uri.clone()),
+                ..Default::default()
+            },
         );
         let store = SignalKStore {
             version: signalk_types::SIGNALK_VERSION.to_string(),
@@ -275,7 +276,10 @@ mod tests {
                 store.apply_delta(make_gps_delta(6.0));
             }
             let received = rx.recv().await.unwrap();
-            assert_eq!(received.updates[0].values[0].path, "navigation.speedOverGround");
+            assert_eq!(
+                received.updates[0].values[0].path,
+                "navigation.speedOverGround"
+            );
         });
     }
 

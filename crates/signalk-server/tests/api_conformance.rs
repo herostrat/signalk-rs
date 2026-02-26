@@ -45,9 +45,18 @@ async fn discovery_has_v1_endpoint() {
 async fn discovery_v1_has_required_fields() {
     let (_, body) = get(test_app(), "/signalk").await;
     let v1 = &body["endpoints"]["v1"];
-    assert!(v1["version"].is_string(), "v1 endpoint must have 'version' string");
-    assert!(v1["signalk-http"].is_string(), "v1 endpoint must have 'signalk-http' string");
-    assert!(v1["signalk-ws"].is_string(), "v1 endpoint must have 'signalk-ws' string");
+    assert!(
+        v1["version"].is_string(),
+        "v1 endpoint must have 'version' string"
+    );
+    assert!(
+        v1["signalk-http"].is_string(),
+        "v1 endpoint must have 'signalk-http' string"
+    );
+    assert!(
+        v1["signalk-ws"].is_string(),
+        "v1 endpoint must have 'signalk-ws' string"
+    );
 }
 
 #[tokio::test]
@@ -60,8 +69,14 @@ async fn discovery_version_is_correct() {
 #[tokio::test]
 async fn discovery_has_server_field() {
     let (_, body) = get(test_app(), "/signalk").await;
-    assert!(body["server"]["id"].is_string(), "Discovery must have server.id");
-    assert!(body["server"]["version"].is_string(), "Discovery must have server.version");
+    assert!(
+        body["server"]["id"].is_string(),
+        "Discovery must have server.id"
+    );
+    assert!(
+        body["server"]["version"].is_string(),
+        "Discovery must have server.version"
+    );
 }
 
 // ─── GET /signalk/v1/api — Full model ────────────────────────────────────────
@@ -136,7 +151,10 @@ async fn path_traversal_missing_path_returns_404() {
 #[tokio::test]
 async fn path_traversal_vessels_self_returns_200() {
     let (status, _) = get(test_app(), "/signalk/v1/api/vessels/self").await;
-    assert_eq!(status, 200, "GET /vessels/self must return 200 when vessel exists");
+    assert_eq!(
+        status, 200,
+        "GET /vessels/self must return 200 when vessel exists"
+    );
 }
 
 // ─── GET /signalk/v1/snapshot — History ──────────────────────────────────────
@@ -162,7 +180,11 @@ async fn login_valid_credentials_returns_200() {
     )
     .await;
     // Dev mode: empty password hash accepts any password
-    assert_eq!(status, 200, "Login with valid username must succeed in dev mode, got: {}", body);
+    assert_eq!(
+        status, 200,
+        "Login with valid username must succeed in dev mode, got: {}",
+        body
+    );
 }
 
 #[tokio::test]
@@ -191,7 +213,12 @@ async fn login_response_token_is_jwt() {
     let token = body["token"].as_str().unwrap_or("");
     // JWT format: three dot-separated base64url segments
     let parts: Vec<&str> = token.split('.').collect();
-    assert_eq!(parts.len(), 3, "Token must be a JWT (3 dot-separated parts), got: {}", token);
+    assert_eq!(
+        parts.len(),
+        3,
+        "Token must be a JWT (3 dot-separated parts), got: {}",
+        token
+    );
 }
 
 #[tokio::test]

@@ -59,8 +59,16 @@ impl Update {
         }
     }
 
-    pub fn with_timestamp(source: Source, timestamp: DateTime<Utc>, values: Vec<PathValue>) -> Self {
-        Update { source, timestamp, values }
+    pub fn with_timestamp(
+        source: Source,
+        timestamp: DateTime<Utc>,
+        values: Vec<PathValue>,
+    ) -> Self {
+        Update {
+            source,
+            timestamp,
+            values,
+        }
     }
 }
 

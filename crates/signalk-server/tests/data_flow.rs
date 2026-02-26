@@ -97,7 +97,10 @@ async fn full_model_source_ref_format() {
         .as_str()
         .unwrap_or("");
     // Source refs follow "{label}.{talker}" convention for NMEA0183
-    assert_eq!(source_ref, "ttyUSB0.GP", "$source must be 'ttyUSB0.GP' for this delta");
+    assert_eq!(
+        source_ref, "ttyUSB0.GP",
+        "$source must be 'ttyUSB0.GP' for this delta"
+    );
 }
 
 // ── Leaf path traversal ───────────────────────────────────────────────────────
@@ -105,20 +108,29 @@ async fn full_model_source_ref_format() {
 #[tokio::test]
 async fn path_traversal_leaf_value_and_source() {
     let (app, _) = seeded_app().await;
-    let (status, body) =
-        get(app, "/signalk/v1/api/vessels/self/navigation/speedOverGround").await;
+    let (status, body) = get(
+        app,
+        "/signalk/v1/api/vessels/self/navigation/speedOverGround",
+    )
+    .await;
 
     assert_eq!(status, 200, "Leaf path must return 200, got: {}", body);
     assert_eq!(body["value"], 3.85, "Value must match injected SOG");
-    assert_eq!(body["$source"], "ttyUSB0.GP", "$source must be the NMEA talker ref");
+    assert_eq!(
+        body["$source"], "ttyUSB0.GP",
+        "$source must be the NMEA talker ref"
+    );
     assert!(body["timestamp"].is_string(), "Leaf must include timestamp");
 }
 
 #[tokio::test]
 async fn path_traversal_second_leaf() {
     let (app, _) = seeded_app().await;
-    let (status, body) =
-        get(app, "/signalk/v1/api/vessels/self/navigation/courseOverGroundTrue").await;
+    let (status, body) = get(
+        app,
+        "/signalk/v1/api/vessels/self/navigation/courseOverGroundTrue",
+    )
+    .await;
 
     assert_eq!(status, 200);
     assert_eq!(body["value"], 2.971);
@@ -131,7 +143,11 @@ async fn path_traversal_intermediate_node_contains_children() {
     let (app, _) = seeded_app().await;
     let (status, body) = get(app, "/signalk/v1/api/vessels/self/navigation").await;
 
-    assert_eq!(status, 200, "Intermediate path must return 200, got: {}", body);
+    assert_eq!(
+        status, 200,
+        "Intermediate path must return 200, got: {}",
+        body
+    );
     assert!(
         body["speedOverGround"].is_object(),
         "navigation node must contain speedOverGround, got: {}",
@@ -147,10 +163,17 @@ async fn path_traversal_intermediate_node_contains_children() {
 #[tokio::test]
 async fn path_traversal_three_levels_deep() {
     let (app, _) = seeded_app().await;
-    let (status, body) =
-        get(app, "/signalk/v1/api/vessels/self/environment/depth/belowKeel").await;
+    let (status, body) = get(
+        app,
+        "/signalk/v1/api/vessels/self/environment/depth/belowKeel",
+    )
+    .await;
 
-    assert_eq!(status, 200, "3-level deep path must return 200, got: {}", body);
+    assert_eq!(
+        status, 200,
+        "3-level deep path must return 200, got: {}",
+        body
+    );
     assert_eq!(body["value"], 12.5);
 }
 
@@ -160,9 +183,11 @@ async fn path_traversal_three_levels_deep() {
 async fn path_traversal_missing_child_returns_404() {
     let (app, _) = seeded_app().await;
     // The parent "navigation" exists, but "headingTrue" was never injected
-    let (status, _) =
-        get(app, "/signalk/v1/api/vessels/self/navigation/headingTrue").await;
-    assert_eq!(status, 404, "Non-existent child path must return 404 even when parent exists");
+    let (status, _) = get(app, "/signalk/v1/api/vessels/self/navigation/headingTrue").await;
+    assert_eq!(
+        status, 404,
+        "Non-existent child path must return 404 even when parent exists"
+    );
 }
 
 #[tokio::test]
@@ -180,16 +205,25 @@ async fn updated_value_reflected_in_rest() {
 
     // First delta
     store.write().await.apply_delta(gps_delta());
-    let (_, body1) =
-        get(app.clone(), "/signalk/v1/api/vessels/self/navigation/speedOverGround").await;
+    let (_, body1) = get(
+        app.clone(),
+        "/signalk/v1/api/vessels/self/navigation/speedOverGround",
+    )
+    .await;
     assert_eq!(body1["value"], 3.85);
 
     // Updated delta with new SOG
-    store.write().await.apply_delta(Delta::self_vessel(vec![Update::new(
-        Source::nmea0183("ttyUSB0", "GP"),
-        vec![PathValue::new("navigation.speedOverGround", json!(5.12))],
-    )]));
-    let (_, body2) =
-        get(app, "/signalk/v1/api/vessels/self/navigation/speedOverGround").await;
+    store
+        .write()
+        .await
+        .apply_delta(Delta::self_vessel(vec![Update::new(
+            Source::nmea0183("ttyUSB0", "GP"),
+            vec![PathValue::new("navigation.speedOverGround", json!(5.12))],
+        )]));
+    let (_, body2) = get(
+        app,
+        "/signalk/v1/api/vessels/self/navigation/speedOverGround",
+    )
+    .await;
     assert_eq!(body2["value"], 5.12, "Store must reflect the latest value");
 }

@@ -99,8 +99,7 @@ impl serde::Serialize for VesselData {
 
         for (flat_key, sk_value) in &self.values {
             let parts: Vec<&str> = flat_key.split('.').collect();
-            let leaf =
-                serde_json::to_value(sk_value).map_err(serde::ser::Error::custom)?;
+            let leaf = serde_json::to_value(sk_value).map_err(serde::ser::Error::custom)?;
             insert_nested(&mut map, &parts, leaf);
         }
 
@@ -124,8 +123,7 @@ fn flatten_into(
     };
     // Heuristic: SignalKValue leaves always carry these three fields.
     if obj.contains_key("value") && obj.contains_key("$source") && obj.contains_key("timestamp") {
-        let sk: SignalKValue =
-            serde_json::from_value(json.clone()).map_err(|e| e.to_string())?;
+        let sk: SignalKValue = serde_json::from_value(json.clone()).map_err(|e| e.to_string())?;
         map.insert(prefix.to_string(), sk);
     } else {
         for (key, val) in obj {
@@ -267,10 +265,7 @@ mod tests {
         assert_eq!(json["navigation"]["speedOverGround"]["value"], 3.85);
         assert_eq!(json["navigation"]["courseOverGroundTrue"]["value"], 1.23);
         assert_eq!(json["environment"]["depth"]["belowKeel"]["value"], 12.5);
-        assert_eq!(
-            json["navigation"]["speedOverGround"]["$source"],
-            "gps.0"
-        );
+        assert_eq!(json["navigation"]["speedOverGround"]["$source"], "gps.0");
         // Flat key must NOT appear at the top level
         assert!(json.get("navigation.speedOverGround").is_none());
     }
@@ -319,12 +314,15 @@ mod tests {
         let resp = DiscoveryResponse {
             endpoints: {
                 let mut m = HashMap::new();
-                m.insert("v1".to_string(), EndpointInfo {
-                    version: "1.7.0".to_string(),
-                    signalk_http: "http://localhost:3000/signalk/v1".to_string(),
-                    signalk_ws: "ws://localhost:3000/signalk/v1/stream".to_string(),
-                    signalk_tcp: None,
-                });
+                m.insert(
+                    "v1".to_string(),
+                    EndpointInfo {
+                        version: "1.7.0".to_string(),
+                        signalk_http: "http://localhost:3000/signalk/v1".to_string(),
+                        signalk_ws: "ws://localhost:3000/signalk/v1/stream".to_string(),
+                        signalk_tcp: None,
+                    },
+                );
                 m
             },
             server: ServerInfo {
@@ -333,7 +331,15 @@ mod tests {
             },
         };
         let json: serde_json::Value = serde_json::to_value(&resp).unwrap();
-        assert_eq!(json["endpoints"]["v1"]["signalk-http"], "http://localhost:3000/signalk/v1");
-        assert!(!json["endpoints"]["v1"].as_object().unwrap().contains_key("signalk-tcp"));
+        assert_eq!(
+            json["endpoints"]["v1"]["signalk-http"],
+            "http://localhost:3000/signalk/v1"
+        );
+        assert!(
+            !json["endpoints"]["v1"]
+                .as_object()
+                .unwrap()
+                .contains_key("signalk-tcp")
+        );
     }
 }

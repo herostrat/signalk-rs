@@ -5,8 +5,8 @@
 //! shared across multiple test compilation units.
 #![allow(dead_code)]
 
-use axum::{body::Body, http::Request, response::Response, Router};
-use signalk_server::{build_router, config::ServerConfig, ServerState};
+use axum::{Router, body::Body, http::Request, response::Response};
+use signalk_server::{ServerState, build_router, config::ServerConfig};
 use signalk_store::store::SignalKStore;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -105,9 +105,13 @@ pub fn load_schema(name: &str) -> Option<serde_json::Value> {
     // Walk up from the crate dir to find the workspace tests/schemas/ directory
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let schema_path = manifest_dir
-        .parent()  // crates/
-        .and_then(|p| p.parent())  // workspace root
-        .map(|root| root.join("tests").join("schemas").join(format!("{}.json", name)))?;
+        .parent() // crates/
+        .and_then(|p| p.parent()) // workspace root
+        .map(|root| {
+            root.join("tests")
+                .join("schemas")
+                .join(format!("{}.json", name))
+        })?;
 
     let content = std::fs::read_to_string(schema_path).ok()?;
     serde_json::from_str(&content).ok()
@@ -122,7 +126,10 @@ pub fn assert_valid_schema(name: &str, value: &serde_json::Value) {
     let schema = match load_schema(name) {
         Some(s) => s,
         None => {
-            eprintln!("[schema] Warning: schema '{}' not found, skipping validation", name);
+            eprintln!(
+                "[schema] Warning: schema '{}' not found, skipping validation",
+                name
+            );
             return;
         }
     };
@@ -132,7 +139,9 @@ pub fn assert_valid_schema(name: &str, value: &serde_json::Value) {
     // of triggering network requests (which panic inside a tokio executor).
     let mut opts = jsonschema::options();
     for &sname in &["delta", "signalk", "vessel", "definitions"] {
-        let Some(s) = load_schema(sname) else { continue };
+        let Some(s) = load_schema(sname) else {
+            continue;
+        };
         // Extract and own the URI string before `s` is moved into from_contents.
         let Some(uri) = s
             .get("id")
@@ -141,7 +150,9 @@ pub fn assert_valid_schema(name: &str, value: &serde_json::Value) {
         else {
             continue;
         };
-        let Ok(resource) = jsonschema::Resource::from_contents(s) else { continue };
+        let Ok(resource) = jsonschema::Resource::from_contents(s) else {
+            continue;
+        };
         opts = opts.with_resource(&uri, resource);
     }
 

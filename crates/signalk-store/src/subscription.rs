@@ -47,7 +47,9 @@ impl ActiveSubscription {
                 // Deliver immediately, but respect min_period
                 match self.last_sent {
                     None => true,
-                    Some(last) => now.duration_since(last) >= Duration::from_millis(self.min_period_ms),
+                    Some(last) => {
+                        now.duration_since(last) >= Duration::from_millis(self.min_period_ms)
+                    }
                 }
             }
             SubscriptionPolicy::Ideal => {
@@ -55,12 +57,16 @@ impl ActiveSubscription {
                 if *value != self.last_value.clone().unwrap_or(serde_json::Value::Null) {
                     match self.last_sent {
                         None => true,
-                        Some(last) => now.duration_since(last) >= Duration::from_millis(self.min_period_ms),
+                        Some(last) => {
+                            now.duration_since(last) >= Duration::from_millis(self.min_period_ms)
+                        }
                     }
                 } else {
                     match self.last_sent {
                         None => true,
-                        Some(last) => now.duration_since(last) >= Duration::from_millis(self.period_ms),
+                        Some(last) => {
+                            now.duration_since(last) >= Duration::from_millis(self.period_ms)
+                        }
                     }
                 }
             }
@@ -182,7 +188,10 @@ mod tests {
         let filtered = filter_delta(&delta, &mut subs).unwrap();
 
         assert_eq!(filtered.updates[0].values.len(), 1);
-        assert_eq!(filtered.updates[0].values[0].path, "navigation.speedOverGround");
+        assert_eq!(
+            filtered.updates[0].values[0].path,
+            "navigation.speedOverGround"
+        );
     }
 
     #[test]

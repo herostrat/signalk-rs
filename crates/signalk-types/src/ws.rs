@@ -121,7 +121,9 @@ pub struct UnsubscribeSpec {
 
 impl UnsubscribeSpec {
     pub fn all() -> Self {
-        UnsubscribeSpec { path: "*".to_string() }
+        UnsubscribeSpec {
+            path: "*".to_string(),
+        }
     }
 
     pub fn path(path: impl Into<String>) -> Self {

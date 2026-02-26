@@ -5,7 +5,7 @@
 ///   - Path lookup latency (getSelfPath)
 ///   - Broadcast fanout overhead
 ///   - Pattern matching performance for subscriptions
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use signalk_store::store::SignalKStore;
 use signalk_types::{Delta, PathValue, Source, Update};
 
@@ -27,7 +27,10 @@ fn make_engine_delta() -> Delta {
         vec![
             PathValue::new("propulsion.main.revolutions", serde_json::json!(2500.0)),
             PathValue::new("propulsion.main.oilTemperature", serde_json::json!(355.15)),
-            PathValue::new("propulsion.main.waterTemperature", serde_json::json!(353.15)),
+            PathValue::new(
+                "propulsion.main.waterTemperature",
+                serde_json::json!(353.15),
+            ),
             PathValue::new("propulsion.main.oilPressure", serde_json::json!(400000.0)),
         ],
     )])
@@ -92,10 +95,14 @@ fn bench_wildcard_match(c: &mut Criterion) {
         for i in 0..5 {
             store.apply_delta(Delta::self_vessel(vec![Update::new(
                 Source::nmea0183("ttyUSB0", "GP"),
-                (0..4).map(|j| PathValue::new(
-                    format!("group{}.sub{}.value{}", i, j, i * 4 + j),
-                    serde_json::json!(i as f64 + j as f64 * 0.1),
-                )).collect(),
+                (0..4)
+                    .map(|j| {
+                        PathValue::new(
+                            format!("group{}.sub{}.value{}", i, j, i * 4 + j),
+                            serde_json::json!(i as f64 + j as f64 * 0.1),
+                        )
+                    })
+                    .collect(),
             )]));
         }
     }

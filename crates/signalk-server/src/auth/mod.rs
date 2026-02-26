@@ -1,15 +1,12 @@
 use axum::{
+    Json,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
-use axum_extra::{
-    headers::authorization::Bearer,
-    TypedHeader,
-};
+use axum_extra::{TypedHeader, headers::authorization::Bearer};
 use chrono::Utc;
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 use signalk_types::{LoginRequest, LoginResponse};
 use std::sync::Arc;
@@ -130,5 +127,9 @@ pub async fn validate(
 pub async fn logout() -> Response {
     // Stateless JWT — logout handled client-side
     // TODO: token blocklist for production
-    (StatusCode::OK, Json(serde_json::json!({"message": "Logged out"}))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({"message": "Logged out"})),
+    )
+        .into_response()
 }

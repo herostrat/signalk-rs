@@ -8,7 +8,7 @@
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
-use signalk_server::{build_router, config::ServerConfig, ServerState};
+use signalk_server::{ServerState, build_router, config::ServerConfig};
 use signalk_store::store::SignalKStore;
 use signalk_types::{Delta, PathValue, Source, Update};
 use std::sync::Arc;
@@ -34,17 +34,20 @@ async fn spawn_ws_server() -> (String, Arc<RwLock<SignalKStore>>) {
     (format!("ws://127.0.0.1:{port}"), store)
 }
 
-async fn connect(base_url: &str, params: &str) -> tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-> {
+async fn connect(
+    base_url: &str,
+    params: &str,
+) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
     let url = format!("{base_url}/signalk/v1/stream{params}");
     let (ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
     ws
 }
 
-async fn recv_text(ws: &mut tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->) -> serde_json::Value {
+async fn recv_text(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+) -> serde_json::Value {
     let msg = tokio::time::timeout(Duration::from_secs(3), ws.next())
         .await
         .expect("timeout waiting for WS message")
@@ -91,7 +94,10 @@ async fn ws_hello_has_required_fields() {
     );
     assert!(hello["self"].is_string(), "Hello must include self URI");
     assert!(hello["roles"].is_array(), "Hello must include roles array");
-    assert!(hello["timestamp"].is_string(), "Hello must include ISO timestamp");
+    assert!(
+        hello["timestamp"].is_string(),
+        "Hello must include ISO timestamp"
+    );
 }
 
 #[tokio::test]
@@ -117,7 +123,11 @@ async fn ws_hello_roles_contain_master() {
         .iter()
         .filter_map(|v| v.as_str())
         .collect();
-    assert!(roles.contains(&"master"), "Server must declare 'master' role, got: {:?}", roles);
+    assert!(
+        roles.contains(&"master"),
+        "Server must declare 'master' role, got: {:?}",
+        roles
+    );
 }
 
 // ── subscribe=none: no data after hello ───────────────────────────────────────
@@ -204,7 +214,10 @@ async fn ws_live_delta_after_subscribe() {
 
     // Client should receive the delta
     let delta = recv_text(&mut ws).await;
-    assert!(delta["updates"].is_array(), "Live delta must have 'updates' array");
+    assert!(
+        delta["updates"].is_array(),
+        "Live delta must have 'updates' array"
+    );
     let empty = vec![];
     let paths: Vec<&str> = delta["updates"][0]["values"]
         .as_array()
@@ -292,7 +305,9 @@ async fn ws_server_responds_to_ping() {
     recv_text(&mut ws).await;
 
     // Send ping
-    ws.send(WsMsg::Ping(b"heartbeat".to_vec().into())).await.unwrap();
+    ws.send(WsMsg::Ping(b"heartbeat".to_vec().into()))
+        .await
+        .unwrap();
 
     // Next message must be a Pong
     let pong = tokio::time::timeout(Duration::from_secs(2), ws.next())

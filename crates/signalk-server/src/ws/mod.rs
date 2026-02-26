@@ -8,17 +8,17 @@
 /// 5. Client sends SubscribeMessage / UnsubscribeMessage to adjust subscriptions
 use axum::{
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::Response,
 };
 use serde::Deserialize;
+use signalk_store::subscription::{ActiveSubscription, filter_delta};
 use signalk_types::{
     Delta, HelloMessage, InboundMessage, Source, SubscribeMessage, SubscribeMode,
     SubscriptionPolicy, UnsubscribeMessage,
 };
-use signalk_store::subscription::{filter_delta, ActiveSubscription};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -56,17 +56,20 @@ async fn handle_socket(
     subscribe_mode: SubscribeMode,
     send_cached_values: bool,
 ) {
-    info!(?subscribe_mode, send_cached_values, "WebSocket client connected");
+    info!(
+        ?subscribe_mode,
+        send_cached_values, "WebSocket client connected"
+    );
 
     // 1. Send Hello message
     let store = state.store.read().await;
-    let hello = HelloMessage::new(
-        signalk_types::SIGNALK_VERSION,
-        Some(store.self_uri.clone()),
-    );
+    let hello = HelloMessage::new(signalk_types::SIGNALK_VERSION, Some(store.self_uri.clone()));
     let hello_json = match serde_json::to_string(&hello) {
         Ok(j) => j,
-        Err(e) => { warn!("Failed to serialize hello: {}", e); return; }
+        Err(e) => {
+            warn!("Failed to serialize hello: {}", e);
+            return;
+        }
     };
     if socket.send(Message::Text(hello_json.into())).await.is_err() {
         return;
@@ -79,13 +82,7 @@ async fn handle_socket(
             // Subscribe to all vessels.self data at 1s period
             subscriptions.insert(
                 "default-self".to_string(),
-                ActiveSubscription::new(
-                    "vessels.self",
-                    "**",
-                    1000,
-                    SubscriptionPolicy::Ideal,
-                    0,
-                ),
+                ActiveSubscription::new("vessels.self", "**", 1000, SubscriptionPolicy::Ideal, 0),
             );
         }
         SubscribeMode::All => {
@@ -113,10 +110,7 @@ async fn handle_socket(
             if !values.is_empty() {
                 let cached_delta = Delta::with_context(
                     format!("vessels.{}", self_uri),
-                    vec![signalk_types::Update::new(
-                        Source::internal(),
-                        values,
-                    )],
+                    vec![signalk_types::Update::new(Source::internal(), values)],
                 );
                 if let Some(filtered) = filter_delta(&cached_delta, &mut subscriptions)
                     && let Ok(json) = serde_json::to_string(&filtered)
@@ -198,7 +192,10 @@ fn handle_client_message(text: &str, subscriptions: &mut HashMap<String, ActiveS
     }
 }
 
-fn apply_subscriptions(msg: &SubscribeMessage, subscriptions: &mut HashMap<String, ActiveSubscription>) {
+fn apply_subscriptions(
+    msg: &SubscribeMessage,
+    subscriptions: &mut HashMap<String, ActiveSubscription>,
+) {
     for sub in &msg.subscribe {
         let key = format!("{}:{}", msg.context, sub.path);
         let period = sub.period.unwrap_or(1000);
@@ -219,7 +216,10 @@ fn apply_subscriptions(msg: &SubscribeMessage, subscriptions: &mut HashMap<Strin
     }
 }
 
-fn apply_unsubscribe(msg: &UnsubscribeMessage, subscriptions: &mut HashMap<String, ActiveSubscription>) {
+fn apply_unsubscribe(
+    msg: &UnsubscribeMessage,
+    subscriptions: &mut HashMap<String, ActiveSubscription>,
+) {
     for spec in &msg.unsubscribe {
         if spec.path == "*" {
             // Unsubscribe from all in this context

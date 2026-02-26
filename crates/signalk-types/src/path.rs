@@ -16,7 +16,11 @@ pub fn join(parts: &[&str]) -> String {
 /// Normalize a context: "vessels.self" stays as-is,
 /// bare "self" becomes "vessels.self".
 pub fn normalize_context(context: &str) -> &str {
-    if context == "self" { "vessels.self" } else { context }
+    if context == "self" {
+        "vessels.self"
+    } else {
+        context
+    }
 }
 
 /// Check if a path pattern (with wildcards) matches a concrete path.
@@ -69,30 +73,63 @@ mod tests {
 
     #[test]
     fn pattern_exact() {
-        assert!(matches_pattern("navigation.speedOverGround", "navigation.speedOverGround"));
-        assert!(!matches_pattern("navigation.speedOverGround", "navigation.courseOverGroundTrue"));
+        assert!(matches_pattern(
+            "navigation.speedOverGround",
+            "navigation.speedOverGround"
+        ));
+        assert!(!matches_pattern(
+            "navigation.speedOverGround",
+            "navigation.courseOverGroundTrue"
+        ));
     }
 
     #[test]
     fn pattern_single_wildcard() {
-        assert!(matches_pattern("navigation.*", "navigation.speedOverGround"));
-        assert!(matches_pattern("navigation.*", "navigation.courseOverGroundTrue"));
-        assert!(!matches_pattern("navigation.*", "propulsion.speedOverGround"));
+        assert!(matches_pattern(
+            "navigation.*",
+            "navigation.speedOverGround"
+        ));
+        assert!(matches_pattern(
+            "navigation.*",
+            "navigation.courseOverGroundTrue"
+        ));
+        assert!(!matches_pattern(
+            "navigation.*",
+            "propulsion.speedOverGround"
+        ));
         // Wildcard does NOT match across segments
-        assert!(!matches_pattern("navigation.*", "navigation.position.latitude"));
+        assert!(!matches_pattern(
+            "navigation.*",
+            "navigation.position.latitude"
+        ));
     }
 
     #[test]
     fn pattern_mid_wildcard() {
-        assert!(matches_pattern("propulsion.*.oilTemperature", "propulsion.main.oilTemperature"));
-        assert!(matches_pattern("propulsion.*.oilTemperature", "propulsion.aux.oilTemperature"));
-        assert!(!matches_pattern("propulsion.*.oilTemperature", "propulsion.main.oilPressure"));
+        assert!(matches_pattern(
+            "propulsion.*.oilTemperature",
+            "propulsion.main.oilTemperature"
+        ));
+        assert!(matches_pattern(
+            "propulsion.*.oilTemperature",
+            "propulsion.aux.oilTemperature"
+        ));
+        assert!(!matches_pattern(
+            "propulsion.*.oilTemperature",
+            "propulsion.main.oilPressure"
+        ));
     }
 
     #[test]
     fn pattern_double_wildcard() {
-        assert!(matches_pattern("navigation.**", "navigation.speedOverGround"));
-        assert!(matches_pattern("navigation.**", "navigation.position.latitude"));
+        assert!(matches_pattern(
+            "navigation.**",
+            "navigation.speedOverGround"
+        ));
+        assert!(matches_pattern(
+            "navigation.**",
+            "navigation.position.latitude"
+        ));
         assert!(matches_pattern("**", "anything.goes.here"));
     }
 
@@ -100,6 +137,9 @@ mod tests {
     fn normalize_context_self() {
         assert_eq!(normalize_context("self"), "vessels.self");
         assert_eq!(normalize_context("vessels.self"), "vessels.self");
-        assert_eq!(normalize_context("vessels.urn:mrn:signalk:uuid:abc"), "vessels.urn:mrn:signalk:uuid:abc");
+        assert_eq!(
+            normalize_context("vessels.urn:mrn:signalk:uuid:abc"),
+            "vessels.urn:mrn:signalk:uuid:abc"
+        );
     }
 }

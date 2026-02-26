@@ -1,15 +1,16 @@
 /// Re-export store benchmarks from the server bench suite.
 /// (Store has its own benches; this adds server-level store integration scenarios.)
-use criterion::{criterion_group, criterion_main, Throughput, Criterion, BenchmarkId};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use signalk_store::store::SignalKStore;
 use signalk_types::{Delta, PathValue, Source, Update};
 
 fn make_delta(n: u64) -> Delta {
     Delta::self_vessel(vec![Update::new(
         Source::nmea0183("ttyUSB0", "GP"),
-        vec![
-            PathValue::new("navigation.speedOverGround", serde_json::json!(n as f64 * 0.001)),
-        ],
+        vec![PathValue::new(
+            "navigation.speedOverGround",
+            serde_json::json!(n as f64 * 0.001),
+        )],
     )])
 }
 
