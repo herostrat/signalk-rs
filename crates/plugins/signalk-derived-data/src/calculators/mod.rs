@@ -7,8 +7,11 @@ use std::collections::HashMap;
 
 pub mod air_density;
 pub mod battery_power;
+pub mod course_bearing;
+pub mod course_distance;
 pub mod course_over_ground_magnetic;
 pub mod course_over_ground_true;
+pub mod course_xte;
 pub mod depth_below_keel;
 pub mod depth_below_surface;
 pub mod dew_point;
@@ -99,6 +102,10 @@ pub fn all_calculators() -> Vec<Box<dyn Calculator>> {
         Box::new(suncalc::SunCalc),
         Box::new(suntime::SunTime),
         Box::new(moon::Moon),
+        // Course calculators
+        Box::new(course_bearing::CourseBearing),
+        Box::new(course_distance::CourseDistance),
+        Box::new(course_xte::CourseXte),
         // Dynamic-instance calculators (prefix-based inputs)
         Box::new(battery_power::BatteryPower),
         Box::new(prop_state::PropState),

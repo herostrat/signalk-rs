@@ -21,7 +21,9 @@ use signalk_plugin_api::{
     Plugin, PluginContext, PluginError, PluginMetadata, SubscriptionHandle, SubscriptionSpec,
     delta_callback,
 };
-use signalk_types::{Delta, Notification, NotificationMethod, NotificationState, Subscription};
+use signalk_types::{
+    Delta, Notification, NotificationMethod, NotificationState, Subscription, geo::haversine_meters,
+};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
 
@@ -181,17 +183,6 @@ impl Plugin for AnchorAlarmPlugin {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-/// Haversine distance in meters between two lat/lon points (in degrees).
-fn haversine_meters(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
-    const R: f64 = 6_371_000.0; // Earth radius in meters
-    let d_lat = (lat2 - lat1).to_radians();
-    let d_lon = (lon2 - lon1).to_radians();
-    let a = (d_lat / 2.0).sin().powi(2)
-        + lat1.to_radians().cos() * lat2.to_radians().cos() * (d_lon / 2.0).sin().powi(2);
-    let c = 2.0 * a.sqrt().asin();
-    R * c
-}
 
 /// Emit a SignalK notification via `raise_notification`.
 ///

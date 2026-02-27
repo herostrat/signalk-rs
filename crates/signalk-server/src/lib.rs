@@ -1,7 +1,9 @@
 pub mod api;
 pub mod auth;
 pub mod config;
+pub mod course;
 pub mod plugins;
+pub mod resources;
 pub mod webapps;
 pub mod ws;
 
@@ -12,10 +14,12 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::config::ServerConfig;
+use crate::course::CourseManager;
 use crate::plugins::host::PutHandlerRegistry;
 use crate::plugins::manager::PluginManager;
 use crate::plugins::registry::PluginRegistry;
 use crate::plugins::routes::PluginRouteTable;
+use crate::resources::ResourceProviderRegistry;
 use crate::webapps::{WebAppInfo, WebappRegistry};
 
 /// Shared application state — passed as axum State to all handlers.
@@ -38,6 +42,10 @@ pub struct ServerState {
     pub webapp_registry: Arc<RwLock<WebappRegistry>>,
     /// Plugin manager for Tier 1 lifecycle control (admin API)
     pub plugin_manager: Arc<tokio::sync::Mutex<PluginManager>>,
+    /// Resource provider registry (file-based default, plugin-overridable)
+    pub resource_providers: Arc<ResourceProviderRegistry>,
+    /// Course/navigation manager
+    pub course_manager: Arc<CourseManager>,
 }
 
 impl ServerState {
@@ -48,6 +56,9 @@ impl ServerState {
         let put_handlers = Arc::new(RwLock::new(HashMap::new()));
         let plugin_routes = Arc::new(RwLock::new(HashMap::new()));
         let webapp_registry = Arc::new(RwLock::new(WebappRegistry::new()));
+        let resource_providers = Arc::new(ResourceProviderRegistry::new(Arc::new(
+            resources::FileResourceProvider::new(data_dir.join("resources")),
+        )));
         let plugin_manager = PluginManager::new(
             store.clone(),
             route_table.clone(),
@@ -59,6 +70,11 @@ impl ServerState {
             data_dir.join("plugin-config"),
             data_dir.join("plugin-data"),
         );
+        let course_manager = Arc::new(CourseManager::new(
+            store.clone(),
+            data_dir.clone(),
+            resource_providers.clone(),
+        ));
         Arc::new(ServerState {
             config,
             store,
@@ -70,6 +86,8 @@ impl ServerState {
             plugin_registry: Arc::new(RwLock::new(PluginRegistry::new())),
             webapp_registry,
             plugin_manager: Arc::new(tokio::sync::Mutex::new(plugin_manager)),
+            resource_providers,
+            course_manager,
         })
     }
 
@@ -85,8 +103,14 @@ impl ServerState {
         plugin_manager: Arc<tokio::sync::Mutex<PluginManager>>,
         plugin_registry: Arc<RwLock<PluginRegistry>>,
         webapp_registry: Arc<RwLock<WebappRegistry>>,
+        resource_providers: Arc<ResourceProviderRegistry>,
     ) -> Arc<Self> {
         let data_dir = PathBuf::from(&config.data_dir);
+        let course_manager = Arc::new(CourseManager::new(
+            store.clone(),
+            data_dir.clone(),
+            resource_providers.clone(),
+        ));
         Arc::new(ServerState {
             config,
             store,
@@ -98,6 +122,8 @@ impl ServerState {
             plugin_registry,
             webapp_registry,
             plugin_manager,
+            resource_providers,
+            course_manager,
         })
     }
 }
@@ -160,6 +186,44 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
         .route(
             "/admin/api/plugins/{plugin_id}/disable",
             post(api::admin::disable_plugin),
+        )
+        // v2 API
+        .route("/signalk/v2/features", get(api::v2::features::get_features))
+        // v2 Resources API
+        .route(
+            "/signalk/v2/api/resources/{resource_type}",
+            get(api::v2::resources::list_resources).post(api::v2::resources::create_resource),
+        )
+        .route(
+            "/signalk/v2/api/resources/{resource_type}/{id}",
+            get(api::v2::resources::get_resource)
+                .put(api::v2::resources::update_resource)
+                .delete(api::v2::resources::delete_resource),
+        )
+        // v2 Course API
+        .route(
+            "/signalk/v2/api/vessels/self/navigation/course",
+            get(api::v2::course::get_course).delete(api::v2::course::clear_course),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/navigation/course/destination",
+            put(api::v2::course::set_destination),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/navigation/course/activeRoute",
+            put(api::v2::course::set_active_route),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/navigation/course/activeRoute/nextPoint",
+            put(api::v2::course::advance_next_point),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/navigation/course/activeRoute/pointIndex",
+            put(api::v2::course::set_point_index),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/navigation/course/activeRoute/reverse",
+            put(api::v2::course::reverse_route),
         )
         // Plugin routes — proxied to the bridge
         .route("/plugins/{plugin_id}", any(api::proxy_plugin_route))

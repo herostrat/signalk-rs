@@ -49,6 +49,7 @@
 pub mod context;
 pub mod error;
 pub mod plugin;
+pub mod resources;
 
 #[cfg(feature = "testing")]
 pub mod testing;
@@ -62,3 +63,4 @@ pub use context::{
 };
 pub use error::PluginError;
 pub use plugin::{Plugin, PluginMetadata, PluginStatus};
+pub use resources::ResourceProvider;

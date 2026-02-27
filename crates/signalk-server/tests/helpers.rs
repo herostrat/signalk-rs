@@ -138,6 +138,11 @@ pub fn test_app_with_handler(handler_path: &str, plugin_id: &str, bridge_socket:
         std::path::PathBuf::from("/tmp/signalk-test/config"),
         std::path::PathBuf::from("/tmp/signalk-test/data"),
     );
+    let resource_providers = Arc::new(signalk_server::resources::ResourceProviderRegistry::new(
+        Arc::new(signalk_server::resources::FileResourceProvider::new(
+            std::path::PathBuf::from("/tmp/signalk-test/resources"),
+        )),
+    ));
     let state = signalk_server::ServerState::new_shared(
         config,
         store,
@@ -150,6 +155,7 @@ pub fn test_app_with_handler(handler_path: &str, plugin_id: &str, bridge_socket:
             signalk_server::plugins::registry::PluginRegistry::new(),
         )),
         Arc::new(RwLock::new(signalk_server::webapps::WebappRegistry::new())),
+        resource_providers,
     );
     build_router(state, &[])
 }

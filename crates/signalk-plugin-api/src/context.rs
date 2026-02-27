@@ -488,6 +488,24 @@ pub trait PluginContext: Send + Sync {
         .await
     }
 
+    // ── Resource providers ─────────────────────────────────────────────
+
+    /// Register a custom resource provider for a specific resource type.
+    ///
+    /// Plugins can override the default file-based storage for any of the
+    /// standard resource types (waypoints, routes, notes, regions, charts).
+    ///
+    /// Not all tiers support this — the default returns an error.
+    async fn register_resource_provider(
+        &self,
+        _resource_type: &str,
+        _provider: Box<dyn crate::resources::ResourceProvider>,
+    ) -> Result<(), PluginError> {
+        Err(PluginError::runtime(
+            "register_resource_provider not supported by this context",
+        ))
+    }
+
     // ── Webapp registration ──────────────────────────────────────────────
 
     /// Register a webapp to be served at a URL path.

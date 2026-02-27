@@ -235,6 +235,12 @@ async fn main() -> Result<()> {
     let plugin_manager = Arc::new(tokio::sync::Mutex::new(plugin_manager));
 
     // ── Public HTTP + WebSocket server ────────────────────────────────────────
+    let resource_providers = Arc::new(signalk_server::resources::ResourceProviderRegistry::new(
+        Arc::new(signalk_server::resources::FileResourceProvider::new(
+            PathBuf::from(&config.data_dir).join("resources"),
+        )),
+    ));
+
     let state = ServerState::new_shared(
         config.clone(),
         store,
@@ -245,6 +251,7 @@ async fn main() -> Result<()> {
         plugin_manager.clone(),
         plugin_registry,
         webapp_registry.clone(),
+        resource_providers,
     );
 
     // Populate plugin registry with initial Tier 1 statuses

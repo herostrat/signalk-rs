@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod v2;
 pub mod webapps;
 
 /// REST API handlers for the SignalK HTTP interface.

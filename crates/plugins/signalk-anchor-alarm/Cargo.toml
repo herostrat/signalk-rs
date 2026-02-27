@@ -14,3 +14,6 @@ tracing.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 async-trait.workspace = true
+
+[dev-dependencies]
+signalk-plugin-api = { workspace = true, features = ["testing"] }
