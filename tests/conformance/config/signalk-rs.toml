@@ -18,3 +18,8 @@ admin_password_hash = ""
 transport = "uds"
 uds_rs_socket = "/run/signalk/rs.sock"
 uds_bridge_socket = "/run/signalk/bridge.sock"
+
+# Only start derived-data; simulator is NOT started so injected test
+# data is not overwritten by generated values.
+[[plugins]]
+id = "derived-data"

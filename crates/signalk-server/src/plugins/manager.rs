@@ -82,20 +82,15 @@ impl PluginManager {
         );
     }
 
-    /// Start all registered plugins with their configurations.
+    /// Start plugins that are present in the `configs` map.
     ///
-    /// `configs` maps plugin_id → config JSON. Plugins not in the map
-    /// receive an empty object `{}` as config.
+    /// `configs` maps plugin_id → config JSON. Only plugins that appear in
+    /// the map are started; registered plugins without a config entry remain
+    /// stopped.  This allows the TOML `[[plugins]]` section (with its
+    /// `enabled` flag) to control which plugins run.
     pub async fn start_all(&mut self, configs: &HashMap<String, serde_json::Value>) {
-        let plugin_ids: Vec<String> = self.plugins.keys().cloned().collect();
-
-        for plugin_id in plugin_ids {
-            let config = configs
-                .get(&plugin_id)
-                .cloned()
-                .unwrap_or(serde_json::json!({}));
-
-            if let Err(e) = self.start_plugin(&plugin_id, config).await {
+        for (plugin_id, config) in configs {
+            if let Err(e) = self.start_plugin(plugin_id, config.clone()).await {
                 error!(plugin = %plugin_id, error = %e, "Failed to start plugin");
             }
         }
@@ -314,7 +309,9 @@ mod tests {
         let mut mgr = make_manager();
         mgr.register(Box::new(TestPlugin::new("test-plugin")));
 
-        let configs = HashMap::new();
+        // start_all only starts plugins present in the config map
+        let mut configs = HashMap::new();
+        configs.insert("test-plugin".to_string(), serde_json::json!({}));
         mgr.start_all(&configs).await;
 
         let statuses = mgr.statuses();

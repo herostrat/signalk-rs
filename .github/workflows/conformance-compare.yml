@@ -42,23 +42,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Start both servers
+      - name: Run API comparison
         run: |
           docker compose -f docker-compose.test.yml up \
             --build \
-            --detach \
-            signalk-original signalk-rs
-
-      - name: Wait for health checks
-        run: |
-          docker compose -f docker-compose.test.yml \
-            run --rm conformance-runner \
-            sh -c 'until curl -sf $ORIGINAL_URL/signalk && curl -sf $RS_URL/signalk; do sleep 2; done'
-
-      - name: Run API comparison
-        run: |
-          docker compose -f docker-compose.test.yml \
-            run --rm conformance-runner
+            --abort-on-container-exit \
+            --exit-code-from conformance-runner \
+            signalk-original signalk-rs conformance-runner
 
       - name: Print logs on failure
         if: failure()
@@ -79,23 +69,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Start both servers
+      - name: Run data comparison
         run: |
           docker compose -f docker-compose.test.yml up \
             --build \
-            --detach \
-            signalk-original signalk-rs
-
-      - name: Wait for health checks
-        run: |
-          docker compose -f docker-compose.test.yml \
-            run --rm data-compare-runner \
-            sh -c 'until curl -sf $ORIGINAL_URL/signalk && curl -sf $RS_URL/signalk; do sleep 2; done'
-
-      - name: Run data comparison
-        run: |
-          docker compose -f docker-compose.test.yml \
-            run --rm data-compare-runner
+            --abort-on-container-exit \
+            --exit-code-from data-compare-runner \
+            signalk-original signalk-rs data-compare-runner
 
       - name: Print logs on failure
         if: failure()

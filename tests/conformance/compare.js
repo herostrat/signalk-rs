@@ -183,13 +183,18 @@ const TESTS = [
     },
   },
   {
-    name: 'POST /signalk/v1/auth/login — wrong username → 401',
+    name: 'POST /signalk/v1/auth/login — wrong username → 4xx',
     method: 'POST',
     path: '/signalk/v1/auth/login',
     body: { username: 'hacker', password: 'x' },
     check(orig, rs) {
       const errs = [];
-      if (orig.status !== rs.status) errs.push(`status: original=${orig.status} rs=${rs.status}`);
+      // Both must reject — exact status may differ if security is
+      // disabled on the original (404 vs 401).
+      const origRejects = orig.status >= 400 && orig.status < 500;
+      const rsRejects   = rs.status >= 400 && rs.status < 500;
+      if (!origRejects) errs.push(`original should reject, got ${orig.status}`);
+      if (!rsRejects)   errs.push(`rs should reject, got ${rs.status}`);
       return errs;
     },
   },

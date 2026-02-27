@@ -5,26 +5,29 @@
 #   data-compare-runner             <- injects identical deltas, compares REST output
 #
 # Usage:
-#   # API conformance only:
-#   docker compose -f docker-compose.test.yml up --build --exit-code-from conformance-runner
+#   # API conformance:
+#   docker compose -f docker-compose.test.yml up --build \
+#     --abort-on-container-exit --exit-code-from conformance-runner \
+#     signalk-original signalk-rs conformance-runner
 #
-#   # Data conformance only:
-#   docker compose -f docker-compose.test.yml up --build --exit-code-from data-compare-runner
+#   # Data conformance:
+#   docker compose -f docker-compose.test.yml up --build \
+#     --abort-on-container-exit --exit-code-from data-compare-runner \
+#     signalk-original signalk-rs data-compare-runner
 #
 # The runners exit 0 if all comparisons pass, non-zero on divergence.
 
 services:
   # -- Official SignalK server (reference implementation) ----------------------
   signalk-original:
-    image: signalk/signalk-server:latest
+    build:
+      context: ./tests/conformance
+      dockerfile: Dockerfile.original
     ports:
       - "3000:3000"
-    volumes:
-      - ./tests/conformance/config:/root/.signalk:ro
-      # Mount the test-injector plugin for data injection
-      - ./tests/conformance/test-injector:/root/.signalk/node_modules/signalk-test-injector:ro
-    environment:
-      - SIGNALK_SETTINGS_FILE=/root/.signalk/settings.json
+    # Disable security so plugin POST endpoints are accessible without auth.
+    # The startup.sh entrypoint enables security by default; we override it.
+    entrypoint: ["node", "/home/node/signalk/node_modules/signalk-server/bin/signalk-server"]
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:3000/signalk"]
       interval: 5s
@@ -63,7 +66,6 @@ services:
     environment:
       - ORIGINAL_URL=http://signalk-original:3000
       - RS_URL=http://signalk-rs:3000
-    # Runner exits with the number of failed comparisons (0 = all pass)
 
   # -- Data conformance runner -------------------------------------------------
   data-compare-runner:

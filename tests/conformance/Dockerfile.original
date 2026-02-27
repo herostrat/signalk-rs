@@ -1,0 +1,6 @@
+FROM signalk/signalk-server:latest
+USER root
+RUN mkdir -p /home/node/.signalk/node_modules && chown -R node:node /home/node/.signalk
+USER node
+COPY --chown=node:node test-injector /home/node/.signalk/node_modules/signalk-test-injector
+COPY --chown=node:node config/settings.json /home/node/.signalk/settings.json

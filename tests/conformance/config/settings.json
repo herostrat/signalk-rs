@@ -6,9 +6,5 @@
   },
   "interfaces": {
     "appstore": false
-  },
-  "security": {
-    "strategy": "@signalk/signalk-server/dist/tokensecurity",
-    "allowReadOnly": true
   }
 }
