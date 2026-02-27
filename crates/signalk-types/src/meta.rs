@@ -62,6 +62,57 @@ pub enum ZoneState {
     Emergency,
 }
 
+/// Return default metadata for well-known SignalK paths.
+///
+/// These defaults come from the SignalK specification and provide units,
+/// descriptions, and display names for the most common sensor paths.
+/// Returns `None` for unknown paths.
+pub fn default_metadata(path: &str) -> Option<Metadata> {
+    let (units, description, display_name) = match path {
+        // Navigation
+        "navigation.speedOverGround" => ("m/s", "Speed over ground", "SOG"),
+        "navigation.speedThroughWater" => ("m/s", "Speed through water", "STW"),
+        "navigation.courseOverGroundTrue" => ("rad", "Course over ground (true)", "COG(T)"),
+        "navigation.courseOverGroundMagnetic" => ("rad", "Course over ground (magnetic)", "COG(M)"),
+        "navigation.headingTrue" => ("rad", "Heading true", "HDG(T)"),
+        "navigation.headingMagnetic" => ("rad", "Heading magnetic", "HDG(M)"),
+        "navigation.magneticVariation" => ("rad", "Magnetic variation", "VAR"),
+        // Depth
+        "environment.depth.belowTransducer" => ("m", "Depth below transducer", "DBT"),
+        "environment.depth.belowKeel" => ("m", "Depth below keel", "DBK"),
+        "environment.depth.belowSurface" => ("m", "Depth below surface", "DBS"),
+        // Wind
+        "environment.wind.speedApparent" => ("m/s", "Apparent wind speed", "AWS"),
+        "environment.wind.angleApparent" => ("rad", "Apparent wind angle", "AWA"),
+        "environment.wind.speedTrue" => ("m/s", "True wind speed (ground ref)", "TWS"),
+        "environment.wind.angleTrueGround" => ("rad", "True wind angle (ground ref)", "TWA"),
+        "environment.wind.angleTrueWater" => ("rad", "True wind angle (water ref)", "TWA(W)"),
+        "environment.wind.directionTrue" => ("rad", "True wind direction", "TWD"),
+        "environment.wind.directionMagnetic" => ("rad", "Wind direction (magnetic)", "MWD"),
+        // Temperature & pressure
+        "environment.outside.temperature" => ("K", "Outside air temperature", "Air"),
+        "environment.outside.pressure" => ("Pa", "Atmospheric pressure", "Baro"),
+        "environment.outside.humidity" => ("ratio", "Relative humidity", "Hum"),
+        "environment.outside.dewPointTemperature" => ("K", "Dew point temperature", "Dew"),
+        "environment.outside.density" => ("kg/m3", "Air density", "Rho"),
+        "environment.water.temperature" => ("K", "Water temperature", "Water"),
+        // Current
+        "environment.current.setTrue" => ("rad", "Current set (true)", "Set(T)"),
+        "environment.current.setMagnetic" => ("rad", "Current set (magnetic)", "Set(M)"),
+        "environment.current.drift" => ("m/s", "Current drift", "Drift"),
+        // VMG
+        "performance.velocityMadeGood" => ("m/s", "Velocity made good", "VMG"),
+        _ => return None,
+    };
+
+    Some(Metadata {
+        units: Some(units.to_string()),
+        description: Some(description.to_string()),
+        display_name: Some(display_name.to_string()),
+        ..Default::default()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,6 +150,19 @@ mod tests {
         let json = serde_json::to_string_pretty(&meta).unwrap();
         let back: Metadata = serde_json::from_str(&json).unwrap();
         assert_eq!(meta, back);
+    }
+
+    #[test]
+    fn default_metadata_known_path() {
+        let meta = default_metadata("navigation.speedOverGround").unwrap();
+        assert_eq!(meta.units.as_deref(), Some("m/s"));
+        assert_eq!(meta.display_name.as_deref(), Some("SOG"));
+        assert!(meta.description.is_some());
+    }
+
+    #[test]
+    fn default_metadata_unknown_path() {
+        assert!(default_metadata("some.unknown.path").is_none());
     }
 
     #[test]

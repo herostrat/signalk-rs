@@ -52,6 +52,7 @@ tokio-tungstenite.workspace = true
 futures-util.workspace = true
 signalk-types.workspace = true
 signalk-store.workspace = true
+tempfile = "3"
 
 [[bench]]
 name = "api_throughput"

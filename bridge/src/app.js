@@ -13,6 +13,7 @@
 const { EventEmitter } = require('events');
 const path = require('path');
 const fs = require('fs');
+const { StreamBundle } = require('./streambundle');
 
 class SignalKApp extends EventEmitter {
   /**
@@ -21,8 +22,9 @@ class SignalKApp extends EventEmitter {
    * @param {string} options.selfUri     - vessel UUID
    * @param {string} options.dataDir     - base data directory for plugin data
    * @param {object} options.config      - server config
+   * @param {string} [options.wsUrl]     - WebSocket URL for streambundle
    */
-  constructor({ transport, selfUri, dataDir, config }) {
+  constructor({ transport, selfUri, dataDir, config, wsUrl }) {
     super();
     this._transport = transport;
     this._selfUri = selfUri;
@@ -30,6 +32,13 @@ class SignalKApp extends EventEmitter {
     this._config = config;
     this._pluginStatuses = new Map();
     this._putHandlers = new Map();  // path → handler fn
+
+    /** Self vessel ID — full URN, used by plugins in delta context matching. */
+    this.selfId = selfUri;
+
+    // streambundle — per-path Bacon.js reactive streams
+    const bundleUrl = wsUrl || process.env.SIGNALK_WS_URL || 'ws://localhost:3000/signalk/v1/stream';
+    this.streambundle = new StreamBundle(bundleUrl);
 
     // subscriptionmanager — plugin's subscribemanager.subscribe() interface
     this.subscriptionmanager = this._createSubscriptionManager();
@@ -202,6 +211,18 @@ class SignalKApp extends EventEmitter {
 
   _pluginConfigPath(pluginId) {
     return path.join(this._dataDir, 'plugin-config', `${pluginId}.json`);
+  }
+
+  // ─── StreamBundle lifecycle ─────────────────────────────────────────────────
+
+  /** Start the streambundle WebSocket. Call once after construction. */
+  startStreams() {
+    this.streambundle.start();
+  }
+
+  /** Stop the streambundle WebSocket and end all buses. */
+  stopStreams() {
+    this.streambundle.stop();
   }
 
   // ─── Metadata ───────────────────────────────────────────────────────────────

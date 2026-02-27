@@ -130,6 +130,8 @@ pub async fn snapshot() -> Response {
 ///
 /// Checks Tier 1 (local Rust) handlers first, then falls back to Tier 2 (bridge).
 /// Returns 404 if no handler is registered, 503 if the bridge is unreachable.
+///
+/// Special case: if the path ends with `/meta`, writes metadata for the parent path.
 pub async fn put_path(
     State(state): State<Arc<ServerState>>,
     Path(url_path): Path<String>,
@@ -142,6 +144,34 @@ pub async fn put_path(
     } else {
         parts.join(".")
     };
+
+    // ── Metadata PUT: path ends with /meta ──────────────────────────────
+    if parts.last() == Some(&"meta") {
+        let data_path = if let Some(stripped) = sk_path.strip_suffix(".meta") {
+            stripped
+        } else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"message": "Invalid meta path"})),
+            )
+                .into_response();
+        };
+
+        let meta: signalk_types::Metadata = match serde_json::from_value(body) {
+            Ok(m) => m,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"message": format!("Invalid metadata: {e}")})),
+                )
+                    .into_response();
+            }
+        };
+
+        let mut store = state.store.write().await;
+        store.set_metadata(data_path, meta);
+        return Json(serde_json::json!({"state": "COMPLETED", "statusCode": 200})).into_response();
+    }
 
     let request_id = uuid::Uuid::new_v4().to_string();
     let sk_value = body.get("value").cloned().unwrap_or(body);
@@ -367,6 +397,220 @@ pub async fn proxy_plugin_route(
             Json(serde_json::json!({"message": format!("Bridge unreachable: {e}")})),
         )
             .into_response(),
+    }
+}
+
+// ── applicationData ─────────────────────────────────────────────────────────
+
+/// GET /signalk/v1/applicationData/{appId}/{version} — read application data.
+pub async fn get_app_data(
+    State(state): State<Arc<ServerState>>,
+    Path((app_id, version)): Path<(String, String)>,
+) -> Response {
+    let file_path = state
+        .data_dir
+        .join("applicationData")
+        .join(&app_id)
+        .join(format!("{version}.json"));
+
+    match tokio::fs::read_to_string(&file_path).await {
+        Ok(contents) => match serde_json::from_str::<Value>(&contents) {
+            Ok(v) => Json(v).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"message": format!("Corrupt data file: {e}")})),
+            )
+                .into_response(),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"message": format!("No data for {app_id}/{version}")})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"message": format!("Read error: {e}")})),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /signalk/v1/applicationData/{appId}/{version} — store application data.
+pub async fn set_app_data(
+    State(state): State<Arc<ServerState>>,
+    Path((app_id, version)): Path<(String, String)>,
+    Json(body): Json<Value>,
+) -> Response {
+    // Validate: appId and version must be simple names (no path traversal)
+    if app_id.contains('/')
+        || app_id.contains("..")
+        || version.contains('/')
+        || version.contains("..")
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"message": "Invalid appId or version"})),
+        )
+            .into_response();
+    }
+
+    let dir = state.data_dir.join("applicationData").join(&app_id);
+    let file_path = dir.join(format!("{version}.json"));
+
+    if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"message": format!("Cannot create directory: {e}")})),
+        )
+            .into_response();
+    }
+
+    let contents = match serde_json::to_string_pretty(&body) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"message": format!("Serialization error: {e}")})),
+            )
+                .into_response();
+        }
+    };
+
+    match tokio::fs::write(&file_path, contents).await {
+        Ok(()) => {
+            Json(serde_json::json!({"state": "COMPLETED", "statusCode": 200})).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"message": format!("Write error: {e}")})),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /signalk/v1/applicationData/{appId}/{version}/{*key} — read sub-key.
+pub async fn get_app_data_key(
+    State(state): State<Arc<ServerState>>,
+    Path((app_id, version, key)): Path<(String, String, String)>,
+) -> Response {
+    let file_path = state
+        .data_dir
+        .join("applicationData")
+        .join(&app_id)
+        .join(format!("{version}.json"));
+
+    let contents = match tokio::fs::read_to_string(&file_path).await {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"message": format!("No data for {app_id}/{version}")})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"message": format!("Read error: {e}")})),
+            )
+                .into_response();
+        }
+    };
+
+    let root: Value = match serde_json::from_str(&contents) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"message": format!("Corrupt data file: {e}")})),
+            )
+                .into_response();
+        }
+    };
+
+    let parts: Vec<&str> = key.split('/').filter(|s| !s.is_empty()).collect();
+    match traverse_json(&root, &parts) {
+        Some(value) => Json(value.clone()).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"message": format!("Key not found: {key}")})),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /signalk/v1/applicationData/{appId}/{version}/{*key} — write sub-key.
+pub async fn set_app_data_key(
+    State(state): State<Arc<ServerState>>,
+    Path((app_id, version, key)): Path<(String, String, String)>,
+    Json(body): Json<Value>,
+) -> Response {
+    if app_id.contains('/')
+        || app_id.contains("..")
+        || version.contains('/')
+        || version.contains("..")
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"message": "Invalid appId or version"})),
+        )
+            .into_response();
+    }
+
+    let dir = state.data_dir.join("applicationData").join(&app_id);
+    let file_path = dir.join(format!("{version}.json"));
+
+    // Read existing data (or start with empty object)
+    let mut root: Value = match tokio::fs::read_to_string(&file_path).await {
+        Ok(c) => serde_json::from_str(&c).unwrap_or(Value::Object(Default::default())),
+        Err(_) => Value::Object(Default::default()),
+    };
+
+    // Set the nested key
+    let parts: Vec<&str> = key.split('/').filter(|s| !s.is_empty()).collect();
+    set_nested(&mut root, &parts, body);
+
+    if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"message": format!("Cannot create directory: {e}")})),
+        )
+            .into_response();
+    }
+
+    let contents = serde_json::to_string_pretty(&root).unwrap_or_default();
+    match tokio::fs::write(&file_path, contents).await {
+        Ok(()) => {
+            Json(serde_json::json!({"state": "COMPLETED", "statusCode": 200})).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"message": format!("Write error: {e}")})),
+        )
+            .into_response(),
+    }
+}
+
+/// Set a value at a nested path within a JSON value.
+fn set_nested(root: &mut Value, parts: &[&str], value: Value) {
+    if parts.is_empty() {
+        *root = value;
+        return;
+    }
+    let Some((head, tail)) = parts.split_first() else {
+        return;
+    };
+    if !root.is_object() {
+        *root = Value::Object(Default::default());
+    }
+    let obj = root.as_object_mut().unwrap();
+    if tail.is_empty() {
+        obj.insert((*head).to_string(), value);
+    } else {
+        let child = obj
+            .entry((*head).to_string())
+            .or_insert_with(|| Value::Object(Default::default()));
+        set_nested(child, tail, value);
     }
 }
 

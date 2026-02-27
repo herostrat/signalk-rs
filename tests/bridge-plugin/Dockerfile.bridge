@@ -1,0 +1,22 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install bridge dependencies AND the plugin in the SAME node_modules tree.
+# This ensures both share a single baconjs instance (critical for Bus/EventStream compat).
+COPY bridge/package.json ./
+RUN npm install --production && \
+    npm install @signalk/signalk-to-nmea0183
+
+COPY bridge/src/ src/
+
+# Plugin config: enable converters matching available simulator data
+RUN mkdir -p /tmp/signalk-data/plugin-config && \
+    echo '{"RMC":true,"MWVR":true,"DBT":true,"MTW":true,"HDM":true,"HDG":true,"HDTC":true,"MMB":true}' \
+    > /tmp/signalk-data/plugin-config/sk-to-nmea0183.json
+
+# Plugins are discovered from the same node_modules as the bridge
+ENV SIGNALK_PLUGINS_DIR=/app/node_modules
+ENV SIGNALK_DATA_DIR=/tmp/signalk-data
+
+CMD ["node", "src/index.js"]

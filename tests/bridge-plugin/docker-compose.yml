@@ -1,0 +1,71 @@
+# Bridge + real plugin integration test.
+#
+# Verifies that signalk-to-nmea0183 runs through the bridge, receives
+# simulator data via streambundle (WebSocket), converts it to NMEA 0183
+# sentences, and outputs them on the NMEA TCP port.
+#
+# Usage:
+#   docker compose -f tests/bridge-plugin/docker-compose.yml up --build \
+#     --abort-on-container-exit --exit-code-from verify
+#
+# Data flow:
+#   signalk-rs (simulator plugin generates data, port 3000)
+#     │  WebSocket (/signalk/v1/stream)
+#     ▼
+#   bridge (streambundle subscribes → signalk-to-nmea0183 converts → nmea0183out event)
+#     │  NmeaTcpServer (port 10110)
+#     ▼
+#   verify (connects to TCP, reads NMEA sentences, validates)
+
+services:
+
+  signalk-rs:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.rs
+      args:
+        FEATURES: "simulator"
+    volumes:
+      - sockets:/run/signalk
+      - ./config/signalk-rs.toml:/etc/signalk-rs/config.toml:ro
+    environment:
+      - RUST_LOG=signalk_server=info,signalk_store=info
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/signalk"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  bridge:
+    build:
+      context: ../..
+      dockerfile: tests/bridge-plugin/Dockerfile.bridge
+    depends_on:
+      signalk-rs:
+        condition: service_healthy
+    volumes:
+      - sockets:/run/signalk
+    environment:
+      - SIGNALK_BRIDGE_TOKEN=bridge-plugin-test-token
+      - SIGNALK_RS_SOCKET=/run/signalk/rs.sock
+      - SIGNALK_BRIDGE_SOCKET=/run/signalk/bridge.sock
+      - SIGNALK_WS_URL=ws://signalk-rs:3000/signalk/v1/stream
+      - SIGNALK_SELF_URI=urn:mrn:signalk:uuid:00000000-0000-4000-8000-000000000002
+      - DEBUG=1
+
+  verify:
+    image: node:20-alpine
+    working_dir: /test
+    volumes:
+      - ./verify.js:/test/verify.js:ro
+    depends_on:
+      - bridge
+    environment:
+      - RS_URL=http://signalk-rs:3000
+      - BRIDGE_HOST=bridge
+      - NMEA_PORT=10110
+      - COLLECT_SECONDS=10
+    command: node verify.js
+
+volumes:
+  sockets:

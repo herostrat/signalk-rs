@@ -21,6 +21,7 @@ const path = require('path');
 const { createTransport } = require('./transport');
 const { SignalKApp } = require('./app');
 const { PluginLoader } = require('./plugins/loader');
+const { NmeaTcpServer } = require('./nmea-tcp');
 
 const BRIDGE_VERSION = require('../package.json').version;
 
@@ -63,8 +64,18 @@ async function main() {
     await transport.register(BRIDGE_VERSION);
   }
 
+  // WebSocket URL for streambundle (reactive streams for plugins)
+  const wsUrl = process.env.SIGNALK_WS_URL || 'ws://localhost:3000/signalk/v1/stream';
+
   // Create app object
-  const app = new SignalKApp({ transport, selfUri, dataDir, config });
+  const app = new SignalKApp({ transport, selfUri, dataDir, config, wsUrl });
+
+  // Start streambundle (opens WS connection for reactive data feeds)
+  app.startStreams();
+
+  // Start NMEA 0183 TCP output server (forwards plugin nmea0183out events)
+  const nmeaTcp = new NmeaTcpServer(app);
+  nmeaTcp.start();
 
   // Load plugins
   const loader = new PluginLoader(app, pluginsDir);
@@ -86,6 +97,8 @@ async function main() {
   const shutdown = async (signal) => {
     console.log(`[bridge] ${signal} received, stopping plugins...`);
     await loader.stopAll();
+    nmeaTcp.stop();
+    app.stopStreams();
     await transport.stop();
     process.exit(0);
   };

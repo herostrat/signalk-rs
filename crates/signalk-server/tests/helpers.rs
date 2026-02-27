@@ -84,6 +84,18 @@ pub async fn put_json(app: Router, uri: &str, body: serde_json::Value) -> (u16, 
     response_json(response).await
 }
 
+/// Build a test app using a specific data directory (for applicationData tests).
+#[allow(dead_code)]
+pub fn test_app_with_data_dir(data_dir: &std::path::Path) -> Router {
+    let config = ServerConfig {
+        data_dir: data_dir.to_string_lossy().to_string(),
+        ..ServerConfig::default()
+    };
+    let (store, _rx) = SignalKStore::new(config.vessel.uuid.clone());
+    let state = ServerState::new(config, store);
+    build_router(state)
+}
+
 /// Build a test app with a pre-registered PUT handler pointing to a given plugin.
 ///
 /// `handler_path` is a dot-notation path pattern, e.g. `"steering.autopilot.target.*"`.

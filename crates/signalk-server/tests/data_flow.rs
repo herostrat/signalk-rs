@@ -6,7 +6,7 @@
 // Each test creates a fresh app with a seeded store and makes HTTP requests.
 
 mod helpers;
-use helpers::{get, test_app_with_store};
+use helpers::{get, put_json, test_app_with_store};
 use serde_json::json;
 use signalk_types::{Delta, PathValue, Source, Update};
 
@@ -226,4 +226,103 @@ async fn updated_value_reflected_in_rest() {
     )
     .await;
     assert_eq!(body2["value"], 5.12, "Store must reflect the latest value");
+}
+
+// ── Metadata in REST responses ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn leaf_includes_default_metadata() {
+    let (app, _) = seeded_app().await;
+    let (status, body) = get(
+        app,
+        "/signalk/v1/api/vessels/self/navigation/speedOverGround",
+    )
+    .await;
+
+    assert_eq!(status, 200);
+    assert!(
+        body["meta"].is_object(),
+        "Leaf should include default metadata, got: {}",
+        body
+    );
+    assert_eq!(
+        body["meta"]["units"], "m/s",
+        "SOG metadata units should be m/s"
+    );
+    assert!(
+        body["meta"]["description"].is_string(),
+        "metadata should include description"
+    );
+}
+
+#[tokio::test]
+async fn meta_subpath_returns_metadata_only() {
+    let (app, _) = seeded_app().await;
+    let (status, body) = get(
+        app,
+        "/signalk/v1/api/vessels/self/navigation/speedOverGround/meta",
+    )
+    .await;
+
+    assert_eq!(status, 200, "GET /meta subpath should return 200");
+    assert_eq!(body["units"], "m/s");
+    // Should NOT have "value" — this is metadata only
+    assert!(
+        body.get("value").is_none(),
+        "/meta should not contain 'value' field"
+    );
+}
+
+#[tokio::test]
+async fn put_meta_sets_custom_metadata() {
+    let (app, store) = test_app_with_store();
+    store.write().await.apply_delta(gps_delta());
+
+    let custom_meta = json!({
+        "units": "kn",
+        "description": "Custom speed",
+        "zones": [
+            { "upper": 10.0, "state": "nominal" },
+            { "lower": 10.0, "upper": 15.0, "state": "warn" },
+            { "lower": 15.0, "state": "alarm", "message": "Too fast!" }
+        ]
+    });
+
+    let (status, _) = put_json(
+        app.clone(),
+        "/signalk/v1/api/vessels/self/navigation/speedOverGround/meta",
+        custom_meta,
+    )
+    .await;
+    assert_eq!(status, 200, "PUT /meta should return 200");
+
+    // Read back — should reflect custom metadata
+    let (_, body) = get(
+        app,
+        "/signalk/v1/api/vessels/self/navigation/speedOverGround",
+    )
+    .await;
+
+    assert_eq!(
+        body["meta"]["units"], "kn",
+        "Custom units should override default"
+    );
+    assert_eq!(body["meta"]["zones"].as_array().unwrap().len(), 3);
+    assert_eq!(body["meta"]["zones"][2]["message"], "Too fast!");
+}
+
+#[tokio::test]
+async fn default_metadata_for_depth() {
+    let (app, _) = seeded_app().await;
+    let (status, body) = get(
+        app,
+        "/signalk/v1/api/vessels/self/environment/depth/belowKeel",
+    )
+    .await;
+
+    assert_eq!(status, 200);
+    assert_eq!(
+        body["meta"]["units"], "m",
+        "Depth metadata units should be m"
+    );
 }

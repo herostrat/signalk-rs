@@ -269,6 +269,10 @@ fn build_delta(values: &generators::SimulatedValues, enable_environment: bool) -
         "navigation.magneticVariation",
         serde_json::json!(values.magnetic_variation_rad),
     ));
+    path_values.push(PathValue::new(
+        "navigation.datetime",
+        serde_json::json!(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
+    ));
 
     // Environment (optional)
     if enable_environment {
@@ -446,8 +450,10 @@ mod tests {
 
         // Should have emitted at least one delta
         // (interval is 1000ms by default, but the first tick is immediate)
-        let deltas = ctx.emitted_deltas.lock().unwrap();
-        assert!(!deltas.is_empty(), "expected at least one delta emitted");
+        {
+            let deltas = ctx.emitted_deltas.lock().unwrap();
+            assert!(!deltas.is_empty(), "expected at least one delta emitted");
+        }
 
         // Stop
         plugin.stop().await.unwrap();

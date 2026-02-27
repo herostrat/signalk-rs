@@ -1,0 +1,25 @@
+[server]
+port = 3000
+host = "0.0.0.0"
+name = "signalk-rs-bridge-test"
+
+[vessel]
+uuid = "urn:mrn:signalk:uuid:00000000-0000-4000-8000-000000000002"
+name = "Bridge Test Vessel"
+mmsi = "123456789"
+
+[auth]
+jwt_secret = "bridge-test-secret"
+token_ttl_secs = 3600
+admin_user = "admin"
+admin_password_hash = ""
+
+[internal]
+transport = "uds"
+uds_rs_socket = "/run/signalk/rs.sock"
+uds_bridge_socket = "/run/signalk/bridge.sock"
+bridge_token = "bridge-plugin-test-token"
+
+# Start the simulator so the bridge has data to subscribe to
+[[plugins]]
+id = "simulator"

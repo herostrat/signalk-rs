@@ -6,6 +6,7 @@ pub mod ws;
 
 use signalk_store::store::SignalKStore;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -25,10 +26,13 @@ pub struct ServerState {
     pub put_handler_registry: Arc<PutHandlerRegistry>,
     /// Tier 1 route table (local Rust routes, checked before bridge proxy)
     pub route_table: Arc<PluginRouteTable>,
+    /// Data directory for persistent storage (applicationData etc.)
+    pub data_dir: PathBuf,
 }
 
 impl ServerState {
     pub fn new(config: ServerConfig, store: Arc<RwLock<SignalKStore>>) -> Arc<Self> {
+        let data_dir = PathBuf::from(&config.data_dir);
         Arc::new(ServerState {
             config,
             store,
@@ -36,6 +40,7 @@ impl ServerState {
             plugin_routes: Arc::new(RwLock::new(HashMap::new())),
             put_handler_registry: Arc::new(PutHandlerRegistry::new()),
             route_table: Arc::new(PluginRouteTable::new()),
+            data_dir,
         })
     }
 
@@ -48,6 +53,7 @@ impl ServerState {
         put_handler_registry: Arc<PutHandlerRegistry>,
         route_table: Arc<PluginRouteTable>,
     ) -> Arc<Self> {
+        let data_dir = PathBuf::from(&config.data_dir);
         Arc::new(ServerState {
             config,
             store,
@@ -55,6 +61,7 @@ impl ServerState {
             plugin_routes,
             put_handler_registry,
             route_table,
+            data_dir,
         })
     }
 }
@@ -80,6 +87,15 @@ pub fn build_router(state: Arc<ServerState>) -> axum::Router {
         .route("/signalk/v1/auth/logout", put(auth::logout))
         // WebSocket streaming
         .route("/signalk/v1/stream", get(ws::handler))
+        // Application data persistence
+        .route(
+            "/signalk/v1/applicationData/{appId}/{version}",
+            get(api::get_app_data).post(api::set_app_data),
+        )
+        .route(
+            "/signalk/v1/applicationData/{appId}/{version}/{*key}",
+            get(api::get_app_data_key).post(api::set_app_data_key),
+        )
         // Plugin routes — proxied to the bridge
         .route("/plugins/{plugin_id}", any(api::proxy_plugin_route))
         .route("/plugins/{plugin_id}/{*rest}", any(api::proxy_plugin_route));

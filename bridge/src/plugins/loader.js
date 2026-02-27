@@ -30,26 +30,40 @@ function discoverPlugins(modulesDir) {
   if (!fs.existsSync(modulesDir)) return plugins;
 
   for (const entry of fs.readdirSync(modulesDir)) {
-    const pkgPath = path.join(modulesDir, entry, 'package.json');
-    if (!fs.existsSync(pkgPath)) continue;
+    const entryPath = path.join(modulesDir, entry);
 
-    let pkg;
-    try {
-      pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-    } catch {
+    // Handle scoped packages: @scope/package-name
+    if (entry.startsWith('@') && fs.statSync(entryPath).isDirectory()) {
+      for (const scopedEntry of fs.readdirSync(entryPath)) {
+        _tryAdd(path.join(entryPath, scopedEntry), plugins);
+      }
       continue;
     }
 
-    if (pkg.keywords && pkg.keywords.includes(PLUGIN_KEYWORD)) {
-      plugins.push({
-        id: pkg.name,
-        packagePath: path.join(modulesDir, entry),
-        pkg,
-      });
-    }
+    _tryAdd(entryPath, plugins);
   }
 
   return plugins;
+}
+
+function _tryAdd(packagePath, plugins) {
+  const pkgPath = path.join(packagePath, 'package.json');
+  if (!fs.existsSync(pkgPath)) return;
+
+  let pkg;
+  try {
+    pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+  } catch {
+    return;
+  }
+
+  if (pkg.keywords && pkg.keywords.includes(PLUGIN_KEYWORD)) {
+    plugins.push({
+      id: pkg.name,
+      packagePath,
+      pkg,
+    });
+  }
 }
 
 /**
@@ -72,23 +86,43 @@ class PluginLoader {
     }
   }
 
+  /**
+   * Create a per-plugin app wrapper with plugin-specific properties.
+   * In the original signalk-server, each plugin gets its own app with
+   * debug, setPluginStatus, etc. scoped to the plugin.
+   */
+  _createPluginApp(pluginId) {
+    const app = this._app;
+    return Object.create(app, {
+      debug: { value: (...args) => {
+        if (process.env.DEBUG) console.log(`[${pluginId}]`, ...args);
+      }},
+      reportOutputMessages: { value: () => {} },
+      setPluginStatus: { value: (msg) => app.setPluginStatus(pluginId, msg) },
+      setPluginError: { value: (msg) => app.setPluginError(pluginId, msg) },
+    });
+  }
+
   /** Load a single plugin by path. */
   async load(id, packagePath, pkg) {
     try {
       const mainFile = path.join(packagePath, pkg.main || 'index.js');
       const pluginFactory = require(mainFile);
 
+      // Each plugin gets its own app wrapper with plugin-specific properties
+      const pluginApp = this._createPluginApp(id);
+
       // Plugins export either a function (factory) or an object
       const plugin = typeof pluginFactory === 'function'
-        ? pluginFactory(this._app)
+        ? pluginFactory(pluginApp)
         : pluginFactory;
 
       this._loaded.set(id, { plugin, pkg });
       console.log(`[bridge] Loaded plugin: ${id}@${pkg.version || 'unknown'}`);
 
-      // Get config schema if available
-      const schema = plugin.schema ? plugin.schema() : {};
-      const savedOptions = this._app.readPluginOptions(id);
+      // Get config schema if available (can be a function or a plain object)
+      const schema = typeof plugin.schema === 'function' ? plugin.schema() : (plugin.schema || {});
+      const savedOptions = this._app.readPluginOptions(plugin.id || id);
 
       // Start plugin
       await this._startPlugin(id, plugin, savedOptions);

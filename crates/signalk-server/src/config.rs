@@ -7,6 +7,9 @@ pub struct ServerConfig {
     pub vessel: VesselSettings,
     pub auth: AuthSettings,
     pub internal: InternalSettings,
+    /// Data directory for persistent storage (applicationData, plugin data, etc.)
+    #[serde(default = "default_data_dir")]
+    pub data_dir: String,
     /// Plugin configurations — everything is a plugin.
     ///
     /// ```toml
@@ -77,6 +80,10 @@ pub struct AuthSettings {
     pub admin_password_hash: String,
 }
 
+fn default_data_dir() -> String {
+    "/var/lib/signalk-rs".to_string()
+}
+
 fn default_http_rs_port() -> u16 {
     3001
 }
@@ -123,6 +130,7 @@ impl Default for ServerConfig {
                 admin_user: "admin".to_string(),
                 admin_password_hash: String::new(), // set by user
             },
+            data_dir: default_data_dir(),
             internal: InternalSettings {
                 transport: "uds".to_string(),
                 uds_rs_socket: "/run/signalk/rs.sock".to_string(),

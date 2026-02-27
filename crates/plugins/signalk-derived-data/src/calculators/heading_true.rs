@@ -72,7 +72,7 @@ mod tests {
         let result = calc.calculate(&values).unwrap();
         let value = result[0].value.as_f64().unwrap();
         assert!(
-            value >= 0.0 && value < 2.0 * PI,
+            (0.0..2.0 * PI).contains(&value),
             "value={value} out of range"
         );
     }

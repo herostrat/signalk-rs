@@ -232,9 +232,11 @@ mod tests {
         let result = plugin.start(serde_json::json!({}), ctx.clone()).await;
         assert!(result.is_ok());
 
-        let statuses = ctx.status_messages.lock().unwrap();
-        assert!(!statuses.is_empty());
-        assert!(statuses[0].contains("calculators active"));
+        {
+            let statuses = ctx.status_messages.lock().unwrap();
+            assert!(!statuses.is_empty());
+            assert!(statuses[0].contains("calculators active"));
+        }
 
         plugin.stop().await.unwrap();
     }
@@ -264,19 +266,21 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Check that derived data was emitted
-        let emitted = ctx.emitted_deltas.lock().unwrap();
-        let has_heading_true = emitted.iter().any(|d| {
-            d.updates.iter().any(|u| {
-                u.values
-                    .iter()
-                    .any(|pv| pv.path == "navigation.headingTrue")
-            })
-        });
-        assert!(
-            has_heading_true,
-            "Expected navigation.headingTrue in emitted deltas, got: {:?}",
-            *emitted
-        );
+        {
+            let emitted = ctx.emitted_deltas.lock().unwrap();
+            let has_heading_true = emitted.iter().any(|d| {
+                d.updates.iter().any(|u| {
+                    u.values
+                        .iter()
+                        .any(|pv| pv.path == "navigation.headingTrue")
+                })
+            });
+            assert!(
+                has_heading_true,
+                "Expected navigation.headingTrue in emitted deltas, got: {:?}",
+                *emitted
+            );
+        }
 
         plugin.stop().await.unwrap();
     }
@@ -307,18 +311,20 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // headingTrue should NOT be emitted (it's disabled)
-        let emitted = ctx.emitted_deltas.lock().unwrap();
-        let has_heading_true = emitted.iter().any(|d| {
-            d.updates.iter().any(|u| {
-                u.values
-                    .iter()
-                    .any(|pv| pv.path == "navigation.headingTrue")
-            })
-        });
-        assert!(
-            !has_heading_true,
-            "headingTrue should be disabled but was emitted"
-        );
+        {
+            let emitted = ctx.emitted_deltas.lock().unwrap();
+            let has_heading_true = emitted.iter().any(|d| {
+                d.updates.iter().any(|u| {
+                    u.values
+                        .iter()
+                        .any(|pv| pv.path == "navigation.headingTrue")
+                })
+            });
+            assert!(
+                !has_heading_true,
+                "headingTrue should be disabled but was emitted"
+            );
+        }
 
         plugin.stop().await.unwrap();
     }
@@ -345,24 +351,26 @@ mod tests {
         ctx.deliver_delta(&delta);
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let emitted = ctx.emitted_deltas.lock().unwrap();
-        let density_pv = emitted.iter().find_map(|d| {
-            d.updates.iter().find_map(|u| {
-                u.values
-                    .iter()
-                    .find(|pv| pv.path == "environment.outside.density")
-            })
-        });
-        assert!(
-            density_pv.is_some(),
-            "Expected air density in emitted deltas"
-        );
+        {
+            let emitted = ctx.emitted_deltas.lock().unwrap();
+            let density_pv = emitted.iter().find_map(|d| {
+                d.updates.iter().find_map(|u| {
+                    u.values
+                        .iter()
+                        .find(|pv| pv.path == "environment.outside.density")
+                })
+            });
+            assert!(
+                density_pv.is_some(),
+                "Expected air density in emitted deltas"
+            );
 
-        let density = density_pv.unwrap().value.as_f64().unwrap();
-        assert!(
-            (density - 1.225).abs() < 0.01,
-            "Expected ~1.225 kg/m³, got {density}"
-        );
+            let density = density_pv.unwrap().value.as_f64().unwrap();
+            assert!(
+                (density - 1.225).abs() < 0.01,
+                "Expected ~1.225 kg/m³, got {density}"
+            );
+        }
 
         plugin.stop().await.unwrap();
     }

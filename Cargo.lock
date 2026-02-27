@@ -2446,6 +2446,7 @@ name = "signalk-plugin-simulator"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "serde",
  "serde_json",
  "signalk-plugin-api",
@@ -2479,6 +2480,7 @@ dependencies = [
  "signalk-plugin-simulator",
  "signalk-store",
  "signalk-types",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-tungstenite 0.26.2",

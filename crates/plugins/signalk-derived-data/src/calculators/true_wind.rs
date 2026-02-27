@@ -185,6 +185,9 @@ mod tests {
             .value
             .as_f64()
             .unwrap();
-        assert!(dir >= 0.0 && dir < 2.0 * PI, "direction={dir} out of range");
+        assert!(
+            (0.0..2.0 * PI).contains(&dir),
+            "direction={dir} out of range"
+        );
     }
 }

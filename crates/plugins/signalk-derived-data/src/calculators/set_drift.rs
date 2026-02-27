@@ -132,7 +132,7 @@ mod tests {
     fn current_from_beam() {
         // Heading north (mag=0), variation=0, STW=5
         // COG pushed 30° east by current, SOG=6
-        let values = make_values(0.0, 0.5236, 5.0, 6.0, 0.0);
+        let values = make_values(0.0, std::f64::consts::FRAC_PI_6, 5.0, 6.0, 0.0);
         let result = SetDrift.calculate(&values).unwrap();
 
         let drift = result
@@ -211,7 +211,7 @@ mod tests {
             if pv.path.contains("set") {
                 let val = pv.value.as_f64().unwrap();
                 assert!(
-                    val >= 0.0 && val < 2.0 * PI,
+                    (0.0..2.0 * PI).contains(&val),
                     "{}: {val} out of range",
                     pv.path
                 );

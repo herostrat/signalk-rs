@@ -1,4 +1,4 @@
-use signalk_types::{Delta, FullModel, SignalKValue, Source, SourceRef, VesselData};
+use signalk_types::{Delta, FullModel, Metadata, SignalKValue, Source, SourceRef, VesselData};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast};
@@ -26,6 +26,10 @@ pub struct SignalKStore {
     /// Source registry: sourceRef string → Source object
     sources: HashMap<String, Source>,
 
+    /// Per-path metadata (self vessel) — persists across delta updates.
+    /// Explicit metadata set via PUT /meta takes precedence over defaults.
+    metadata: HashMap<String, Metadata>,
+
     /// Broadcast sender — all delta updates are sent here
     tx: broadcast::Sender<Delta>,
 }
@@ -48,6 +52,7 @@ impl SignalKStore {
             self_uri,
             vessels,
             sources: HashMap::new(),
+            metadata: HashMap::new(),
             tx,
         };
         (Arc::new(RwLock::new(store)), rx)
@@ -134,11 +139,29 @@ impl SignalKStore {
     }
 
     /// Build the full SignalK model snapshot (for REST GET /signalk/v1/api/).
+    ///
+    /// Metadata is merged into SignalKValue leaves:
+    /// 1. Explicit metadata (set via PUT /meta) takes highest priority
+    /// 2. Spec defaults fill in for paths that have values but no explicit metadata
     pub fn full_model(&self) -> FullModel {
         let mut model = FullModel::new(&self.self_uri);
 
         for (uri, vessel) in &self.vessels {
-            model.vessels.insert(uri.clone(), vessel.clone());
+            let mut vessel = vessel.clone();
+
+            // Inject metadata for self vessel
+            if uri == &self.self_uri {
+                for (path, sv) in vessel.values.iter_mut() {
+                    // Explicit metadata first, then spec defaults
+                    if let Some(meta) = self.metadata.get(path) {
+                        sv.meta = Some(meta.clone());
+                    } else if let Some(meta) = signalk_types::meta::default_metadata(path) {
+                        sv.meta = Some(meta);
+                    }
+                }
+            }
+
+            model.vessels.insert(uri.clone(), vessel);
         }
 
         for (ref_str, src) in &self.sources {
@@ -179,6 +202,26 @@ impl SignalKStore {
             path.to_string(),
             SignalKValue::new(value, SourceRef::new(&source_ref.0), Utc::now()),
         );
+    }
+
+    // ── Metadata ─────────────────────────────────────────────────────────────
+
+    /// Set explicit metadata for a path (self vessel).
+    pub fn set_metadata(&mut self, path: &str, meta: Metadata) {
+        self.metadata.insert(path.to_string(), meta);
+    }
+
+    /// Get explicit metadata for a path (self vessel).
+    pub fn get_metadata(&self, path: &str) -> Option<&Metadata> {
+        self.metadata.get(path)
+    }
+
+    /// Get effective metadata: explicit first, then spec defaults.
+    pub fn effective_metadata(&self, path: &str) -> Option<Metadata> {
+        if let Some(meta) = self.metadata.get(path) {
+            return Some(meta.clone());
+        }
+        signalk_types::meta::default_metadata(path)
     }
 }
 
@@ -291,6 +334,87 @@ mod tests {
 
         let nav = store.get_self_matching("navigation.*");
         assert_eq!(nav.len(), 2);
+    }
+
+    #[test]
+    fn set_and_get_metadata() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        let meta = Metadata {
+            units: Some("m/s".to_string()),
+            description: Some("Speed over ground".to_string()),
+            ..Default::default()
+        };
+        store.set_metadata("navigation.speedOverGround", meta.clone());
+
+        let got = store.get_metadata("navigation.speedOverGround").unwrap();
+        assert_eq!(got.units, meta.units);
+        assert!(store.get_metadata("navigation.unknown").is_none());
+    }
+
+    #[test]
+    fn effective_metadata_prefers_explicit() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        // Default exists for SOG
+        let default = store
+            .effective_metadata("navigation.speedOverGround")
+            .unwrap();
+        assert_eq!(default.units.as_deref(), Some("m/s"));
+
+        // Override with explicit metadata (custom zones)
+        let custom = Metadata {
+            units: Some("kn".to_string()),
+            ..Default::default()
+        };
+        store.set_metadata("navigation.speedOverGround", custom);
+
+        let effective = store
+            .effective_metadata("navigation.speedOverGround")
+            .unwrap();
+        assert_eq!(effective.units.as_deref(), Some("kn"));
+    }
+
+    #[test]
+    fn full_model_includes_default_metadata() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        store.apply_delta(make_gps_delta(3.5));
+
+        let model = store.full_model();
+        let vessel = model.vessels.get("urn:mrn:signalk:uuid:test").unwrap();
+        let sog = vessel.values.get("navigation.speedOverGround").unwrap();
+        assert!(sog.meta.is_some(), "SOG should have default metadata");
+        assert_eq!(sog.meta.as_ref().unwrap().units.as_deref(), Some("m/s"));
+    }
+
+    #[test]
+    fn full_model_includes_explicit_metadata() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        store.apply_delta(make_gps_delta(3.5));
+        store.set_metadata(
+            "navigation.speedOverGround",
+            Metadata {
+                units: Some("kn".to_string()),
+                description: Some("Custom SOG".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let model = store.full_model();
+        let vessel = model.vessels.get("urn:mrn:signalk:uuid:test").unwrap();
+        let sog = vessel.values.get("navigation.speedOverGround").unwrap();
+        // Explicit overrides default
+        assert_eq!(sog.meta.as_ref().unwrap().units.as_deref(), Some("kn"));
+        assert_eq!(
+            sog.meta.as_ref().unwrap().description.as_deref(),
+            Some("Custom SOG")
+        );
     }
 
     #[test]
