@@ -1,0 +1,19 @@
+[package]
+name = "signalk-ais-status"
+description = "AIS target tracking plugin — data fusion, status lifecycle, CPA/TCPA"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+signalk-plugin-api.workspace = true
+signalk-types.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+signalk-plugin-api = { workspace = true, features = ["testing"] }

@@ -37,6 +37,17 @@ impl SubscriptionSpec {
             subscribe: paths,
         }
     }
+
+    /// Subscribe to paths on ALL vessels (wildcard context).
+    ///
+    /// Used by plugins that need to process data from all vessels,
+    /// e.g. AIS target tracking. The host filters with `context == "*"`.
+    pub fn all_vessels(paths: Vec<signalk_types::Subscription>) -> Self {
+        SubscriptionSpec {
+            context: "*".to_string(),
+            subscribe: paths,
+        }
+    }
 }
 
 /// Opaque handle for an active subscription. Pass to `unsubscribe()` to cancel.

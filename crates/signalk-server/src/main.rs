@@ -217,6 +217,7 @@ async fn main() -> Result<()> {
         signalk_plugin_anchor_alarm::AnchorAlarmPlugin::new(),
     ));
     plugin_manager.register(Box::new(signalk_derived_data::DerivedDataPlugin::new()));
+    plugin_manager.register(Box::new(signalk_ais_status::AisStatusPlugin::new()));
     #[cfg(feature = "simulator")]
     plugin_manager.register(Box::new(signalk_plugin_simulator::SimulatorPlugin::new()));
 

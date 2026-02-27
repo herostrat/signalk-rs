@@ -2379,6 +2379,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "signalk-ais-status"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "signalk-plugin-api",
+ "signalk-types",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "signalk-derived-data"
 version = "0.1.0"
 dependencies = [
@@ -2497,6 +2510,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "signalk-ais-status",
  "signalk-derived-data",
  "signalk-internal",
  "signalk-plugin-anchor-alarm",
