@@ -204,7 +204,7 @@ async fn simulator_stop_halts_data() {
     let ts_before = {
         let s = store.read().await;
         s.get_self_path("navigation.speedOverGround")
-            .map(|v| v.timestamp.clone())
+            .map(|v| v.timestamp)
     };
     assert!(ts_before.is_some(), "Expected data before stop");
 
@@ -216,7 +216,7 @@ async fn simulator_stop_halts_data() {
     let ts_after = {
         let s = store.read().await;
         s.get_self_path("navigation.speedOverGround")
-            .map(|v| v.timestamp.clone())
+            .map(|v| v.timestamp)
     };
 
     assert_eq!(

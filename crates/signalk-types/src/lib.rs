@@ -4,6 +4,7 @@ pub const SIGNALK_VERSION: &str = "1.7.0";
 pub mod delta;
 pub mod full;
 pub mod meta;
+pub mod notification;
 pub mod path;
 pub mod source;
 pub mod ws;
@@ -15,6 +16,7 @@ pub use full::{
     SignalKValue, VesselData,
 };
 pub use meta::{Metadata, Zone, ZoneState};
+pub use notification::{Notification, NotificationMethod, NotificationState};
 pub use path::{matches_pattern, normalize_context, resolve_self, split};
 pub use source::{Source, SourceRef};
 pub use ws::{

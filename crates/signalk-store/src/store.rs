@@ -211,6 +211,23 @@ impl SignalKStore {
             .collect()
     }
 
+    /// Get all notification paths and values for the self vessel.
+    ///
+    /// Returns all paths starting with `notifications.` and their values.
+    /// To check for active alarms, inspect each value's `state` field.
+    pub fn notifications(&self) -> Vec<(&str, &SignalKValue)> {
+        let vessel = match self.vessels.get(&self.self_uri) {
+            Some(v) => v,
+            None => return vec![],
+        };
+        vessel
+            .values
+            .iter()
+            .filter(|(path, _)| path.starts_with("notifications."))
+            .map(|(path, val)| (path.as_str(), val))
+            .collect()
+    }
+
     /// Build the full SignalK model snapshot (for REST GET /signalk/v1/api/).
     ///
     /// Metadata is merged into SignalKValue leaves:
@@ -665,5 +682,33 @@ mod tests {
                 .get_self_path_by_source("navigation.speedOverGround", "unknown")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn notifications_returns_notification_paths() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        // Add regular data + notifications
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(Delta::self_vessel(vec![Update::new(
+            Source::plugin("anchor-alarm"),
+            vec![PathValue::new(
+                "notifications.navigation.anchor",
+                serde_json::json!({
+                    "state": "alarm",
+                    "method": ["visual", "sound"],
+                    "message": "Anchor dragging!"
+                }),
+            )],
+        )]));
+
+        let notifs = store.notifications();
+        assert_eq!(notifs.len(), 1);
+        assert_eq!(notifs[0].0, "notifications.navigation.anchor");
+        assert_eq!(notifs[0].1.value["state"], "alarm");
+
+        // Regular navigation paths should NOT appear
+        assert!(notifs.iter().all(|(p, _)| p.starts_with("notifications.")));
     }
 }

@@ -109,6 +109,29 @@ class SignalKApp extends EventEmitter {
     return this._transport.sendDelta(delta);
   }
 
+  /**
+   * Emit a notification delta (convenience wrapper around handleMessage).
+   *
+   * @param {string} pluginId - plugin identifier (used as source label)
+   * @param {string} skPath   - notification path without "notifications." prefix
+   * @param {object} notification
+   * @param {string} notification.state   - "alarm", "warn", "alert", "normal", etc.
+   * @param {string[]} notification.method - ["visual", "sound"]
+   * @param {string} notification.message - human-readable message
+   */
+  notify(pluginId, skPath, { state, method, message }) {
+    return this.handleMessage(pluginId, {
+      context: 'vessels.self',
+      updates: [{
+        source: { label: pluginId, type: 'plugin' },
+        values: [{
+          path: `notifications.${skPath}`,
+          value: { state, method, message },
+        }],
+      }],
+    });
+  }
+
   // ─── PUT handler registration ────────────────────────────────────────────────
 
   /**

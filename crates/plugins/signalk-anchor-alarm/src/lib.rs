@@ -21,7 +21,7 @@ use signalk_plugin_api::{
     Plugin, PluginContext, PluginError, PluginMetadata, SubscriptionHandle, SubscriptionSpec,
     delta_callback,
 };
-use signalk_types::{Delta, PathValue, Source, Subscription, Update};
+use signalk_types::{Delta, Notification, NotificationMethod, NotificationState, Subscription};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
 
@@ -154,11 +154,11 @@ impl Plugin for AnchorAlarmPlugin {
                             if is_outside && !was_alarming {
                                 warn!(distance, radius, "Anchor alarm triggered!");
                                 *alarming_clone.lock().unwrap() = true;
-                                emit_notification(&ctx_clone, distance, radius, "alarm", true);
+                                emit_notification(&ctx_clone, distance, radius, true);
                             } else if !is_outside && was_alarming {
                                 info!(distance, radius, "Back inside anchor radius");
                                 *alarming_clone.lock().unwrap() = false;
-                                emit_notification(&ctx_clone, distance, radius, "normal", false);
+                                emit_notification(&ctx_clone, distance, radius, false);
                             }
                         }
                     }
@@ -193,42 +193,37 @@ fn haversine_meters(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     R * c
 }
 
-/// Emit a SignalK notification delta via handle_message.
+/// Emit a SignalK notification via `raise_notification`.
 ///
-/// Spawns a `tokio` task to call the async `handle_message` from within
+/// Spawns a `tokio` task to call the async method from within
 /// the synchronous subscription callback.
-fn emit_notification(
-    ctx: &Arc<dyn PluginContext>,
-    distance: f64,
-    radius: f64,
-    state: &str,
-    alarming: bool,
-) {
-    let message = if alarming {
-        format!("Anchor alarm! Vessel is {distance:.0}m from anchor (radius: {radius:.0}m)")
+fn emit_notification(ctx: &Arc<dyn PluginContext>, distance: f64, radius: f64, alarming: bool) {
+    let (state, method, message) = if alarming {
+        (
+            NotificationState::Alarm,
+            vec![NotificationMethod::Visual, NotificationMethod::Sound],
+            format!("Anchor alarm! Vessel is {distance:.0}m from anchor (radius: {radius:.0}m)"),
+        )
     } else {
-        format!("Back within anchor radius ({distance:.0}m, radius: {radius:.0}m)")
+        (
+            NotificationState::Normal,
+            vec![],
+            format!("Back within anchor radius ({distance:.0}m, radius: {radius:.0}m)"),
+        )
     };
 
-    let notification = serde_json::json!({
-        "value": {
-            "state": state,
-            "method": ["visual", "sound"],
-            "message": message,
-        }
-    });
-
-    let delta = Delta::self_vessel(vec![Update::new(
-        Source::plugin("anchor-alarm"),
-        vec![PathValue::new(
-            "notifications.navigation.anchor",
-            notification,
-        )],
-    )]);
+    let notification = Notification {
+        state,
+        method,
+        message,
+    };
 
     let ctx = ctx.clone();
     tokio::spawn(async move {
-        if let Err(e) = ctx.handle_message(delta).await {
+        if let Err(e) = ctx
+            .raise_notification("navigation.anchor", notification, "anchor-alarm")
+            .await
+        {
             tracing::error!("Failed to emit anchor notification: {e}");
         }
     });
@@ -237,6 +232,7 @@ fn emit_notification(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use signalk_types::{PathValue, Source, Update};
 
     #[test]
     fn haversine_zero_distance() {

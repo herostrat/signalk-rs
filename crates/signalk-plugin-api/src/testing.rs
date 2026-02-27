@@ -319,6 +319,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn raise_notification_emits_correct_delta() {
+        use signalk_types::{Notification, NotificationMethod, NotificationState};
+
+        let mock = MockPluginContext::new();
+        mock.raise_notification(
+            "navigation.anchor",
+            Notification {
+                state: NotificationState::Alarm,
+                method: vec![NotificationMethod::Visual, NotificationMethod::Sound],
+                message: "Anchor dragging!".to_string(),
+            },
+            "anchor-alarm",
+        )
+        .await
+        .unwrap();
+
+        let deltas = mock.emitted_deltas.lock().unwrap();
+        assert_eq!(deltas.len(), 1);
+
+        let delta = &deltas[0];
+        assert_eq!(delta.updates.len(), 1);
+        assert_eq!(delta.updates[0].values.len(), 1);
+        assert_eq!(
+            delta.updates[0].values[0].path,
+            "notifications.navigation.anchor"
+        );
+
+        let value = &delta.updates[0].values[0].value;
+        assert_eq!(value["state"], "alarm");
+        assert_eq!(value["message"], "Anchor dragging!");
+        assert_eq!(value["method"], serde_json::json!(["visual", "sound"]));
+    }
+
+    #[tokio::test]
+    async fn clear_notification_emits_normal_state() {
+        let mock = MockPluginContext::new();
+        mock.clear_notification("navigation.anchor", "anchor-alarm")
+            .await
+            .unwrap();
+
+        let deltas = mock.emitted_deltas.lock().unwrap();
+        assert_eq!(deltas.len(), 1);
+
+        let value = &deltas[0].updates[0].values[0].value;
+        assert_eq!(value["state"], "normal");
+        assert!(value["method"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn mock_register_put_handler_records_path() {
         let mock = MockPluginContext::new();
         mock.register_put_handler(

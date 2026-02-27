@@ -331,6 +331,8 @@ pub struct WebAppRegistration {
 /// | `set_status` / `set_error`| `setPluginStatus`             | Plugin status reporting            |
 /// | `save_options`            | `savePluginOptions`           | Config persistence                 |
 /// | `read_options`            | `readPluginOptions`           | Config persistence                 |
+/// | `raise_notification`      | `notify`                      | via `handle_message` (delta)       |
+/// | `clear_notification`      | `notify` (state=normal)       | via `handle_message` (delta)       |
 #[async_trait]
 pub trait PluginContext: Send + Sync {
     // ── Data read ───────────────────────────────────────────────────────
@@ -445,6 +447,46 @@ pub trait PluginContext: Send + Sync {
         &self,
         handler: DeltaInputHandler,
     ) -> Result<(), PluginError>;
+
+    // ── Notifications ────────────────────────────────────────────────────
+
+    /// Raise a notification at the given path.
+    ///
+    /// Creates a delta with `notifications.{path}` and calls `handle_message()`.
+    /// Path should NOT include the `notifications.` prefix.
+    ///
+    /// Equivalent to JS `app.notify(path, { state, method, message })`.
+    async fn raise_notification(
+        &self,
+        path: &str,
+        notification: signalk_types::Notification,
+        plugin_id: &str,
+    ) -> Result<(), PluginError> {
+        use signalk_types::{PathValue, Source, Update};
+        let value = serde_json::to_value(&notification)
+            .map_err(|e| PluginError::runtime(format!("Failed to serialize notification: {e}")))?;
+        let delta = Delta::self_vessel(vec![Update::new(
+            Source::plugin(plugin_id),
+            vec![PathValue::new(format!("notifications.{path}"), value)],
+        )]);
+        self.handle_message(delta).await
+    }
+
+    /// Clear a notification (sets state to Normal with empty methods).
+    ///
+    /// Equivalent to raising a notification with state `Normal`.
+    async fn clear_notification(&self, path: &str, plugin_id: &str) -> Result<(), PluginError> {
+        self.raise_notification(
+            path,
+            signalk_types::Notification {
+                state: signalk_types::NotificationState::Normal,
+                method: vec![],
+                message: String::new(),
+            },
+            plugin_id,
+        )
+        .await
+    }
 
     // ── Webapp registration ──────────────────────────────────────────────
 
