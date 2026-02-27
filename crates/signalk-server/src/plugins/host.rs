@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 use tracing::warn;
 
+use super::delta_filter::DeltaFilterChain;
 use super::routes::PluginRouteTable;
 
 /// Shared PUT handler function — Arc-wrapped for cloning across threads.
@@ -89,6 +90,8 @@ pub struct RustPluginContext {
     /// Active subscription abort handles
     sub_handles: Arc<Mutex<HashMap<u64, tokio::task::AbortHandle>>>,
     next_sub_id: Arc<Mutex<u64>>,
+    /// Shared delta input filter chain (pre-store)
+    delta_filter: Arc<DeltaFilterChain>,
 }
 
 impl RustPluginContext {
@@ -102,6 +105,7 @@ impl RustPluginContext {
         plugin_routes_map: Arc<RwLock<HashMap<String, String>>>,
         config_dir: PathBuf,
         data_dir: PathBuf,
+        delta_filter: Arc<DeltaFilterChain>,
     ) -> Self {
         RustPluginContext {
             plugin_id,
@@ -116,6 +120,7 @@ impl RustPluginContext {
             error_msg: Arc::new(Mutex::new(None)),
             sub_handles: Arc::new(Mutex::new(HashMap::new())),
             next_sub_id: Arc::new(Mutex::new(1)),
+            delta_filter,
         }
     }
 
@@ -158,6 +163,10 @@ impl PluginContext for RustPluginContext {
     }
 
     async fn handle_message(&self, delta: Delta) -> Result<(), PluginError> {
+        let delta = match self.delta_filter.apply(delta) {
+            Some(d) => d,
+            None => return Ok(()), // dropped by a delta input handler
+        };
         self.store.write().await.apply_delta(delta);
         Ok(())
     }
@@ -318,10 +327,10 @@ impl PluginContext for RustPluginContext {
 
     async fn register_delta_input_handler(
         &self,
-        _handler: DeltaInputHandler,
+        handler: DeltaInputHandler,
     ) -> Result<(), PluginError> {
-        // TODO: Wire into delta pipeline in store
-        tracing::warn!(plugin = %self.plugin_id, "register_delta_input_handler not yet implemented");
+        self.delta_filter.register(&self.plugin_id, handler);
+        tracing::info!(plugin = %self.plugin_id, "Delta input handler registered");
         Ok(())
     }
 }
@@ -354,6 +363,7 @@ mod tests {
         let put_registry = Arc::new(PutHandlerRegistry::new());
         let put_handlers = Arc::new(RwLock::new(HashMap::new()));
         let plugin_routes = Arc::new(RwLock::new(HashMap::new()));
+        let delta_filter = Arc::new(DeltaFilterChain::new());
 
         let ctx = Arc::new(RustPluginContext::new(
             "test-plugin".to_string(),
@@ -364,6 +374,7 @@ mod tests {
             plugin_routes,
             PathBuf::from("/tmp/signalk-test/config"),
             PathBuf::from("/tmp/signalk-test/data"),
+            delta_filter,
         ));
 
         (ctx, store)

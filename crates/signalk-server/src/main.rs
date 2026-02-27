@@ -6,7 +6,10 @@ use signalk_internal::{
 use signalk_server::{
     ServerState, build_router,
     config::ServerConfig,
-    plugins::{host::PutHandlerRegistry, manager::PluginManager, routes::PluginRouteTable},
+    plugins::{
+        delta_filter::DeltaFilterChain, host::PutHandlerRegistry, manager::PluginManager,
+        routes::PluginRouteTable,
+    },
 };
 use signalk_store::store::SignalKStore;
 use std::collections::HashMap;
@@ -14,7 +17,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Load configuration from a TOML file, falling back to defaults.
 ///
@@ -65,7 +68,7 @@ async fn main() -> Result<()> {
         .init();
 
     let config = load_config();
-    warn!(config_vessel_uuid = %config.vessel.uuid, "config loaded");
+    info!(config_vessel_uuid = %config.vessel.uuid, "config loaded");
     let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port).parse()?;
 
     info!(vessel_uri = %config.vessel.uuid, "signalk-rs starting");
@@ -87,16 +90,23 @@ async fn main() -> Result<()> {
     let plugin_routes: Arc<RwLock<HashMap<String, String>>> =
         Arc::new(RwLock::new(HashMap::new()));
 
+    // ── Delta filter chain (shared between plugins and Internal API) ─────────
+    let delta_filter = Arc::new(DeltaFilterChain::new());
+
     let store_for_delta = store.clone();
     let store_for_query = store.clone();
+    let filter_for_delta = delta_filter.clone();
 
     let internal_state = InternalState::new_shared(
         bridge_token,
         Callbacks {
             on_delta: Box::new(move |delta| {
                 let s = store_for_delta.clone();
+                let f = filter_for_delta.clone();
                 tokio::spawn(async move {
-                    s.write().await.apply_delta(delta);
+                    if let Some(delta) = f.apply(delta) {
+                        s.write().await.apply_delta(delta);
+                    }
                 });
             }),
             on_query: Box::new(move |query| {
@@ -137,6 +147,7 @@ async fn main() -> Result<()> {
         put_handler_registry.clone(),
         put_handlers.clone(),
         plugin_routes.clone(),
+        delta_filter,
         config_dir,
         data_dir,
     );

@@ -2405,8 +2405,6 @@ name = "signalk-plugin-client"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "hyper",
- "hyper-util",
  "serde",
  "serde_json",
  "signalk-plugin-api",

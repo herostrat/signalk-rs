@@ -58,6 +58,9 @@ pub struct MockPluginContext {
     /// Counter for subscription handle IDs.
     pub(crate) next_sub_id: Arc<Mutex<u64>>,
 
+    /// Delta input handlers registered via `register_delta_input_handler`.
+    pub(crate) delta_input_handlers: Arc<Mutex<Vec<DeltaInputHandler>>>,
+
     /// Data directory for tests.
     pub data_directory: PathBuf,
 }
@@ -73,6 +76,7 @@ impl MockPluginContext {
             saved_options: Arc::new(Mutex::new(None)),
             subscriptions: Arc::new(Mutex::new(Vec::new())),
             next_sub_id: Arc::new(Mutex::new(1)),
+            delta_input_handlers: Arc::new(Mutex::new(Vec::new())),
             data_directory: PathBuf::from("/tmp/signalk-plugin-test"),
         }
     }
@@ -86,11 +90,29 @@ impl MockPluginContext {
     }
 
     /// Deliver a delta to all active subscriptions (simulates store broadcast).
+    ///
+    /// Applies registered delta input handlers first — if any handler returns
+    /// `None`, the delta is dropped and not delivered to subscriptions.
     pub fn deliver_delta(&self, delta: &Delta) {
+        let handlers = self.delta_input_handlers.lock().unwrap();
+        let mut current = delta.clone();
+        for handler in handlers.iter() {
+            match handler(current) {
+                Some(d) => current = d,
+                None => return, // dropped by handler
+            }
+        }
+        drop(handlers);
+
         let subs = self.subscriptions.lock().unwrap();
         for (_, callback) in subs.iter() {
-            callback(delta.clone());
+            callback(current.clone());
         }
+    }
+
+    /// Number of registered delta input handlers.
+    pub fn delta_input_handler_count(&self) -> usize {
+        self.delta_input_handlers.lock().unwrap().len()
     }
 }
 
@@ -193,8 +215,9 @@ impl PluginContext for MockPluginContext {
 
     async fn register_delta_input_handler(
         &self,
-        _handler: DeltaInputHandler,
+        handler: DeltaInputHandler,
     ) -> Result<(), PluginError> {
+        self.delta_input_handlers.lock().unwrap().push(handler);
         Ok(())
     }
 }

@@ -14,6 +14,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
+use super::delta_filter::DeltaFilterChain;
 use super::host::{PutHandlerRegistry, RustPluginContext, cleanup_plugin};
 use super::isolation::guarded;
 use super::routes::PluginRouteTable;
@@ -36,17 +37,21 @@ pub struct PluginManager {
     put_handlers: Arc<RwLock<HashMap<String, String>>>,
     /// Shared plugin routes map (also used by bridge via InternalState)
     plugin_routes: Arc<RwLock<HashMap<String, String>>>,
+    /// Shared delta input filter chain (pre-store)
+    delta_filter: Arc<DeltaFilterChain>,
     config_dir: PathBuf,
     data_dir: PathBuf,
 }
 
 impl PluginManager {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         store: Arc<RwLock<SignalKStore>>,
         route_table: Arc<PluginRouteTable>,
         put_handler_registry: Arc<PutHandlerRegistry>,
         put_handlers: Arc<RwLock<HashMap<String, String>>>,
         plugin_routes: Arc<RwLock<HashMap<String, String>>>,
+        delta_filter: Arc<DeltaFilterChain>,
         config_dir: PathBuf,
         data_dir: PathBuf,
     ) -> Self {
@@ -57,6 +62,7 @@ impl PluginManager {
             put_handler_registry,
             put_handlers,
             plugin_routes,
+            delta_filter,
             config_dir,
             data_dir,
         }
@@ -123,6 +129,7 @@ impl PluginManager {
             self.plugin_routes.clone(),
             self.config_dir.clone(),
             plugin_data_dir,
+            self.delta_filter.clone(),
         ));
 
         entry.context = Some(ctx.clone());
@@ -192,6 +199,7 @@ impl PluginManager {
         }
         self.route_table.remove(plugin_id).await;
         self.put_handler_registry.remove_plugin(plugin_id).await;
+        self.delta_filter.remove_plugin(plugin_id);
 
         // Remove from shared maps
         self.put_handlers
@@ -221,6 +229,11 @@ impl PluginManager {
     /// Get the PUT handler registry (shared with the server for PUT dispatch).
     pub fn put_handler_registry(&self) -> &Arc<PutHandlerRegistry> {
         &self.put_handler_registry
+    }
+
+    /// Get the delta filter chain (shared with the server for delta pre-filtering).
+    pub fn delta_filter(&self) -> &Arc<DeltaFilterChain> {
+        &self.delta_filter
     }
 }
 
@@ -290,6 +303,7 @@ mod tests {
             Arc::new(PutHandlerRegistry::new()),
             Arc::new(RwLock::new(HashMap::new())),
             Arc::new(RwLock::new(HashMap::new())),
+            Arc::new(DeltaFilterChain::new()),
             PathBuf::from("/tmp/signalk-test/config"),
             PathBuf::from("/tmp/signalk-test/data"),
         )

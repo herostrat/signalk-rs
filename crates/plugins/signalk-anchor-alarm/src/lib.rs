@@ -18,7 +18,8 @@
 use async_trait::async_trait;
 use serde::Deserialize;
 use signalk_plugin_api::{
-    Plugin, PluginContext, PluginError, PluginMetadata, SubscriptionSpec, delta_callback,
+    Plugin, PluginContext, PluginError, PluginMetadata, SubscriptionHandle, SubscriptionSpec,
+    delta_callback,
 };
 use signalk_types::{Delta, PathValue, Source, Subscription, Update};
 use std::sync::{Arc, Mutex};
@@ -46,13 +47,15 @@ fn default_radius() -> f64 {
 // ─── Plugin ─────────────────────────────────────────────────────────────────
 
 pub struct AnchorAlarmPlugin {
-    abort_handle: Option<tokio::task::AbortHandle>,
+    subscription_handle: Option<SubscriptionHandle>,
+    ctx: Option<Arc<dyn PluginContext>>,
 }
 
 impl AnchorAlarmPlugin {
     pub fn new() -> Self {
         AnchorAlarmPlugin {
-            abort_handle: None,
+            subscription_handle: None,
+            ctx: None,
         }
     }
 }
@@ -123,7 +126,7 @@ impl Plugin for AnchorAlarmPlugin {
         let alarming_clone = alarming.clone();
         let ctx_clone = ctx.clone();
 
-        let _handle = ctx
+        let handle = ctx
             .subscribe(
                 SubscriptionSpec::self_vessel(vec![Subscription::path("navigation.position")]),
                 delta_callback(move |delta: Delta| {
@@ -167,12 +170,15 @@ impl Plugin for AnchorAlarmPlugin {
             )
             .await?;
 
+        self.subscription_handle = Some(handle);
+        self.ctx = Some(ctx);
+
         Ok(())
     }
 
     async fn stop(&mut self) -> Result<(), PluginError> {
-        if let Some(h) = self.abort_handle.take() {
-            h.abort();
+        if let (Some(handle), Some(ctx)) = (self.subscription_handle.take(), self.ctx.take()) {
+            ctx.unsubscribe(handle).await?;
         }
         Ok(())
     }
@@ -193,8 +199,8 @@ fn haversine_meters(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 
 /// Emit a SignalK notification delta via handle_message.
 ///
-/// Uses `tokio::task::block_in_place` + a local runtime to call the async
-/// `handle_message` from within the synchronous subscription callback.
+/// Spawns a `tokio` task to call the async `handle_message` from within
+/// the synchronous subscription callback.
 fn emit_notification(
     ctx: &Arc<dyn PluginContext>,
     distance: f64,

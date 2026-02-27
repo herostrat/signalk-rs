@@ -211,6 +211,15 @@ pub struct RegisteredRoute {
     pub handler: RouteHandler,
 }
 
+impl std::fmt::Debug for RegisteredRoute {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegisteredRoute")
+            .field("method", &self.method)
+            .field("path", &self.path)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Abstract HTTP router for plugin route registration.
 ///
 /// Plugins use this to register REST endpoints without depending on
@@ -225,6 +234,7 @@ pub trait PluginRouter: Send {
 /// Default `PluginRouter` implementation that collects routes into a `Vec`.
 ///
 /// Used by `PluginContext` implementations to capture routes during setup.
+#[derive(Debug)]
 pub struct RouteCollector {
     routes: Vec<RegisteredRoute>,
 }
