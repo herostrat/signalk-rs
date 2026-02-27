@@ -102,13 +102,18 @@ impl NoiseGenerator {
 /// Simulates a vessel moving in a circle around a center point.
 ///
 /// Produces position (lat/lon), course over ground, and speed over ground.
+/// SOG varies realistically: base speed ± wave/current noise.
 pub struct PositionGenerator {
     center_lat: f64,
     center_lon: f64,
     radius_deg: f64,
     orbit_period_secs: f64,
-    /// Speed in m/s (circumference / period)
+    /// Base speed in m/s (circumference / period)
     speed_mps: f64,
+    /// Slow speed variation (simulates current/wind effect)
+    speed_variation: SineGenerator,
+    /// Fast speed jitter (simulates wave effects on GPS)
+    speed_noise: NoiseGenerator,
 }
 
 /// Output of one position generator tick.
@@ -139,6 +144,10 @@ impl PositionGenerator {
             radius_deg,
             orbit_period_secs,
             speed_mps,
+            // Slow SOG variation: ±0.8 m/s over 45s (current/wind effect)
+            speed_variation: SineGenerator::new(-0.8, 0.8, 45.0).with_phase(7.0),
+            // Fast SOG jitter: ±0.15 m/s every 2s (wave/GPS noise)
+            speed_noise: NoiseGenerator::new(0.15, 2.0),
         }
     }
 
@@ -154,11 +163,17 @@ impl PositionGenerator {
         // At angle θ, tangent direction = θ + π/2
         let cog = (angle + PI / 2.0).rem_euclid(2.0 * PI);
 
+        // SOG: base speed + slow variation + fast jitter (never negative)
+        let sog = (self.speed_mps
+            + self.speed_variation.value(elapsed_secs)
+            + self.speed_noise.offset(elapsed_secs))
+        .max(0.0);
+
         PositionOutput {
             latitude: lat,
             longitude: lon,
             cog_rad: cog,
-            sog_mps: self.speed_mps,
+            sog_mps: sog,
         }
     }
 }
@@ -211,12 +226,17 @@ pub struct SimulatorState {
 
     // Environment - depth & water
     pub depth: SineGenerator,
+    depth_noise: NoiseGenerator,
     pub water_temp: SineGenerator,
+    water_temp_noise: NoiseGenerator,
 
     // Environment - atmosphere
     pub air_temp: SineGenerator,
+    air_temp_noise: NoiseGenerator,
     pub pressure: SineGenerator,
+    pressure_noise: NoiseGenerator,
     pub humidity: SineGenerator,
+    humidity_noise: NoiseGenerator,
 
     // Propulsion
     pub enable_propulsion: bool,
@@ -224,6 +244,7 @@ pub struct SimulatorState {
     pub oil_temp: SineGenerator,
     oil_temp_noise: NoiseGenerator,
     pub coolant_temp: SineGenerator,
+    coolant_temp_noise: NoiseGenerator,
 }
 
 /// All simulated values for one tick.
@@ -291,32 +312,43 @@ impl SimulatorState {
             wind_angle: SineGenerator::new(-PI, PI, 30.0),
             // Apparent wind speed: 2–15 m/s, period 25s
             wind_speed: SineGenerator::new(2.0, 15.0, 25.0).with_phase(5.0),
-            wind_speed_noise: NoiseGenerator::new(1.0, 3.0),
+            wind_speed_noise: NoiseGenerator::new(1.0, 2.0),
 
-            // Depth: 3–25m, slow oscillation (120s)
-            depth: SineGenerator::new(3.0, 25.0, 120.0).with_phase(10.0),
+            // Depth: 5–18m, period 60s (reef/channel simulation)
+            depth: SineGenerator::new(5.0, 18.0, 60.0).with_phase(10.0),
+            // Sonar jitter: ±0.1m every 1s (sensor noise, wave action)
+            depth_noise: NoiseGenerator::new(0.1, 1.0),
 
-            // Water temp: 283–293 K (10–20°C), very slow (600s)
-            water_temp: SineGenerator::new(283.0, 293.0, 600.0).with_phase(30.0),
+            // Water temp: 283–293 K (10–20°C), period 120s
+            water_temp: SineGenerator::new(283.0, 293.0, 120.0).with_phase(30.0),
+            // Sensor noise: ±0.05 K
+            water_temp_noise: NoiseGenerator::new(0.05, 3.0),
 
-            // Air temp: 288–298 K (15–25°C), very slow (900s)
-            air_temp: SineGenerator::new(288.0, 298.0, 900.0).with_phase(50.0),
+            // Air temp: 288–298 K (15–25°C), period 180s
+            air_temp: SineGenerator::new(288.0, 298.0, 180.0).with_phase(50.0),
+            // Sensor noise: ±0.1 K
+            air_temp_noise: NoiseGenerator::new(0.1, 3.0),
 
-            // Barometric pressure: 100800–102000 Pa, very slow (1800s)
-            pressure: SineGenerator::new(100_800.0, 102_000.0, 1800.0).with_phase(100.0),
+            // Barometric pressure: 100800–102000 Pa, period 300s
+            pressure: SineGenerator::new(100_800.0, 102_000.0, 300.0).with_phase(100.0),
+            // Sensor noise: ±15 Pa (~0.15 hPa)
+            pressure_noise: NoiseGenerator::new(15.0, 3.0),
 
-            // Relative humidity: 0.40–0.90 (40%–90%), very slow (1200s)
-            humidity: SineGenerator::new(0.40, 0.90, 1200.0).with_phase(70.0),
+            // Relative humidity: 0.50–0.85, period 200s
+            humidity: SineGenerator::new(0.50, 0.85, 200.0).with_phase(70.0),
+            // Sensor noise: ±0.01
+            humidity_noise: NoiseGenerator::new(0.01, 3.0),
 
             // Propulsion
             enable_propulsion,
-            // RPM: base 5 Hz, up to +45 Hz correlated with SOG (max ~4 m/s)
-            rpm: CorrelatedGenerator::new(5.0, 45.0, 4.0, 0.5),
-            // Oil temp: 340–370 K, period 300s (warm-up cycle)
-            oil_temp: SineGenerator::new(340.0, 370.0, 300.0).with_phase(20.0),
-            oil_temp_noise: NoiseGenerator::new(2.0, 5.0),
-            // Coolant temp: 340–365 K, period 360s
-            coolant_temp: SineGenerator::new(340.0, 365.0, 360.0).with_phase(40.0),
+            // RPM: base 5 Hz, up to +45 Hz correlated with SOG (max ~5 m/s)
+            rpm: CorrelatedGenerator::new(5.0, 45.0, 5.0, 0.5),
+            // Oil temp: 340–370 K, period 90s (warm-up cycle)
+            oil_temp: SineGenerator::new(340.0, 370.0, 90.0).with_phase(20.0),
+            oil_temp_noise: NoiseGenerator::new(1.5, 4.0),
+            // Coolant temp: 340–365 K, period 120s
+            coolant_temp: SineGenerator::new(340.0, 365.0, 120.0).with_phase(40.0),
+            coolant_temp_noise: NoiseGenerator::new(1.0, 5.0),
         }
     }
 
@@ -325,7 +357,7 @@ impl SimulatorState {
     /// This is the core generation method — deterministic for the same `elapsed_secs`.
     /// Use this in tests for reproducible values.
     pub fn tick_at(&self, elapsed_secs: f64) -> SimulatedValues {
-        // Position & navigation
+        // Position & navigation (SOG already has noise inside PositionGenerator)
         let pos = self.position.generate(elapsed_secs);
 
         // Heading magnetic = COG + variation + compass noise
@@ -333,15 +365,31 @@ impl SimulatorState {
             (pos.cog_rad + self.magnetic_variation_rad + self.heading_noise.offset(elapsed_secs))
                 .rem_euclid(2.0 * PI);
 
-        // Environment
+        // Environment - wind
         let wind_speed_base = self.wind_speed.value(elapsed_secs);
         let wind_speed = (wind_speed_base + self.wind_speed_noise.offset(elapsed_secs)).max(0.0);
+
+        // Environment - depth (trend + sonar jitter, never < 0.5m)
+        let depth =
+            (self.depth.value(elapsed_secs) + self.depth_noise.offset(elapsed_secs)).max(0.5);
+
+        // Environment - water temp (trend + sensor noise)
+        let water_temp =
+            self.water_temp.value(elapsed_secs) + self.water_temp_noise.offset(elapsed_secs);
+
+        // Atmosphere (trend + sensor noise)
+        let air_temp = self.air_temp.value(elapsed_secs) + self.air_temp_noise.offset(elapsed_secs);
+        let pressure = self.pressure.value(elapsed_secs) + self.pressure_noise.offset(elapsed_secs);
+        let humidity = (self.humidity.value(elapsed_secs)
+            + self.humidity_noise.offset(elapsed_secs))
+        .clamp(0.0, 1.0);
 
         // Propulsion
         let propulsion = if self.enable_propulsion {
             let revs = self.rpm.value(pos.sog_mps, elapsed_secs).max(0.0);
             let oil = self.oil_temp.value(elapsed_secs) + self.oil_temp_noise.offset(elapsed_secs);
-            let coolant = self.coolant_temp.value(elapsed_secs);
+            let coolant = self.coolant_temp.value(elapsed_secs)
+                + self.coolant_temp_noise.offset(elapsed_secs);
             Some(PropulsionValues {
                 revolutions_hz: revs,
                 oil_temperature_k: oil,
@@ -359,11 +407,11 @@ impl SimulatorState {
             heading_magnetic_rad: heading_mag,
             wind_angle_apparent_rad: self.wind_angle.value(elapsed_secs),
             wind_speed_apparent_mps: wind_speed,
-            depth_below_transducer_m: self.depth.value(elapsed_secs),
-            water_temperature_k: self.water_temp.value(elapsed_secs),
-            air_temperature_k: self.air_temp.value(elapsed_secs),
-            pressure_pa: self.pressure.value(elapsed_secs),
-            humidity_ratio: self.humidity.value(elapsed_secs),
+            depth_below_transducer_m: depth,
+            water_temperature_k: water_temp,
+            air_temperature_k: air_temp,
+            pressure_pa: pressure,
+            humidity_ratio: humidity,
             magnetic_variation_rad: self.magnetic_variation_rad,
             propulsion,
         }
@@ -438,7 +486,12 @@ mod tests {
             assert!(dlat < 0.01, "lat drift too large: {dlat} at t={i}");
             assert!(dlon < 0.01, "lon drift too large: {dlon} at t={i}");
             assert!(pos.cog_rad >= 0.0 && pos.cog_rad < 2.0 * PI);
-            assert!(pos.sog_mps > 0.0);
+            // SOG should be in reasonable range (base ~4.19 m/s ± noise)
+            assert!(
+                pos.sog_mps >= 0.0 && pos.sog_mps < 10.0,
+                "SOG out of range: {} at t={i}",
+                pos.sog_mps
+            );
         }
     }
 
@@ -447,7 +500,8 @@ mod tests {
         let pg = PositionGenerator::new(54.5, 10.0, 200.0, 300.0);
         let start = pg.generate(0.0);
         let end = pg.generate(300.0);
-        // After one full period, should be back to start
+        // After one full period, position should be back near start
+        // (noise causes slight SOG difference, but position orbit is deterministic)
         assert!(
             (start.latitude - end.latitude).abs() < 1e-6,
             "lat: {} vs {}",
@@ -460,6 +514,15 @@ mod tests {
             start.longitude,
             end.longitude
         );
+    }
+
+    #[test]
+    fn position_generator_sog_varies() {
+        let pg = PositionGenerator::new(54.5, 10.0, 200.0, 300.0);
+        let a = pg.generate(0.0);
+        let b = pg.generate(10.0);
+        // SOG should differ between ticks (noise + sine variation)
+        assert_ne!(a.sog_mps, b.sog_mps, "SOG should vary between ticks");
     }
 
     #[test]
@@ -483,11 +546,11 @@ mod tests {
         assert!(values.cog_rad >= 0.0 && values.cog_rad < 2.0 * PI);
         assert!(values.heading_magnetic_rad >= 0.0 && values.heading_magnetic_rad < 2.0 * PI);
         assert!(values.wind_speed_apparent_mps >= 0.0);
-        assert!(values.depth_below_transducer_m >= 2.5);
+        assert!(values.depth_below_transducer_m >= 0.5);
         assert!(values.water_temperature_k > 280.0);
         assert!(values.air_temperature_k > 285.0);
         assert!(values.pressure_pa > 100_000.0);
-        assert!(values.humidity_ratio >= 0.3 && values.humidity_ratio <= 1.0);
+        assert!(values.humidity_ratio >= 0.0 && values.humidity_ratio <= 1.0);
         assert!((values.magnetic_variation_rad - 2.5_f64.to_radians()).abs() < 0.01);
         assert!(values.propulsion.is_some());
 

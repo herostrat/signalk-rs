@@ -114,8 +114,8 @@ async fn full_model_self_is_valid_urn() {
     let (_, body) = get(test_app(), "/signalk/v1/api").await;
     let self_uri = body["self"].as_str().unwrap();
     assert!(
-        self_uri.starts_with("urn:mrn:signalk:uuid:"),
-        "Self URI must be a SignalK UUID URN, got: {}",
+        self_uri.starts_with("vessels.urn:mrn:signalk:uuid:"),
+        "Self URI must be vessels.{{URN}} per spec, got: {}",
         self_uri
     );
 }

@@ -193,8 +193,8 @@ async fn main() -> Result<()> {
     let put_handler_registry = Arc::new(PutHandlerRegistry::new());
     let webapp_registry = Arc::new(RwLock::new(signalk_server::webapps::WebappRegistry::new()));
 
-    let config_dir = PathBuf::from("/etc/signalk-rs/plugin-config");
-    let data_dir = PathBuf::from("/var/lib/signalk-rs/plugin-data");
+    let config_dir = PathBuf::from(&config.data_dir).join("plugin-config");
+    let data_dir = PathBuf::from(&config.data_dir).join("plugin-data");
 
     let mut plugin_manager = PluginManager::new(
         store.clone(),
@@ -244,6 +244,7 @@ async fn main() -> Result<()> {
         route_table,
         plugin_manager.clone(),
         plugin_registry,
+        webapp_registry.clone(),
     );
 
     // Populate plugin registry with initial Tier 1 statuses
@@ -253,12 +254,18 @@ async fn main() -> Result<()> {
     }
 
     // Discover webapps from node_modules + collect plugin-registered webapps
-    let mut webapps =
+    let discovered =
         signalk_server::webapps::discover_webapps(std::path::Path::new(&config.modules_dir));
     {
-        let registry = webapp_registry.read().await;
-        webapps.extend(registry.all().iter().cloned());
+        let mut registry = webapp_registry.write().await;
+        for webapp in &discovered {
+            registry.register(webapp.clone());
+        }
     }
+    let webapps = {
+        let registry = webapp_registry.read().await;
+        registry.all().to_vec()
+    };
     if !webapps.is_empty() {
         info!(count = webapps.len(), "Discovered webapps");
     }

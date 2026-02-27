@@ -84,6 +84,7 @@ impl ServerState {
         route_table: Arc<PluginRouteTable>,
         plugin_manager: Arc<tokio::sync::Mutex<PluginManager>>,
         plugin_registry: Arc<RwLock<PluginRegistry>>,
+        webapp_registry: Arc<RwLock<WebappRegistry>>,
     ) -> Arc<Self> {
         let data_dir = PathBuf::from(&config.data_dir);
         Arc::new(ServerState {
@@ -95,7 +96,7 @@ impl ServerState {
             route_table,
             data_dir,
             plugin_registry,
-            webapp_registry: Arc::new(RwLock::new(WebappRegistry::new())),
+            webapp_registry,
             plugin_manager,
         })
     }
@@ -111,8 +112,9 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
     use tower_http::cors::CorsLayer;
 
     let mut router = axum::Router::new()
-        // Discovery
+        // Discovery (with trailing-slash variant — KIP requests /signalk/)
         .route("/signalk", get(api::discovery))
+        .route("/signalk/", get(api::discovery))
         // REST data API
         .route("/signalk/v1/api", get(api::full_model))
         .route("/signalk/v1/api/", get(api::full_model))

@@ -63,7 +63,10 @@ async fn handle_socket(
 
     // 1. Send Hello message
     let store = state.store.read().await;
-    let hello = HelloMessage::new(signalk_types::SIGNALK_VERSION, Some(store.self_uri.clone()));
+    let hello = HelloMessage::new(
+        signalk_types::SIGNALK_VERSION,
+        Some(format!("vessels.{}", store.self_uri)),
+    );
     let hello_json = match serde_json::to_string(&hello) {
         Ok(j) => j,
         Err(e) => {

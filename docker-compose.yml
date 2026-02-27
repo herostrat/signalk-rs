@@ -1,17 +1,34 @@
-version: '3.9'
+# signalk-rs full-stack: Rust server + Node.js bridge + webapps.
+#
+# Dev usage:
+#   docker compose up --build
+#   # Open http://localhost:3000/@signalk/instrumentpanel/
+#   # Open http://localhost:3000/@mxtommy/kip/
+#
+# Smoke tests (CI + local):
+#   docker compose --profile test up --build --abort-on-container-exit --exit-code-from smoke
 
 services:
   signalk-rs:
     build:
       context: .
       dockerfile: docker/Dockerfile.rs
+      args:
+        FEATURES: simulator
     ports:
       - "3000:3000"
     volumes:
       - signalk-sockets:/run/signalk
-      - signalk-data:/etc/signalk-rs
+      - ./docker/signalk-rs.toml:/etc/signalk-rs/config.toml:ro
+      - ./webapps/node_modules:/var/lib/signalk-rs/node_modules:ro
     environment:
       - RUST_LOG=signalk_server=info,signalk_store=info
+      - SIGNALK_CONFIG_FILE=/etc/signalk-rs/config.toml
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/signalk"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
     restart: unless-stopped
 
   signalk-bridge:
@@ -19,19 +36,36 @@ services:
       context: bridge
       dockerfile: ../docker/Dockerfile.bridge
     depends_on:
-      - signalk-rs
+      signalk-rs:
+        condition: service_healthy
     volumes:
       - signalk-sockets:/run/signalk
       - signalk-data:/data
-      - ./bridge:/app
     environment:
-      - SIGNALK_BRIDGE_TOKEN=${SIGNALK_BRIDGE_TOKEN:-changeme}
+      - SIGNALK_BRIDGE_TOKEN=${SIGNALK_BRIDGE_TOKEN:-dev-token-12345}
       - SIGNALK_RS_SOCKET=/run/signalk/rs.sock
       - SIGNALK_BRIDGE_SOCKET=/run/signalk/bridge.sock
       - SIGNALK_WS_URL=ws://signalk-rs:3000/signalk/v1/stream?subscribe=none
       - SIGNALK_DATA_DIR=/data
       - SIGNALK_PLUGINS_DIR=/app/node_modules
     restart: unless-stopped
+
+  # Smoke tests — only runs with: docker compose --profile test up
+  smoke:
+    image: node:20-alpine
+    working_dir: /tmp/smoke
+    volumes:
+      - ./tests/smoke:/tests:ro
+    depends_on:
+      signalk-rs:
+        condition: service_healthy
+    command: >
+      sh -c "cp /tests/package.json . 2>/dev/null || true &&
+             npm install --production --silent 2>/dev/null &&
+             sh /tests/checks.sh http://signalk-rs:3000 &&
+             NODE_PATH=/tmp/smoke/node_modules node /tests/ws-hello.js ws://signalk-rs:3000/signalk/v1/stream"
+    profiles:
+      - test
 
 volumes:
   signalk-sockets:   # shared between rs + bridge (UDS sockets)

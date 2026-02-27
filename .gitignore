@@ -13,3 +13,6 @@ node_modules/
 
 .DS_Store
 Thumbs.db
+
+# Local dev data
+.signalk-data/

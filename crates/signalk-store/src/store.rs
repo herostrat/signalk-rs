@@ -234,7 +234,7 @@ impl SignalKStore {
     /// 1. Explicit metadata (set via PUT /meta) takes highest priority
     /// 2. Spec defaults fill in for paths that have values but no explicit metadata
     pub fn full_model(&self) -> FullModel {
-        let mut model = FullModel::new(&self.self_uri);
+        let mut model = FullModel::new(format!("vessels.{}", self.self_uri));
 
         for (uri, vessel) in &self.vessels {
             let mut vessel = vessel.clone();

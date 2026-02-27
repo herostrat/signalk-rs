@@ -1,0 +1,36 @@
+# signalk-rs development config
+#
+# Used by both Docker (docker-compose.yml) and local dev.
+# Docker: mounted as /etc/signalk-rs/config.toml, paths match container layout.
+# Local:  cargo run --features simulator (override paths with env or copy/edit).
+
+# Top-level paths (must be before any [section] headers in TOML)
+modules_dir = "/var/lib/signalk-rs/node_modules"
+data_dir = "/var/lib/signalk-rs"
+
+[server]
+port = 3000
+host = "0.0.0.0"
+name = "signalk-rs dev"
+
+[vessel]
+uuid = "urn:mrn:signalk:uuid:a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+name = "Dev Boat"
+
+[auth]
+jwt_secret = "dev-secret-not-for-production"
+token_ttl_secs = 604800
+admin_user = "admin"
+admin_password_hash = ""
+
+[internal]
+transport = "uds"
+uds_rs_socket = "/run/signalk/rs.sock"
+uds_bridge_socket = "/run/signalk/bridge.sock"
+bridge_token = "dev-token-12345"
+
+# --- Plugins ---
+
+[[plugins]]
+id = "simulator"
+config = { update_interval_ms = 1000 }

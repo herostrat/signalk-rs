@@ -26,15 +26,18 @@ use crate::ServerState;
 ///
 /// Returns available API versions and their endpoints.
 /// This is the entry point for all SignalK clients.
-pub async fn discovery(State(state): State<Arc<ServerState>>) -> Response {
-    let base = format!(
-        "http://{}:{}/signalk/v1",
-        state.config.server.host, state.config.server.port
-    );
-    let ws_base = format!(
-        "ws://{}:{}/signalk/v1",
-        state.config.server.host, state.config.server.port
-    );
+pub async fn discovery(
+    State(_state): State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    // Use the request Host header so webapps can reach us from the browser.
+    // Falls back to config host:port if no Host header is present.
+    let host = headers
+        .get(axum::http::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost:3000");
+    let base = format!("http://{host}/signalk/v1");
+    let ws_base = format!("ws://{host}/signalk/v1");
 
     let mut endpoints = HashMap::new();
     endpoints.insert(

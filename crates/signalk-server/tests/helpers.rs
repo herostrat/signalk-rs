@@ -149,6 +149,7 @@ pub fn test_app_with_handler(handler_path: &str, plugin_id: &str, bridge_socket:
         Arc::new(RwLock::new(
             signalk_server::plugins::registry::PluginRegistry::new(),
         )),
+        Arc::new(RwLock::new(signalk_server::webapps::WebappRegistry::new())),
     );
     build_router(state, &[])
 }
