@@ -29,7 +29,7 @@ fn make_app() -> (axum::Router, String) {
     }
 
     let state = ServerState::new(config, store);
-    (build_router(state), self_uri)
+    (build_router(state, &[]), self_uri)
 }
 
 /// Benchmark: GET /signalk (discovery) — simplest possible endpoint.

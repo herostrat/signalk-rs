@@ -1,3 +1,6 @@
+pub mod admin;
+pub mod webapps;
+
 /// REST API handlers for the SignalK HTTP interface.
 ///
 /// Routes:
@@ -62,14 +65,25 @@ pub async fn full_model(State(state): State<Arc<ServerState>>) -> Response {
     Json(model).into_response()
 }
 
+/// Query parameters for GET /signalk/v1/api/{*path}.
+#[derive(Debug, serde::Deserialize)]
+pub struct PathQueryParams {
+    /// Select a specific source instead of the highest-priority one.
+    #[serde(default)]
+    source: Option<String>,
+}
+
 /// GET /signalk/v1/api/{*path} — hierarchical path traversal.
 ///
 /// The path is dot-separated in the data model but slash-separated in the URL.
 /// e.g. GET /signalk/v1/api/vessels/self/navigation/speedOverGround
 ///      → path: "navigation.speedOverGround" in self vessel context
+///
+/// Optional query parameter `?source=gps.GP` to select a specific data source.
 pub async fn get_path(
     State(state): State<Arc<ServerState>>,
     Path(url_path): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<PathQueryParams>,
 ) -> Response {
     let store = state.store.read().await;
 
@@ -77,6 +91,27 @@ pub async fn get_path(
 
     if raw_parts.is_empty() {
         return Json(store.full_model()).into_response();
+    }
+
+    // Source-specific query: return the value from a named source
+    if let Some(ref source_ref) = query.source {
+        // Convert URL path to dot-path for store lookup
+        let sk_path = if raw_parts.len() >= 2 && raw_parts[0] == "vessels" {
+            raw_parts[2..].join(".")
+        } else {
+            raw_parts.join(".")
+        };
+
+        return match store.get_self_path_by_source(&sk_path, source_ref) {
+            Some(val) => Json(val).into_response(),
+            None => (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "message": format!("No value for {sk_path} from source {source_ref}")
+                })),
+            )
+                .into_response(),
+        };
     }
 
     // Resolve "vessels/self/..." → "vessels/{self_uri}/..."

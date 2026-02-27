@@ -7,11 +7,20 @@ use tracing::debug;
 /// Capacity of the broadcast channel for delta fanout
 const BROADCAST_CAPACITY: usize = 1024;
 
+/// Default priority for sources without an explicit priority configuration.
+/// Sources at the same priority level use last-write-wins semantics.
+const DEFAULT_SOURCE_PRIORITY: u16 = 100;
+
 /// The core in-memory SignalK data store.
 ///
 /// Thread-safe via `Arc<RwLock<...>>`. Delta updates are stored in a flat
 /// `HashMap<path, SignalKValue>` per vessel context and fanned out to all
 /// WebSocket subscribers via a `tokio::broadcast` channel.
+///
+/// Multi-source: every value is stored per-source in `multi_source`, while
+/// `vessel.values` always holds the highest-priority (lowest number) source.
+/// When no priorities are configured, all sources default to 100 and the
+/// behaviour is last-write-wins (backwards-compatible).
 #[derive(Debug)]
 pub struct SignalKStore {
     /// SignalK API version
@@ -29,6 +38,14 @@ pub struct SignalKStore {
     /// Per-path metadata (self vessel) — persists across delta updates.
     /// Explicit metadata set via PUT /meta takes precedence over defaults.
     metadata: HashMap<String, Metadata>,
+
+    /// Per-source values for the self vessel: path → (source_ref → SignalKValue).
+    /// Every source's latest value is retained for source-selection queries.
+    multi_source: HashMap<String, HashMap<String, SignalKValue>>,
+
+    /// Source priority configuration: source_ref → priority (lower = higher).
+    /// Sources not in this map default to DEFAULT_SOURCE_PRIORITY (100).
+    source_priorities: HashMap<String, u16>,
 
     /// Broadcast sender — all delta updates are sent here
     tx: broadcast::Sender<Delta>,
@@ -53,9 +70,17 @@ impl SignalKStore {
             vessels,
             sources: HashMap::new(),
             metadata: HashMap::new(),
+            multi_source: HashMap::new(),
+            source_priorities: HashMap::new(),
             tx,
         };
         (Arc::new(RwLock::new(store)), rx)
+    }
+
+    /// Set source priority configuration. Lower number = higher priority.
+    /// Sources not in the map default to 100 (DEFAULT_SOURCE_PRIORITY).
+    pub fn set_source_priorities(&mut self, priorities: HashMap<String, u16>) {
+        self.source_priorities = priorities;
     }
 
     /// Subscribe to the delta broadcast channel.
@@ -88,6 +113,7 @@ impl SignalKStore {
             return;
         };
 
+        let is_self = vessel_uri == self.self_uri;
         let vessel = self.vessels.entry(vessel_uri).or_default();
 
         for update in &delta.updates {
@@ -104,7 +130,38 @@ impl SignalKStore {
                     SourceRef::new(&source_ref.0),
                     update.timestamp,
                 );
-                vessel.values.insert(pv.path.clone(), value);
+
+                // Always store in multi_source (retain all source values)
+                if is_self {
+                    self.multi_source
+                        .entry(pv.path.clone())
+                        .or_default()
+                        .insert(source_ref.0.clone(), value.clone());
+                }
+
+                // Priority check: only update active value if new source has
+                // equal or higher priority (lower number = higher priority).
+                // Inlined to avoid borrowing all of `self` via method call.
+                let new_pri = self
+                    .source_priorities
+                    .get(&source_ref.0)
+                    .copied()
+                    .unwrap_or(DEFAULT_SOURCE_PRIORITY);
+                let should_update = match vessel.values.get(&pv.path) {
+                    Some(current) => {
+                        let cur_pri = self
+                            .source_priorities
+                            .get(&current.source.0)
+                            .copied()
+                            .unwrap_or(DEFAULT_SOURCE_PRIORITY);
+                        new_pri <= cur_pri
+                    }
+                    None => true,
+                };
+
+                if should_update {
+                    vessel.values.insert(pv.path.clone(), value);
+                }
             }
         }
 
@@ -122,6 +179,22 @@ impl SignalKStore {
     pub fn get_vessel_path(&self, vessel_uri: &str, path: &str) -> Option<&SignalKValue> {
         let vessel = self.vessels.get(vessel_uri)?;
         vessel.values.get(path)
+    }
+
+    /// Get the value at a path from a specific source for the self vessel.
+    pub fn get_self_path_by_source(&self, path: &str, source_ref: &str) -> Option<&SignalKValue> {
+        self.multi_source.get(path)?.get(source_ref)
+    }
+
+    /// Get all source values for a path on the self vessel.
+    /// Returns a map from source_ref → SignalKValue.
+    pub fn get_self_path_sources(&self, path: &str) -> Option<&HashMap<String, SignalKValue>> {
+        let sources = self.multi_source.get(path)?;
+        if sources.is_empty() {
+            None
+        } else {
+            Some(sources)
+        }
     }
 
     /// Get all values for the self vessel matching a path pattern.
@@ -426,5 +499,171 @@ mod tests {
         let model = store.full_model();
         assert!(model.vessels.contains_key("urn:mrn:signalk:uuid:test"));
         assert!(!model.sources.is_empty());
+    }
+
+    // ── Multi-source / priority tests ────────────────────────────────────
+
+    fn make_ais_delta(sog: f64) -> Delta {
+        Delta::self_vessel(vec![Update::new(
+            Source::plugin("ais"),
+            vec![PathValue::new(
+                "navigation.speedOverGround",
+                serde_json::json!(sog),
+            )],
+        )])
+    }
+
+    fn make_sim_delta(sog: f64) -> Delta {
+        Delta::self_vessel(vec![Update::new(
+            Source::plugin("simulator"),
+            vec![PathValue::new(
+                "navigation.speedOverGround",
+                serde_json::json!(sog),
+            )],
+        )])
+    }
+
+    #[test]
+    fn multi_source_stores_all_sources() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(make_ais_delta(3.8));
+
+        let sources = store
+            .get_self_path_sources("navigation.speedOverGround")
+            .unwrap();
+        assert_eq!(sources.len(), 2);
+        assert!(sources.contains_key("ttyUSB0.GP"));
+        assert!(sources.contains_key("ais"));
+    }
+
+    #[test]
+    fn no_priorities_last_write_wins() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(make_ais_delta(3.8));
+
+        // Without priorities, AIS wrote last → AIS wins
+        let active = store.get_self_path("navigation.speedOverGround").unwrap();
+        assert_eq!(active.value, serde_json::json!(3.8));
+        assert_eq!(active.source.0, "ais");
+    }
+
+    #[test]
+    fn higher_priority_wins() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        let mut priorities = HashMap::new();
+        priorities.insert("ttyUSB0.GP".to_string(), 10); // GPS: highest
+        priorities.insert("ais".to_string(), 50);
+        priorities.insert("simulator".to_string(), 200); // Simulator: lowest
+        store.set_source_priorities(priorities);
+
+        // GPS writes first
+        store.apply_delta(make_gps_delta(3.5));
+        // AIS writes second — lower priority, should NOT overwrite
+        store.apply_delta(make_ais_delta(3.8));
+
+        let active = store.get_self_path("navigation.speedOverGround").unwrap();
+        assert_eq!(active.value, serde_json::json!(3.5));
+        assert_eq!(active.source.0, "ttyUSB0.GP");
+    }
+
+    #[test]
+    fn lower_priority_does_not_overwrite() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        let mut priorities = HashMap::new();
+        priorities.insert("ttyUSB0.GP".to_string(), 10);
+        priorities.insert("simulator".to_string(), 200);
+        store.set_source_priorities(priorities);
+
+        // GPS writes first
+        store.apply_delta(make_gps_delta(3.5));
+        // Simulator writes second — much lower priority, should NOT overwrite
+        store.apply_delta(make_sim_delta(9.9));
+
+        let active = store.get_self_path("navigation.speedOverGround").unwrap();
+        assert_eq!(active.value, serde_json::json!(3.5), "GPS should still win");
+
+        // But multi_source should have both
+        let sources = store
+            .get_self_path_sources("navigation.speedOverGround")
+            .unwrap();
+        assert_eq!(sources.len(), 2);
+        assert_eq!(
+            sources.get("simulator").unwrap().value,
+            serde_json::json!(9.9)
+        );
+    }
+
+    #[test]
+    fn same_priority_last_write_wins() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        let mut priorities = HashMap::new();
+        priorities.insert("ttyUSB0.GP".to_string(), 10);
+        priorities.insert("ais".to_string(), 10); // Same priority as GPS
+        store.set_source_priorities(priorities);
+
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(make_ais_delta(3.8));
+
+        // Same priority → last write wins
+        let active = store.get_self_path("navigation.speedOverGround").unwrap();
+        assert_eq!(active.value, serde_json::json!(3.8));
+        assert_eq!(active.source.0, "ais");
+    }
+
+    #[test]
+    fn higher_priority_overwrites_lower() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        let mut priorities = HashMap::new();
+        priorities.insert("ttyUSB0.GP".to_string(), 10);
+        priorities.insert("simulator".to_string(), 200);
+        store.set_source_priorities(priorities);
+
+        // Low-priority writes first
+        store.apply_delta(make_sim_delta(9.9));
+        // High-priority writes second — should overwrite
+        store.apply_delta(make_gps_delta(3.5));
+
+        let active = store.get_self_path("navigation.speedOverGround").unwrap();
+        assert_eq!(active.value, serde_json::json!(3.5));
+        assert_eq!(active.source.0, "ttyUSB0.GP");
+    }
+
+    #[test]
+    fn get_self_path_by_source_returns_specific_source() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(make_ais_delta(3.8));
+
+        let gps_val = store
+            .get_self_path_by_source("navigation.speedOverGround", "ttyUSB0.GP")
+            .unwrap();
+        assert_eq!(gps_val.value, serde_json::json!(3.5));
+
+        let ais_val = store
+            .get_self_path_by_source("navigation.speedOverGround", "ais")
+            .unwrap();
+        assert_eq!(ais_val.value, serde_json::json!(3.8));
+
+        assert!(
+            store
+                .get_self_path_by_source("navigation.speedOverGround", "unknown")
+                .is_none()
+        );
     }
 }

@@ -19,6 +19,7 @@ use tracing::warn;
 
 use super::delta_filter::DeltaFilterChain;
 use super::routes::PluginRouteTable;
+use crate::webapps::{WebAppInfo, WebappRegistry, WebappSource};
 
 /// Shared PUT handler function — Arc-wrapped for cloning across threads.
 pub type SharedPutHandler = Arc<
@@ -94,6 +95,8 @@ pub struct RustPluginContext {
     next_sub_id: Arc<Mutex<u64>>,
     /// Shared delta input filter chain (pre-store)
     delta_filter: Arc<DeltaFilterChain>,
+    /// Shared webapp registry for register_webapp()
+    webapp_registry: Arc<RwLock<WebappRegistry>>,
 }
 
 impl RustPluginContext {
@@ -108,6 +111,7 @@ impl RustPluginContext {
         config_dir: PathBuf,
         data_dir: PathBuf,
         delta_filter: Arc<DeltaFilterChain>,
+        webapp_registry: Arc<RwLock<WebappRegistry>>,
     ) -> Self {
         RustPluginContext {
             plugin_id,
@@ -123,6 +127,7 @@ impl RustPluginContext {
             sub_handles: Arc::new(Mutex::new(HashMap::new())),
             next_sub_id: Arc::new(Mutex::new(1)),
             delta_filter,
+            webapp_registry,
         }
     }
 
@@ -142,6 +147,19 @@ impl PluginContext for RustPluginContext {
     async fn get_self_path(&self, path: &str) -> Result<Option<serde_json::Value>, PluginError> {
         let store = self.store.read().await;
         Ok(store.get_self_path(path).map(|v| v.value.clone()))
+    }
+
+    async fn get_self_path_sources(
+        &self,
+        path: &str,
+    ) -> Result<Option<std::collections::HashMap<String, serde_json::Value>>, PluginError> {
+        let store = self.store.read().await;
+        Ok(store.get_self_path_sources(path).map(|sources| {
+            sources
+                .iter()
+                .map(|(src, sv)| (src.clone(), sv.value.clone()))
+                .collect()
+        }))
     }
 
     async fn get_path(&self, full_path: &str) -> Result<Option<serde_json::Value>, PluginError> {
@@ -326,6 +344,27 @@ impl PluginContext for RustPluginContext {
         tracing::warn!(plugin = %self.plugin_id, error = %msg, "Plugin error");
     }
 
+    async fn register_webapp(
+        &self,
+        info: signalk_plugin_api::WebAppRegistration,
+    ) -> Result<(), PluginError> {
+        let url = format!("/@signalk/{}", self.plugin_id);
+        let webapp = WebAppInfo {
+            name: self.plugin_id.clone(),
+            version: String::new(),
+            display_name: Some(info.display_name),
+            description: info.description,
+            url: url.clone(),
+            public_dir: info.public_dir,
+            source: Some(WebappSource::RustPlugin {
+                plugin_id: self.plugin_id.clone(),
+            }),
+        };
+        self.webapp_registry.write().await.register(webapp);
+        tracing::info!(plugin = %self.plugin_id, url = %url, "Webapp registered");
+        Ok(())
+    }
+
     async fn register_delta_input_handler(
         &self,
         handler: DeltaInputHandler,
@@ -366,6 +405,7 @@ mod tests {
         let plugin_routes = Arc::new(RwLock::new(HashMap::new()));
         let delta_filter = Arc::new(DeltaFilterChain::new());
 
+        let webapp_registry = Arc::new(RwLock::new(WebappRegistry::new()));
         let ctx = Arc::new(RustPluginContext::new(
             "test-plugin".to_string(),
             store.clone(),
@@ -376,6 +416,7 @@ mod tests {
             PathBuf::from("/tmp/signalk-test/config"),
             PathBuf::from("/tmp/signalk-test/data"),
             delta_filter,
+            webapp_registry,
         ));
 
         (ctx, store)

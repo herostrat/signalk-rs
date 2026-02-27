@@ -23,7 +23,7 @@ async fn spawn_ws_server() -> (String, Arc<RwLock<SignalKStore>>) {
     let config = ServerConfig::default();
     let (store, _rx) = SignalKStore::new(config.vessel.uuid.clone());
     let state = ServerState::new(config, store.clone());
-    let router = build_router(state);
+    let router = build_router(state, &[]);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();

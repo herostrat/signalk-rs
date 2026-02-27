@@ -14,10 +14,13 @@
  * Transport interface (all methods return Promises):
  *   sendDelta(delta)                     → void
  *   queryPath(skPath)                    → { value, $source, timestamp } | null
+ *   querySources(skPath)               → { sourceRef: value, ... } | null
+ *   queryMetadata(skPath)               → Metadata | null
  *   writePath(skPath, value)             → void
  *   registerHandler(pluginId, path)      → void
  *   registerPluginRoutes(pluginId, pfx)  → void
  *   register(version)                    → void
+ *   reportPlugins(plugins)              → void
  *   startServer()                        → void (sync, starts background server)
  *   stop()                               → void
  *

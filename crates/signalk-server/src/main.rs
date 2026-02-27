@@ -75,6 +75,17 @@ async fn main() -> Result<()> {
 
     let (store, _rx) = SignalKStore::new(&config.vessel.uuid);
 
+    // ── Source priorities ─────────────────────────────────────────────────────
+    if !config.source_priorities.is_empty() {
+        store
+            .blocking_write()
+            .set_source_priorities(config.source_priorities.clone());
+        info!(
+            count = config.source_priorities.len(),
+            "Source priorities configured"
+        );
+    }
+
     // ── Internal API (UDS) ────────────────────────────────────────────────────
     let bridge_token = if config.internal.bridge_token.is_empty() {
         let token = uuid::Uuid::new_v4().to_string();
@@ -88,11 +99,19 @@ async fn main() -> Result<()> {
     let put_handlers: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
     let plugin_routes: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
 
+    // ── Shared plugin registry (used by admin API + on_bridge_plugins callback) ──
+    let plugin_registry = Arc::new(RwLock::new(
+        signalk_server::plugins::registry::PluginRegistry::new(),
+    ));
+    let registry_for_bridge = plugin_registry.clone();
+
     // ── Delta filter chain (shared between plugins and Internal API) ─────────
     let delta_filter = Arc::new(DeltaFilterChain::new());
 
     let store_for_delta = store.clone();
     let store_for_query = store.clone();
+    let store_for_metadata = store.clone();
+    let store_for_sources = store.clone();
     let filter_for_delta = delta_filter.clone();
 
     let internal_state = InternalState::new_shared(
@@ -120,6 +139,43 @@ async fn main() -> Result<()> {
                     })
                 })
             }),
+            on_metadata: Box::new(move |path| {
+                let s = store_for_metadata.clone();
+                Box::pin(async move { s.read().await.effective_metadata(&path) })
+            }),
+            on_source_query: Box::new(move |path| {
+                let s = store_for_sources.clone();
+                Box::pin(async move {
+                    let store = s.read().await;
+                    store.get_self_path_sources(&path).map(|sources| {
+                        sources
+                            .iter()
+                            .map(|(src, sv)| (src.clone(), sv.value.clone()))
+                            .collect()
+                    })
+                })
+            }),
+            on_bridge_plugins: Box::new(move |report| {
+                let reg = registry_for_bridge.clone();
+                tokio::spawn(async move {
+                    let mut registry = reg.write().await;
+                    for entry in &report.plugins {
+                        registry.register_tier2(
+                            signalk_server::plugins::registry::BridgePluginInfo {
+                                id: entry.id.clone(),
+                                name: entry.name.clone(),
+                                version: entry.version.clone(),
+                                description: entry.description.clone(),
+                                has_webapp: entry.has_webapp,
+                            },
+                        );
+                    }
+                    tracing::info!(
+                        count = report.plugins.len(),
+                        "Bridge plugins registered in plugin registry"
+                    );
+                });
+            }),
         },
         put_handlers.clone(),
         plugin_routes.clone(),
@@ -135,6 +191,7 @@ async fn main() -> Result<()> {
     // ── Plugin infrastructure ────────────────────────────────────────────────
     let route_table = Arc::new(PluginRouteTable::new());
     let put_handler_registry = Arc::new(PutHandlerRegistry::new());
+    let webapp_registry = Arc::new(RwLock::new(signalk_server::webapps::WebappRegistry::new()));
 
     let config_dir = PathBuf::from("/etc/signalk-rs/plugin-config");
     let data_dir = PathBuf::from("/var/lib/signalk-rs/plugin-data");
@@ -146,6 +203,7 @@ async fn main() -> Result<()> {
         put_handlers.clone(),
         plugin_routes.clone(),
         delta_filter,
+        webapp_registry.clone(),
         config_dir,
         data_dir,
     );
@@ -173,6 +231,9 @@ async fn main() -> Result<()> {
     // Start all plugins that have config entries
     plugin_manager.start_all(&plugin_configs).await;
 
+    // Wrap PluginManager in Arc<Mutex> for shared access (admin API)
+    let plugin_manager = Arc::new(tokio::sync::Mutex::new(plugin_manager));
+
     // ── Public HTTP + WebSocket server ────────────────────────────────────────
     let state = ServerState::new_shared(
         config.clone(),
@@ -181,8 +242,27 @@ async fn main() -> Result<()> {
         plugin_routes,
         put_handler_registry,
         route_table,
+        plugin_manager.clone(),
+        plugin_registry,
     );
-    let router = build_router(state);
+
+    // Populate plugin registry with initial Tier 1 statuses
+    {
+        let mgr = plugin_manager.lock().await;
+        signalk_server::api::admin::populate_registry_from_manager(&state, &mgr).await;
+    }
+
+    // Discover webapps from node_modules + collect plugin-registered webapps
+    let mut webapps =
+        signalk_server::webapps::discover_webapps(std::path::Path::new(&config.modules_dir));
+    {
+        let registry = webapp_registry.read().await;
+        webapps.extend(registry.all().iter().cloned());
+    }
+    if !webapps.is_empty() {
+        info!(count = webapps.len(), "Discovered webapps");
+    }
+    let router = build_router(state, &webapps);
 
     info!(%addr, "Listening");
     let listener = tokio::net::TcpListener::bind(addr).await?;

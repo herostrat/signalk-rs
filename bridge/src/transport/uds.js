@@ -126,6 +126,37 @@ class UdsTransport extends EventEmitter {
     if (status !== 204) throw new Error(`registerPluginRoutes failed: HTTP ${status}`);
   }
 
+  /** Query all source values for a path from signalk-rs (plugin's getSelfPathSources). */
+  async querySources(skPath) {
+    const endpoint = '/internal/v1/api-sources/vessels/self/' + skPath.replace(/\./g, '/');
+    const { status, body } = await udsRequest(
+      this.rsSocket, 'GET', endpoint, null, this.token
+    );
+    if (status === 404) return null;
+    if (status !== 200) throw new Error(`querySources failed: HTTP ${status}`);
+    return body;
+  }
+
+  /** Query metadata for a path from signalk-rs (plugin's getMetadata). */
+  async queryMetadata(skPath) {
+    const endpoint = '/internal/v1/metadata/' + skPath.replace(/\./g, '/');
+    const { status, body } = await udsRequest(
+      this.rsSocket, 'GET', endpoint, null, this.token
+    );
+    if (status === 404) return null;
+    if (status !== 200) throw new Error(`queryMetadata failed: HTTP ${status}`);
+    return body;
+  }
+
+  /** Report loaded plugins to signalk-rs. */
+  async reportPlugins(plugins) {
+    const { status } = await udsRequest(
+      this.rsSocket, 'POST', '/internal/v1/bridge/plugins',
+      { plugins }, this.token
+    );
+    if (status !== 204) throw new Error(`reportPlugins failed: HTTP ${status}`);
+  }
+
   /** Register this bridge with signalk-rs. Called once on startup. */
   async register(version) {
     const { status } = await udsRequest(

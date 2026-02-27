@@ -27,6 +27,7 @@ fn test_plugin_manager(store: Arc<RwLock<SignalKStore>>) -> PluginManager {
         Arc::new(RwLock::new(HashMap::new())),
         Arc::new(RwLock::new(HashMap::new())),
         Arc::new(DeltaFilterChain::new()),
+        Arc::new(RwLock::new(signalk_server::webapps::WebappRegistry::new())),
         PathBuf::from("/tmp/signalk-test/config"),
         PathBuf::from("/tmp/signalk-test/data"),
     )

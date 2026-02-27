@@ -4,9 +4,11 @@
 ///   POST /internal/v1/delta           — bridge injects delta (handleMessage)
 ///   GET  /internal/v1/api/{*path}     — bridge queries path (getSelfPath)
 ///   PUT  /internal/v1/api/{*path}     — bridge writes path (putSelfPath)
+///   GET  /internal/v1/metadata/{*path} — bridge queries metadata (getMetadata)
 ///   POST /internal/v1/handlers        — bridge registers PUT handler
 ///   POST /internal/v1/plugin-routes   — bridge registers REST routes
 ///   POST /internal/v1/bridge/register — bridge registers itself on startup
+///   POST /internal/v1/bridge/plugins  — bridge reports loaded plugins
 use axum::{
     Json, Router,
     body::Body,
@@ -26,10 +28,11 @@ use tower::ServiceExt;
 use tracing::{info, warn};
 
 use crate::protocol::{
-    BridgeRegistration, DeltaIngest, HandlerRegistration, PathQuery, PathQueryResponse,
-    PluginRouteRegistration,
+    BridgePluginReport, BridgeRegistration, DeltaIngest, HandlerRegistration, PathQuery,
+    PathQueryResponse, PluginRouteRegistration,
 };
 use crate::uds::bind_unix_socket;
+use signalk_types::Metadata;
 
 /// Async query function type: maps a PathQuery to an optional response.
 pub type AsyncQueryFn = Box<
@@ -41,10 +44,37 @@ pub type AsyncQueryFn = Box<
         + Sync,
 >;
 
+/// Async metadata function type: maps a dot-path to optional Metadata.
+pub type AsyncMetadataFn = Box<
+    dyn Fn(String) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<Metadata>> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// Async source query function type: maps a dot-path to source→value map.
+pub type AsyncSourceQueryFn = Box<
+    dyn Fn(
+            String,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Option<std::collections::HashMap<String, serde_json::Value>>,
+                    > + Send,
+            >,
+        > + Send
+        + Sync,
+>;
+
+/// Callback for bridge plugin reporting.
+pub type OnBridgePluginsFn = Box<dyn Fn(BridgePluginReport) + Send + Sync>;
+
 /// Callbacks from the main server injected when creating InternalState.
 pub struct Callbacks {
     pub on_delta: Box<dyn Fn(DeltaIngest) + Send + Sync>,
     pub on_query: AsyncQueryFn,
+    pub on_metadata: AsyncMetadataFn,
+    pub on_source_query: AsyncSourceQueryFn,
+    pub on_bridge_plugins: OnBridgePluginsFn,
 }
 
 /// State shared across all internal API handlers.
@@ -121,9 +151,12 @@ fn build_internal_router(state: InternalState) -> Router {
         .route("/internal/v1/delta", post(ingest_delta))
         .route("/internal/v1/api/{*path}", get(query_path))
         .route("/internal/v1/api/{*path}", put(write_path))
+        .route("/internal/v1/api-sources/{*path}", get(query_sources))
+        .route("/internal/v1/metadata/{*path}", get(query_metadata))
         .route("/internal/v1/handlers", post(register_handler))
         .route("/internal/v1/plugin-routes", post(register_plugin_routes))
         .route("/internal/v1/bridge/register", post(register_bridge))
+        .route("/internal/v1/bridge/plugins", post(report_bridge_plugins))
         .with_state(state)
 }
 
@@ -242,6 +275,58 @@ async fn register_bridge(
     StatusCode::NO_CONTENT.into_response()
 }
 
+async fn query_metadata(
+    State(state): State<InternalState>,
+    headers: axum::http::HeaderMap,
+    Path(url_path): Path<String>,
+) -> Response {
+    if !check_token(&headers, &state) {
+        return unauthorized();
+    }
+    let sk_path = url_to_sk_path(&url_path);
+    match (state.callbacks.on_metadata)(sk_path).await {
+        Some(meta) => Json(meta).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"message": "Metadata not found"})),
+        )
+            .into_response(),
+    }
+}
+
+async fn query_sources(
+    State(state): State<InternalState>,
+    headers: axum::http::HeaderMap,
+    Path(url_path): Path<String>,
+) -> Response {
+    if !check_token(&headers, &state) {
+        return unauthorized();
+    }
+    let sk_path = url_to_sk_path(&url_path);
+    match (state.callbacks.on_source_query)(sk_path).await {
+        Some(sources) => Json(sources).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"message": "Path not found"})),
+        )
+            .into_response(),
+    }
+}
+
+async fn report_bridge_plugins(
+    State(state): State<InternalState>,
+    headers: axum::http::HeaderMap,
+    Json(report): Json<BridgePluginReport>,
+) -> Response {
+    if !check_token(&headers, &state) {
+        return unauthorized();
+    }
+    let count = report.plugins.len();
+    (state.callbacks.on_bridge_plugins)(report);
+    info!(count, "Bridge plugins reported");
+    StatusCode::NO_CONTENT.into_response()
+}
+
 fn url_to_sk_path(url_path: &str) -> String {
     let parts: Vec<&str> = url_path.split('/').filter(|s| !s.is_empty()).collect();
     if parts.len() >= 2 && parts[0] == "vessels" {
@@ -261,6 +346,9 @@ mod tests {
             Callbacks {
                 on_delta: Box::new(|_| {}),
                 on_query: Box::new(|_| Box::pin(async { None })),
+                on_metadata: Box::new(|_| Box::pin(async { None })),
+                on_source_query: Box::new(|_| Box::pin(async { None })),
+                on_bridge_plugins: Box::new(|_| {}),
             },
         )
     }

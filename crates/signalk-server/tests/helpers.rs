@@ -17,7 +17,7 @@ pub fn test_app() -> Router {
     let config = ServerConfig::default();
     let (store, _rx) = SignalKStore::new(config.vessel.uuid.clone());
     let state = ServerState::new(config, store);
-    build_router(state)
+    build_router(state, &[])
 }
 
 /// Build a test app AND return the `Arc<RwLock<SignalKStore>>` for data injection.
@@ -29,7 +29,7 @@ pub fn test_app_with_store() -> (Router, Arc<RwLock<SignalKStore>>) {
     let config = ServerConfig::default();
     let (store, _rx) = SignalKStore::new(config.vessel.uuid.clone());
     let state = ServerState::new(config, store.clone());
-    (build_router(state), store)
+    (build_router(state, &[]), store)
 }
 
 /// Build a test app AND return the self vessel URI for assertions.
@@ -39,7 +39,7 @@ pub fn test_app_with_uri() -> (Router, String) {
     let self_uri = config.vessel.uuid.clone();
     let (store, _rx) = SignalKStore::new(&self_uri);
     let state = ServerState::new(config, store);
-    (build_router(state), self_uri)
+    (build_router(state, &[]), self_uri)
 }
 
 /// Make a GET request and return the parsed JSON body + status code.
@@ -93,7 +93,7 @@ pub fn test_app_with_data_dir(data_dir: &std::path::Path) -> Router {
     };
     let (store, _rx) = SignalKStore::new(config.vessel.uuid.clone());
     let state = ServerState::new(config, store);
-    build_router(state)
+    build_router(state, &[])
 }
 
 /// Build a test app with a pre-registered PUT handler pointing to a given plugin.
@@ -125,15 +125,60 @@ pub fn test_app_with_handler(handler_path: &str, plugin_id: &str, bridge_socket:
         plugin_id.to_string(),
     )])));
     let plugin_routes: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
+    let route_table = Arc::new(signalk_server::plugins::routes::PluginRouteTable::new());
+    let put_handler_registry = Arc::new(signalk_server::plugins::host::PutHandlerRegistry::new());
+    let plugin_manager = signalk_server::plugins::manager::PluginManager::new(
+        store.clone(),
+        route_table.clone(),
+        put_handler_registry.clone(),
+        put_handlers.clone(),
+        plugin_routes.clone(),
+        Arc::new(signalk_server::plugins::delta_filter::DeltaFilterChain::new()),
+        Arc::new(RwLock::new(signalk_server::webapps::WebappRegistry::new())),
+        std::path::PathBuf::from("/tmp/signalk-test/config"),
+        std::path::PathBuf::from("/tmp/signalk-test/data"),
+    );
     let state = signalk_server::ServerState::new_shared(
         config,
         store,
         put_handlers,
         plugin_routes,
-        Arc::new(signalk_server::plugins::host::PutHandlerRegistry::new()),
-        Arc::new(signalk_server::plugins::routes::PluginRouteTable::new()),
+        put_handler_registry,
+        route_table,
+        Arc::new(tokio::sync::Mutex::new(plugin_manager)),
+        Arc::new(RwLock::new(
+            signalk_server::plugins::registry::PluginRegistry::new(),
+        )),
     );
-    build_router(state)
+    build_router(state, &[])
+}
+
+/// Build a test app AND return the Arc<ServerState> for direct state access.
+///
+/// Useful for admin API tests that need to register plugins in the PluginManager
+/// or manipulate the PluginRegistry.
+#[allow(dead_code)]
+pub fn test_app_with_state() -> (Router, Arc<ServerState>) {
+    let config = ServerConfig::default();
+    let (store, _rx) = SignalKStore::new(config.vessel.uuid.clone());
+    let state = ServerState::new(config, store);
+    let router = build_router(state.clone(), &[]);
+    (router, state)
+}
+
+/// Make a POST request with an empty body.
+#[allow(dead_code)]
+pub async fn post_empty(app: Router, uri: &str) -> (u16, serde_json::Value) {
+    let response = app
+        .oneshot(
+            Request::post(uri)
+                .header("content-type", "application/json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    response_json(response).await
 }
 
 /// Make a GET request with a Bearer token.

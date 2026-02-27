@@ -18,6 +18,7 @@ use super::delta_filter::DeltaFilterChain;
 use super::host::{PutHandlerRegistry, RustPluginContext, cleanup_plugin};
 use super::isolation::guarded;
 use super::routes::PluginRouteTable;
+use crate::webapps::WebappRegistry;
 
 /// A registered plugin with its runtime state.
 struct PluginEntry {
@@ -39,6 +40,8 @@ pub struct PluginManager {
     plugin_routes: Arc<RwLock<HashMap<String, String>>>,
     /// Shared delta input filter chain (pre-store)
     delta_filter: Arc<DeltaFilterChain>,
+    /// Shared webapp registry
+    webapp_registry: Arc<RwLock<WebappRegistry>>,
     config_dir: PathBuf,
     data_dir: PathBuf,
 }
@@ -52,6 +55,7 @@ impl PluginManager {
         put_handlers: Arc<RwLock<HashMap<String, String>>>,
         plugin_routes: Arc<RwLock<HashMap<String, String>>>,
         delta_filter: Arc<DeltaFilterChain>,
+        webapp_registry: Arc<RwLock<WebappRegistry>>,
         config_dir: PathBuf,
         data_dir: PathBuf,
     ) -> Self {
@@ -63,6 +67,7 @@ impl PluginManager {
             put_handlers,
             plugin_routes,
             delta_filter,
+            webapp_registry,
             config_dir,
             data_dir,
         }
@@ -125,6 +130,7 @@ impl PluginManager {
             self.config_dir.clone(),
             plugin_data_dir,
             self.delta_filter.clone(),
+            self.webapp_registry.clone(),
         ));
 
         entry.context = Some(ctx.clone());
@@ -230,6 +236,58 @@ impl PluginManager {
     pub fn delta_filter(&self) -> &Arc<DeltaFilterChain> {
         &self.delta_filter
     }
+
+    /// Check if a plugin is currently running.
+    pub fn is_running(&self, plugin_id: &str) -> bool {
+        self.plugins
+            .get(plugin_id)
+            .is_some_and(|entry| matches!(entry.status, PluginStatus::Running(_)))
+    }
+
+    /// Read plugin config from disk.
+    pub fn read_plugin_config(&self, plugin_id: &str) -> Option<serde_json::Value> {
+        let path = self.config_dir.join(format!("{plugin_id}.json"));
+        let data = std::fs::read_to_string(path).ok()?;
+        serde_json::from_str(&data).ok()
+    }
+
+    /// Save plugin config to disk.
+    pub fn save_plugin_config(&self, plugin_id: &str, config: &serde_json::Value) {
+        let _ = std::fs::create_dir_all(&self.config_dir);
+        let path = self.config_dir.join(format!("{plugin_id}.json"));
+        let data = serde_json::to_string_pretty(config).unwrap_or_default();
+        let _ = std::fs::write(path, data);
+    }
+
+    /// Get statuses with config schema from each plugin.
+    pub fn statuses_with_schema(&self) -> Vec<(PluginMetadataWithSchema, PluginStatus)> {
+        self.plugins
+            .values()
+            .map(|entry| {
+                let meta = entry.plugin.metadata();
+                let schema = entry.plugin.schema();
+                (
+                    PluginMetadataWithSchema {
+                        id: meta.id,
+                        name: meta.name,
+                        description: meta.description,
+                        version: meta.version,
+                        schema,
+                    },
+                    entry.status.clone(),
+                )
+            })
+            .collect()
+    }
+}
+
+/// Extended plugin metadata including optional config schema.
+pub struct PluginMetadataWithSchema {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub version: String,
+    pub schema: Option<serde_json::Value>,
 }
 
 /// Placeholder plugin used while the real plugin is running inside `guarded()`.
@@ -299,6 +357,7 @@ mod tests {
             Arc::new(RwLock::new(HashMap::new())),
             Arc::new(RwLock::new(HashMap::new())),
             Arc::new(DeltaFilterChain::new()),
+            Arc::new(RwLock::new(WebappRegistry::new())),
             PathBuf::from("/tmp/signalk-test/config"),
             PathBuf::from("/tmp/signalk-test/data"),
         )

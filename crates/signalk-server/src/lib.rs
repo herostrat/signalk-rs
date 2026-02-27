@@ -2,6 +2,7 @@ pub mod api;
 pub mod auth;
 pub mod config;
 pub mod plugins;
+pub mod webapps;
 pub mod ws;
 
 use signalk_store::store::SignalKStore;
@@ -12,7 +13,10 @@ use tokio::sync::RwLock;
 
 use crate::config::ServerConfig;
 use crate::plugins::host::PutHandlerRegistry;
+use crate::plugins::manager::PluginManager;
+use crate::plugins::registry::PluginRegistry;
 use crate::plugins::routes::PluginRouteTable;
+use crate::webapps::{WebAppInfo, WebappRegistry};
 
 /// Shared application state — passed as axum State to all handlers.
 pub struct ServerState {
@@ -28,23 +32,49 @@ pub struct ServerState {
     pub route_table: Arc<PluginRouteTable>,
     /// Data directory for persistent storage (applicationData etc.)
     pub data_dir: PathBuf,
+    /// Tier-agnostic plugin registry for the admin API
+    pub plugin_registry: Arc<RwLock<PluginRegistry>>,
+    /// Webapp registry for static file serving
+    pub webapp_registry: Arc<RwLock<WebappRegistry>>,
+    /// Plugin manager for Tier 1 lifecycle control (admin API)
+    pub plugin_manager: Arc<tokio::sync::Mutex<PluginManager>>,
 }
 
 impl ServerState {
     pub fn new(config: ServerConfig, store: Arc<RwLock<SignalKStore>>) -> Arc<Self> {
         let data_dir = PathBuf::from(&config.data_dir);
+        let route_table = Arc::new(PluginRouteTable::new());
+        let put_handler_registry = Arc::new(PutHandlerRegistry::new());
+        let put_handlers = Arc::new(RwLock::new(HashMap::new()));
+        let plugin_routes = Arc::new(RwLock::new(HashMap::new()));
+        let webapp_registry = Arc::new(RwLock::new(WebappRegistry::new()));
+        let plugin_manager = PluginManager::new(
+            store.clone(),
+            route_table.clone(),
+            put_handler_registry.clone(),
+            put_handlers.clone(),
+            plugin_routes.clone(),
+            Arc::new(crate::plugins::delta_filter::DeltaFilterChain::new()),
+            webapp_registry.clone(),
+            data_dir.join("plugin-config"),
+            data_dir.join("plugin-data"),
+        );
         Arc::new(ServerState {
             config,
             store,
-            put_handlers: Arc::new(RwLock::new(HashMap::new())),
-            plugin_routes: Arc::new(RwLock::new(HashMap::new())),
-            put_handler_registry: Arc::new(PutHandlerRegistry::new()),
-            route_table: Arc::new(PluginRouteTable::new()),
+            put_handlers,
+            plugin_routes,
+            put_handler_registry,
+            route_table,
             data_dir,
+            plugin_registry: Arc::new(RwLock::new(PluginRegistry::new())),
+            webapp_registry,
+            plugin_manager: Arc::new(tokio::sync::Mutex::new(plugin_manager)),
         })
     }
 
     /// Create with externally-provided maps and plugin infrastructure.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_shared(
         config: ServerConfig,
         store: Arc<RwLock<SignalKStore>>,
@@ -52,6 +82,8 @@ impl ServerState {
         plugin_routes: Arc<RwLock<HashMap<String, String>>>,
         put_handler_registry: Arc<PutHandlerRegistry>,
         route_table: Arc<PluginRouteTable>,
+        plugin_manager: Arc<tokio::sync::Mutex<PluginManager>>,
+        plugin_registry: Arc<RwLock<PluginRegistry>>,
     ) -> Arc<Self> {
         let data_dir = PathBuf::from(&config.data_dir);
         Arc::new(ServerState {
@@ -62,16 +94,23 @@ impl ServerState {
             put_handler_registry,
             route_table,
             data_dir,
+            plugin_registry,
+            webapp_registry: Arc::new(RwLock::new(WebappRegistry::new())),
+            plugin_manager,
         })
     }
 }
 
 /// Build the axum router with all public API routes.
-pub fn build_router(state: Arc<ServerState>) -> axum::Router {
+///
+/// `webapps` are mounted as static file services at their URL paths.
+/// They must be passed in separately because router construction is sync,
+/// but the webapp registry uses an async RwLock.
+pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Router {
     use axum::routing::{any, get, post, put};
     use tower_http::cors::CorsLayer;
 
-    let router = axum::Router::new()
+    let mut router = axum::Router::new()
         // Discovery
         .route("/signalk", get(api::discovery))
         // REST data API
@@ -96,9 +135,42 @@ pub fn build_router(state: Arc<ServerState>) -> axum::Router {
             "/signalk/v1/applicationData/{appId}/{version}/{*key}",
             get(api::get_app_data_key).post(api::set_app_data_key),
         )
+        // Webapp listing
+        .route("/signalk/v1/webapps", get(api::webapps::list_webapps))
+        // Admin API
+        .route("/admin/api/plugins", get(api::admin::list_plugins))
+        .route(
+            "/admin/api/plugins/{plugin_id}",
+            get(api::admin::get_plugin),
+        )
+        .route(
+            "/admin/api/plugins/{plugin_id}/config",
+            get(api::admin::get_plugin_config).put(api::admin::update_plugin_config),
+        )
+        .route(
+            "/admin/api/plugins/{plugin_id}/restart",
+            post(api::admin::restart_plugin),
+        )
+        .route(
+            "/admin/api/plugins/{plugin_id}/enable",
+            post(api::admin::enable_plugin),
+        )
+        .route(
+            "/admin/api/plugins/{plugin_id}/disable",
+            post(api::admin::disable_plugin),
+        )
         // Plugin routes — proxied to the bridge
         .route("/plugins/{plugin_id}", any(api::proxy_plugin_route))
         .route("/plugins/{plugin_id}/{*rest}", any(api::proxy_plugin_route));
+
+    // Mount static file serving for each discovered webapp
+    for webapp in webapps {
+        router = router.nest_service(
+            &webapp.url,
+            tower_http::services::ServeDir::new(&webapp.public_dir)
+                .append_index_html_on_directories(true),
+        );
+    }
 
     // Test-only delta injection endpoint (simulator feature)
     #[cfg(feature = "simulator")]

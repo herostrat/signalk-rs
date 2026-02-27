@@ -298,6 +298,19 @@ impl PluginRouter for RouteCollector {
 /// modified), or `None` to drop the delta before it enters the store.
 pub type DeltaInputHandler = Box<dyn Fn(Delta) -> Option<Delta> + Send + Sync + 'static>;
 
+// ─── Webapp registration ────────────────────────────────────────────────────
+
+/// Info needed to register a webapp from a plugin.
+#[derive(Debug, Clone)]
+pub struct WebAppRegistration {
+    /// Human-readable display name for the webapp.
+    pub display_name: String,
+    /// Optional description.
+    pub description: Option<String>,
+    /// Path to the directory containing static files (index.html, etc.).
+    pub public_dir: PathBuf,
+}
+
 // ─── PluginContext trait ────────────────────────────────────────────────────
 
 /// The plugin API surface — Rust equivalent of the JS bridge's `app` object.
@@ -335,6 +348,24 @@ pub trait PluginContext: Send + Sync {
     /// The path includes the context prefix, e.g.
     /// `"vessels.urn:mrn:signalk:uuid:abc.navigation.speedOverGround"`.
     async fn get_path(&self, full_path: &str) -> Result<Option<serde_json::Value>, PluginError>;
+
+    /// Get all source values for a path on the self vessel.
+    ///
+    /// Returns a map from source_ref → value (JSON), or `None` if no data
+    /// exists for the path. Useful when multiple sensors provide the same
+    /// measurement (e.g. multiple GPS receivers).
+    ///
+    /// Equivalent to JS `app.getSelfPathSources('navigation.speedOverGround')`.
+    async fn get_self_path_sources(
+        &self,
+        path: &str,
+    ) -> Result<Option<std::collections::HashMap<String, serde_json::Value>>, PluginError> {
+        // Default: not supported
+        let _ = path;
+        Err(PluginError::runtime(
+            "get_self_path_sources not supported by this context",
+        ))
+    }
 
     // ── Data write ──────────────────────────────────────────────────────
 
@@ -414,4 +445,18 @@ pub trait PluginContext: Send + Sync {
         &self,
         handler: DeltaInputHandler,
     ) -> Result<(), PluginError>;
+
+    // ── Webapp registration ──────────────────────────────────────────────
+
+    /// Register a webapp to be served at a URL path.
+    ///
+    /// Tier 1 (Rust) plugins can expose a web UI by providing a directory
+    /// of static files. The server will serve these at `/plugins/{plugin_id}/`.
+    ///
+    /// Not all tiers support this — the default returns an error.
+    async fn register_webapp(&self, _info: WebAppRegistration) -> Result<(), PluginError> {
+        Err(PluginError::runtime(
+            "register_webapp not supported by this context",
+        ))
+    }
 }

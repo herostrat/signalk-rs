@@ -89,6 +89,14 @@ class SignalKApp extends EventEmitter {
     return Promise.reject(new Error(`putPath: cross-vessel writes not yet supported`));
   }
 
+  /**
+   * Get all source values for a path on the self vessel.
+   * Returns an object mapping source_ref → value, or null if not found.
+   */
+  getSelfPathSources(skPath) {
+    return this._transport.querySources(skPath);
+  }
+
   // ─── Delta emission ──────────────────────────────────────────────────────────
 
   /**
@@ -229,8 +237,7 @@ class SignalKApp extends EventEmitter {
 
   /** Get metadata for a path. */
   getMetadata(skPath) {
-    // TODO: fetch from signalk-rs store metadata
-    return null;
+    return this._transport.queryMetadata(skPath);
   }
 
   // ─── Delta input handler registration ────────────────────────────────────────

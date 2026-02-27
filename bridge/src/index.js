@@ -81,6 +81,14 @@ async function main() {
   const loader = new PluginLoader(app, pluginsDir);
   await loader.loadAll();
 
+  // Report loaded plugins to signalk-rs
+  try {
+    await transport.reportPlugins(loader.list());
+    console.log(`[bridge] Reported ${loader.list().length} plugin(s) to signalk-rs`);
+  } catch (err) {
+    console.error('[bridge] Failed to report plugins:', err.message);
+  }
+
   // Handle lifecycle events from signalk-rs
   transport.on('lifecycle', async ({ event, pluginId }) => {
     console.log(`[bridge] Lifecycle event: ${event}`, pluginId || '(all)');

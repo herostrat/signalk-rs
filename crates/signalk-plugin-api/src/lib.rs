@@ -57,7 +57,8 @@ pub mod testing;
 pub use context::{
     DeltaCallback, DeltaInputHandler, PluginContext, PluginRequest, PluginResponse, PluginRouter,
     PutCommand, PutHandler, PutHandlerResult, RegisteredRoute, RouteCollector, RouteHandler,
-    RouterSetup, SubscriptionHandle, SubscriptionSpec, delta_callback, put_handler, route_handler,
+    RouterSetup, SubscriptionHandle, SubscriptionSpec, WebAppRegistration, delta_callback,
+    put_handler, route_handler,
 };
 pub use error::PluginError;
 pub use plugin::{Plugin, PluginMetadata, PluginStatus};

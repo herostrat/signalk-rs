@@ -118,6 +118,27 @@ pub enum LifecycleEventType {
     Restart,
 }
 
+/// Bridge reports its loaded plugins to signalk-rs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BridgePluginReport {
+    pub plugins: Vec<BridgePluginEntry>,
+}
+
+/// A single bridge plugin entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgePluginEntry {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub version: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub has_webapp: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

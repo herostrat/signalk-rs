@@ -10,4 +10,5 @@ pub mod delta_filter;
 pub mod host;
 pub mod isolation;
 pub mod manager;
+pub mod registry;
 pub mod routes;

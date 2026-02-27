@@ -10,6 +10,22 @@ pub struct ServerConfig {
     /// Data directory for persistent storage (applicationData, plugin data, etc.)
     #[serde(default = "default_data_dir")]
     pub data_dir: String,
+    /// Path to node_modules directory containing webapps and bridge plugins
+    #[serde(default = "default_modules_dir")]
+    pub modules_dir: String,
+    /// Source priority configuration: source_ref → priority (lower = higher).
+    ///
+    /// When multiple data sources provide the same path, the one with the
+    /// lowest priority number wins. Sources without an entry default to 100.
+    ///
+    /// ```toml
+    /// [source_priorities]
+    /// "gps.GP" = 10
+    /// "ais" = 50
+    /// "simulator" = 200
+    /// ```
+    #[serde(default)]
+    pub source_priorities: std::collections::HashMap<String, u16>,
     /// Plugin configurations — everything is a plugin.
     ///
     /// ```toml
@@ -84,6 +100,10 @@ fn default_data_dir() -> String {
     "/var/lib/signalk-rs".to_string()
 }
 
+fn default_modules_dir() -> String {
+    "/var/lib/signalk-rs/node_modules".to_string()
+}
+
 fn default_http_rs_port() -> u16 {
     3001
 }
@@ -131,6 +151,7 @@ impl Default for ServerConfig {
                 admin_password_hash: String::new(), // set by user
             },
             data_dir: default_data_dir(),
+            modules_dir: default_modules_dir(),
             internal: InternalSettings {
                 transport: "uds".to_string(),
                 uds_rs_socket: "/run/signalk/rs.sock".to_string(),
@@ -139,6 +160,7 @@ impl Default for ServerConfig {
                 http_bridge_port: 3002,
                 bridge_token: String::new(),
             },
+            source_priorities: std::collections::HashMap::new(),
             plugins: Vec::new(),
         }
     }

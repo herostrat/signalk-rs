@@ -166,12 +166,14 @@ class PluginLoader {
     }
   }
 
-  /** Get a list of all loaded plugins with their status. */
+  /** Get a list of all loaded plugins with their info. */
   list() {
     return Array.from(this._loaded.entries()).map(([id, { pkg }]) => ({
       id,
-      version: pkg.version,
-      description: pkg.description,
+      name: pkg.description || id,
+      version: pkg.version || '0.0.0',
+      description: pkg.description || '',
+      hasWebapp: !!(pkg.keywords && pkg.keywords.includes('signalk-webapp')),
     }));
   }
 }
