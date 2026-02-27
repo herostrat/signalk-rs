@@ -2429,6 +2429,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "signalk-plugin-simulator"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "signalk-plugin-api",
+ "signalk-types",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "signalk-server"
 version = "0.1.0"
 dependencies = [
@@ -2449,6 +2462,7 @@ dependencies = [
  "signalk-plugin-anchor-alarm",
  "signalk-plugin-api",
  "signalk-plugin-nmea0183",
+ "signalk-plugin-simulator",
  "signalk-store",
  "signalk-types",
  "thiserror",

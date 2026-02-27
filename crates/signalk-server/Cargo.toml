@@ -20,6 +20,7 @@ signalk-store.workspace = true
 signalk-internal.workspace = true
 signalk-plugin-nmea0183.workspace = true
 signalk-plugin-anchor-alarm.workspace = true
+signalk-plugin-simulator = { workspace = true, optional = true }
 tokio.workspace = true
 async-trait.workspace = true
 axum.workspace = true
@@ -36,6 +37,10 @@ config.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 uuid.workspace = true
+
+[features]
+default = []
+simulator = ["signalk-plugin-simulator"]
 
 [dev-dependencies]
 reqwest.workspace = true

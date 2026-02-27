@@ -162,6 +162,10 @@ async fn main() -> Result<()> {
     plugin_manager.register(Box::new(
         signalk_plugin_anchor_alarm::AnchorAlarmPlugin::new(),
     ));
+    #[cfg(feature = "simulator")]
+    plugin_manager.register(Box::new(
+        signalk_plugin_simulator::SimulatorPlugin::new(),
+    ));
 
     // Build plugin configs from [[plugins]] section
     let plugin_configs: HashMap<String, serde_json::Value> = config

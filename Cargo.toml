@@ -7,6 +7,7 @@ members = [
     "crates/signalk-internal",
     "crates/plugins/signalk-nmea0183",
     "crates/plugins/signalk-anchor-alarm",
+    "crates/plugins/signalk-plugin-simulator",
     "crates/signalk-plugin-client",
 ]
 resolver = "2"
@@ -72,6 +73,7 @@ signalk-store = { path = "crates/signalk-store" }
 signalk-internal = { path = "crates/signalk-internal" }
 signalk-plugin-nmea0183 = { path = "crates/plugins/signalk-nmea0183" }
 signalk-plugin-anchor-alarm = { path = "crates/plugins/signalk-anchor-alarm" }
+signalk-plugin-simulator = { path = "crates/plugins/signalk-plugin-simulator" }
 signalk-plugin-client = { path = "crates/signalk-plugin-client" }
 
 # Testing & Benchmarking (dev only)
