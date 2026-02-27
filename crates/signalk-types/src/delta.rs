@@ -37,13 +37,19 @@ impl Delta {
     }
 }
 
+fn utc_now() -> DateTime<Utc> {
+    Utc::now()
+}
+
 /// A single update from one source at one point in time.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Update {
     /// The data source that produced these values
     pub source: Source,
 
-    /// RFC 3339 timestamp when these values were recorded
+    /// RFC 3339 timestamp when these values were recorded.
+    /// Defaults to the current time when absent (plugins often omit it).
+    #[serde(default = "utc_now")]
     pub timestamp: DateTime<Utc>,
 
     /// The actual value changes

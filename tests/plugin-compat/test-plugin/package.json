@@ -1,0 +1,8 @@
+{
+  "name": "signalk-test-plugin",
+  "version": "1.0.0",
+  "description": "Spy plugin for signalk-rs plugin API compatibility testing",
+  "main": "index.js",
+  "keywords": ["signalk-node-server-plugin"],
+  "license": "MIT"
+}

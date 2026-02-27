@@ -116,7 +116,12 @@ pub async fn uds_proxy(
 
     stream.write_all(request.as_bytes()).await?;
     stream.write_all(body).await?;
-    stream.shutdown().await?;
+    // No shutdown() here: HTTP/1.1 uses Content-Length for request framing.
+    // The bridge knows the request is complete without a FIN.
+    // After res.end(), Node.js closes the socket (Connection: close), which
+    // causes read_to_end() to return. Calling shutdown() prematurely closes
+    // the write side, which can cause Node.js to destroy the socket before
+    // async handlers have a chance to send their response.
 
     let mut raw = Vec::new();
     stream.read_to_end(&mut raw).await?;

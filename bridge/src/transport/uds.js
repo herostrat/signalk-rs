@@ -150,7 +150,11 @@ class UdsTransport extends EventEmitter {
     const dir = path.dirname(this.bridgeSocket);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-    this._server = http.createServer((req, res) => {
+    // allowHalfOpen: true is required so that async route handlers can send
+    // a response after signalk-rs half-closes the request connection.
+    // Without it Node.js auto-closes the write side when the client shuts
+    // down its write end, destroying `res` before the handler can call res.end().
+    this._server = http.createServer({ allowHalfOpen: true }, (req, res) => {
       this._handleCallback(req, res);
     });
 
@@ -181,7 +185,10 @@ class UdsTransport extends EventEmitter {
             state,
             statusCode,
           });
-          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(responseBody),
+          });
           res.end(responseBody);
         };
         this.emit('put', { ...parsed, pluginId, path: skPath.replace(/\//g, '.'), respond });
@@ -201,8 +208,15 @@ class UdsTransport extends EventEmitter {
       if (proxyMatch) {
         const [, pluginId, pluginPath = '/'] = proxyMatch;
         const respond = (statusCode, body, contentType = 'application/json') => {
-          res.writeHead(statusCode, { 'Content-Type': contentType });
-          res.end(typeof body === 'string' ? body : JSON.stringify(body));
+          const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
+          // Always set Content-Length so Node.js does not use chunked transfer
+          // encoding. signalk-rs's uds_proxy reads raw bytes and cannot decode
+          // chunked responses.
+          res.writeHead(statusCode, {
+            'Content-Type': contentType,
+            'Content-Length': Buffer.byteLength(bodyStr),
+          });
+          res.end(bodyStr);
         };
         this.emit('proxy', { pluginId, method, path: pluginPath, body: parsed, respond });
         return;

@@ -1,0 +1,63 @@
+version: '3.9'
+
+# Plugin compatibility test stack.
+#
+# Usage:
+#   docker compose -f tests/plugin-compat/docker-compose.yml up --build --abort-on-container-exit
+#
+# The verify service exits 0 on success, non-zero on failure.
+# --abort-on-container-exit stops all services when verify exits.
+#
+# Data flow:
+#   verify.js
+#     └─► signalk-rs:3000  (public HTTP API + WS stream)
+#           └─► bridge.sock  (uds_proxy for plugin REST + PUT forwarding)
+#                 └─► signalk-test-plugin (via app.js router)
+#           └─► rs.sock  (Internal API for delta + query from bridge)
+#
+# Sockets are shared between signalk-rs and bridge via the `sockets` volume.
+
+services:
+
+  signalk-rs:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.rs
+    volumes:
+      - sockets:/run/signalk
+      - ./config/signalk-rs.toml:/etc/signalk-rs/config.toml:ro
+    environment:
+      - RUST_LOG=signalk_server=debug,signalk_internal=debug,signalk_store=info
+
+  bridge:
+    build:
+      context: ../../bridge
+      dockerfile: ../docker/Dockerfile.bridge
+    depends_on:
+      - signalk-rs
+    volumes:
+      - sockets:/run/signalk
+      # Mount the test plugin so the bridge discovers it via SIGNALK_PLUGINS_DIR.
+      - ./test-plugin:/plugins/signalk-test-plugin:ro
+    environment:
+      - SIGNALK_BRIDGE_TOKEN=plugin-compat-test-bridge-token
+      - SIGNALK_RS_SOCKET=/run/signalk/rs.sock
+      - SIGNALK_BRIDGE_SOCKET=/run/signalk/bridge.sock
+      - SIGNALK_WS_URL=ws://signalk-rs:3000/signalk/v1/stream?subscribe=none
+      - SIGNALK_SELF_URI=urn:mrn:signalk:uuid:00000000-0000-4000-8000-000000000002
+      - SIGNALK_PLUGINS_DIR=/plugins
+      - SIGNALK_DATA_DIR=/tmp/signalk-data
+
+  verify:
+    image: node:20-alpine
+    working_dir: /test
+    volumes:
+      - ./:/test:ro
+    environment:
+      - SIGNALK_URL=http://signalk-rs:3000
+    depends_on:
+      - bridge
+    command: node verify.js
+
+volumes:
+  sockets:   # shared UDS socket directory (/run/signalk)

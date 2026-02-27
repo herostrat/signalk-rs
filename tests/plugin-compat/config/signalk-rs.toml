@@ -1,0 +1,24 @@
+# signalk-rs config for plugin compatibility tests.
+# Fixed values ensure reproducible, hermetic test runs.
+
+[server]
+port = 3000
+host = "0.0.0.0"
+name = "signalk-rs-plugin-compat-test"
+
+[vessel]
+uuid = "urn:mrn:signalk:uuid:00000000-0000-4000-8000-000000000002"
+name = "Plugin Compat Test Vessel"
+
+[auth]
+jwt_secret = "plugin-compat-test-jwt-secret"
+token_ttl_secs = 3600
+admin_user = "admin"
+admin_password_hash = ""
+
+[internal]
+transport = "uds"
+uds_rs_socket = "/run/signalk/rs.sock"
+uds_bridge_socket = "/run/signalk/bridge.sock"
+# Fixed token so bridge can start in any order without reading from signalk-rs stderr.
+bridge_token = "plugin-compat-test-bridge-token"
