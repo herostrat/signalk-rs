@@ -29,6 +29,9 @@ pub struct HelloMessage {
 impl HelloMessage {
     pub fn new(version: impl Into<String>, self_uri: Option<String>) -> Self {
         HelloMessage {
+            // TODO: InstrumentPanel checks `name === "signalk-server"` to enable
+            // applicationData (layout persistence) and metaUpdateInWS features.
+            // Change to "signalk-server" if full compatibility is needed.
             name: Some("signalk-rs".to_string()),
             version: version.into(),
             self_uri,

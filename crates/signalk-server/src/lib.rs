@@ -154,13 +154,13 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
         .route("/signalk/v1/auth/logout", put(auth::logout))
         // WebSocket streaming
         .route("/signalk/v1/stream", get(ws::handler))
-        // Application data persistence
+        // Application data persistence (scope = "global" or "user")
         .route(
-            "/signalk/v1/applicationData/{appId}/{version}",
+            "/signalk/v1/applicationData/{scope}/{appId}/{version}",
             get(api::get_app_data).post(api::set_app_data),
         )
         .route(
-            "/signalk/v1/applicationData/{appId}/{version}/{*key}",
+            "/signalk/v1/applicationData/{scope}/{appId}/{version}/{*key}",
             get(api::get_app_data_key).post(api::set_app_data_key),
         )
         // Webapp listing
@@ -225,6 +225,58 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
             "/signalk/v2/api/vessels/self/navigation/course/activeRoute/reverse",
             put(api::v2::course::reverse_route),
         )
+        // /skServer compatibility routes for admin UI
+        .route(
+            "/skServer/loginStatus",
+            get(api::server_routes::login_status),
+        )
+        .route("/skServer/plugins", get(api::admin::list_plugins))
+        .route(
+            "/skServer/plugins/{plugin_id}/config",
+            get(api::admin::get_plugin_config).post(api::admin::update_plugin_config),
+        )
+        .route("/skServer/webapps", get(api::server_routes::list_webapps))
+        .route("/skServer/settings", get(api::server_routes::get_settings))
+        .route("/skServer/vessel", get(api::server_routes::get_vessel))
+        .route("/skServer/addons", get(api::server_routes::empty_array))
+        .route(
+            "/skServer/appstore/available",
+            get(api::server_routes::appstore_available),
+        )
+        .route(
+            "/skServer/security/access/requests",
+            get(api::server_routes::empty_array),
+        )
+        .route(
+            "/skServer/security/config",
+            get(api::server_routes::empty_object),
+        )
+        .route(
+            "/skServer/security/users",
+            get(api::server_routes::empty_array),
+        )
+        .route(
+            "/skServer/security/devices",
+            get(api::server_routes::empty_array),
+        )
+        .route("/skServer/providers", get(api::server_routes::empty_array))
+        .route(
+            "/skServer/availablePaths",
+            get(api::server_routes::empty_array),
+        )
+        .route(
+            "/skServer/sourcePriorities",
+            get(api::server_routes::empty_object),
+        )
+        .route("/skServer/debugKeys", get(api::server_routes::empty_array))
+        .route(
+            "/skServer/logfiles/",
+            get(api::server_routes::list_logfiles),
+        )
+        .route(
+            "/skServer/runDiscovery",
+            put(api::server_routes::run_discovery),
+        )
         // Plugin routes — proxied to the bridge
         .route("/plugins/{plugin_id}", any(api::proxy_plugin_route))
         .route("/plugins/{plugin_id}/{*rest}", any(api::proxy_plugin_route));
@@ -234,6 +286,17 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
         router = router.nest_service(
             &webapp.url,
             tower_http::services::ServeDir::new(&webapp.public_dir)
+                .append_index_html_on_directories(true),
+        );
+    }
+
+    // Admin UI — explicit mount (no signalk-webapp keyword, like original server)
+    let admin_ui_dir =
+        std::path::Path::new(&state.config.modules_dir).join("@signalk/server-admin-ui/public");
+    if admin_ui_dir.is_dir() {
+        router = router.nest_service(
+            "/admin",
+            tower_http::services::ServeDir::new(&admin_ui_dir)
                 .append_index_html_on_directories(true),
         );
     }

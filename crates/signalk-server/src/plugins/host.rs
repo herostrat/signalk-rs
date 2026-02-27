@@ -354,6 +354,7 @@ impl PluginContext for RustPluginContext {
             version: String::new(),
             display_name: Some(info.display_name),
             description: info.description,
+            keywords: vec!["signalk-webapp".to_string()],
             url: url.clone(),
             public_dir: info.public_dir,
             source: Some(WebappSource::RustPlugin {

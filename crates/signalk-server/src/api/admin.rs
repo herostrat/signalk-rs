@@ -71,7 +71,7 @@ pub async fn get_plugin_config(
 
     Json(serde_json::json!({
         "schema": info.schema,
-        "config": current_config,
+        "configuration": current_config,
     }))
     .into_response()
 }

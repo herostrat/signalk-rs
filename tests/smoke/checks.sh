@@ -154,6 +154,39 @@ check "Course has nextPoint after set" \
 check "DELETE course returns 200" \
   "$(http_status DELETE "$BASE/signalk/v2/api/vessels/self/navigation/course")" "200"
 
+# --- Admin UI ---
+echo "  Admin UI"
+check "Admin UI serves static files (200)" \
+  "$(status "$BASE/admin/")" "200"
+
+# --- /skServer Compatibility ---
+echo "  /skServer Routes"
+check "loginStatus returns 200" \
+  "$(status "$BASE/skServer/loginStatus")" "200"
+check "loginStatus has status field" \
+  "$(fetch "$BASE/skServer/loginStatus")" '"status"'
+check "skServer/plugins returns 200" \
+  "$(status "$BASE/skServer/plugins")" "200"
+check "skServer/plugins lists simulator" \
+  "$(fetch "$BASE/skServer/plugins")" '"simulator"'
+check "skServer/webapps returns 200" \
+  "$(status "$BASE/skServer/webapps")" "200"
+check "skServer/vessel returns 200" \
+  "$(status "$BASE/skServer/vessel")" "200"
+check "skServer/vessel has uuid" \
+  "$(fetch "$BASE/skServer/vessel")" '"uuid"'
+check "skServer/settings returns 200" \
+  "$(status "$BASE/skServer/settings")" "200"
+
+# --- applicationData with scope ---
+echo "  applicationData (scoped)"
+APP_DATA_STATUS=$(http_status POST "$BASE/signalk/v1/applicationData/global/test-app/1.0" \
+  '{"theme":"dark","panels":[1,2]}')
+check "POST global appData returns 200" \
+  "$APP_DATA_STATUS" "200"
+check "GET global appData returns data" \
+  "$(fetch "$BASE/signalk/v1/applicationData/global/test-app/1.0")" '"theme"'
+
 # --- Summary ---
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

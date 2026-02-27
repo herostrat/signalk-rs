@@ -293,7 +293,8 @@ class SignalKApp extends EventEmitter {
       subscribe(subscription, unsubscribes, callback, pluginId) {
         // Connect to signalk-rs WebSocket stream for subscriptions
         // The WS URL comes from config
-        const WS_URL = process.env.SIGNALK_WS_URL || 'ws://localhost:3000/signalk/v1/stream?subscribe=none';
+        const baseUrl = process.env.SIGNALK_WS_URL || 'ws://localhost:3000/signalk/v1/stream';
+        const WS_URL = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'subscribe=none';
         const WebSocket = require('ws');
         const ws = new WebSocket(WS_URL);
 

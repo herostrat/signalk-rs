@@ -38,6 +38,9 @@ pub struct WebAppInfo {
     /// Description
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Keywords from package.json (e.g. signalk-webapp, signalk-embeddable-webapp)
+    #[serde(default)]
+    pub keywords: Vec<String>,
     /// URL path this webapp is served at, e.g. "/@signalk/instrumentpanel"
     pub url: String,
     /// Absolute path to the static files directory
@@ -169,11 +172,18 @@ fn try_read_webapp(package_path: &Path, package_name: &str) -> Option<WebAppInfo
     // URL: /{package_name} (preserving scoped names)
     let url = format!("/{package_name}");
 
+    // Preserve all keywords from package.json for the admin UI
+    let kw = keywords
+        .iter()
+        .filter_map(|k| k.as_str().map(|s| s.to_string()))
+        .collect();
+
     Some(WebAppInfo {
         name: package_name.to_string(),
         version,
         display_name,
         description,
+        keywords: kw,
         url,
         public_dir,
         source: Some(WebappSource::NpmPackage),
@@ -282,6 +292,7 @@ mod tests {
             version: "1.0.0".to_string(),
             display_name: None,
             description: None,
+            keywords: vec!["signalk-webapp".to_string()],
             url: "/test".to_string(),
             public_dir: PathBuf::from("/tmp/test"),
             source: Some(WebappSource::NpmPackage),
@@ -291,6 +302,7 @@ mod tests {
             version: "2.0.0".to_string(),
             display_name: None,
             description: None,
+            keywords: vec!["signalk-webapp".to_string()],
             url: "/test".to_string(),
             public_dir: PathBuf::from("/tmp/test2"),
             source: Some(WebappSource::NpmPackage),

@@ -32,6 +32,8 @@ pub struct PluginInfo {
     pub tier: PluginTier,
     pub status: String,
     pub enabled: bool,
+    #[serde(default)]
+    pub keywords: Vec<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub has_webapp: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -86,6 +88,7 @@ impl PluginRegistry {
                 tier: PluginTier::Rust,
                 status: status.to_string(),
                 enabled,
+                keywords: vec!["signalk-node-server-plugin".to_string()],
                 has_webapp: false,
                 webapp_url: None,
                 schema: None,
@@ -105,6 +108,7 @@ impl PluginRegistry {
                 tier: PluginTier::Bridge,
                 status: "running".to_string(),
                 enabled: true,
+                keywords: vec!["signalk-node-server-plugin".to_string()],
                 has_webapp: info.has_webapp,
                 webapp_url: None,
                 schema: None,

@@ -31,6 +31,9 @@ pub struct StreamParams {
     pub subscribe: Option<String>,
     #[serde(rename = "sendCachedValues")]
     pub send_cached_values: Option<bool>,
+    /// InstrumentPanel sends sendMeta=all; accepted but not yet implemented.
+    #[serde(rename = "sendMeta")]
+    pub send_meta: Option<String>,
 }
 
 /// Axum route handler — upgrades HTTP to WebSocket.
@@ -182,6 +185,12 @@ async fn handle_socket(
 
 /// Process a client control message (subscribe / unsubscribe).
 fn handle_client_message(text: &str, subscriptions: &mut HashMap<String, ActiveSubscription>) {
+    // Ignore empty keepalive messages (e.g. InstrumentPanel sends "{}" every 10s)
+    let trimmed = text.trim();
+    if trimmed == "{}" || trimmed.is_empty() {
+        return;
+    }
+
     match serde_json::from_str::<InboundMessage>(text) {
         Ok(InboundMessage::Subscribe(msg)) => {
             apply_subscriptions(&msg, subscriptions);

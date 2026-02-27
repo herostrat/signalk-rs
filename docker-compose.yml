@@ -45,7 +45,7 @@ services:
       - SIGNALK_BRIDGE_TOKEN=${SIGNALK_BRIDGE_TOKEN:-dev-token-12345}
       - SIGNALK_RS_SOCKET=/run/signalk/rs.sock
       - SIGNALK_BRIDGE_SOCKET=/run/signalk/bridge.sock
-      - SIGNALK_WS_URL=ws://signalk-rs:3000/signalk/v1/stream?subscribe=none
+      - SIGNALK_WS_URL=ws://signalk-rs:3000/signalk/v1/stream
       - SIGNALK_DATA_DIR=/data
       - SIGNALK_PLUGINS_DIR=/app/node_modules
     restart: unless-stopped

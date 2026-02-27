@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod server_routes;
 pub mod v2;
 pub mod webapps;
 
@@ -441,16 +442,38 @@ pub async fn proxy_plugin_route(
 
 // ── applicationData ─────────────────────────────────────────────────────────
 
-/// GET /signalk/v1/applicationData/{appId}/{version} — read application data.
+/// Resolve the file path for applicationData.
+/// Scope "user" falls back to "global" (no auth system yet).
+fn app_data_dir(data_dir: &std::path::Path, scope: &str, app_id: &str) -> std::path::PathBuf {
+    let effective_scope = if scope == "user" { "global" } else { scope };
+    data_dir
+        .join("applicationData")
+        .join(effective_scope)
+        .join(app_id)
+}
+
+/// Validate scope parameter — only "global" and "user" are allowed.
+/// Returns `Some(error_response)` if invalid, `None` if valid.
+fn invalid_scope(scope: &str) -> Option<Response> {
+    if scope != "global" && scope != "user" {
+        return Some((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"message": format!("Invalid scope: {scope}. Must be 'global' or 'user'")})),
+        )
+            .into_response());
+    }
+    None
+}
+
+/// GET /signalk/v1/applicationData/{scope}/{appId}/{version} — read application data.
 pub async fn get_app_data(
     State(state): State<Arc<ServerState>>,
-    Path((app_id, version)): Path<(String, String)>,
+    Path((scope, app_id, version)): Path<(String, String, String)>,
 ) -> Response {
-    let file_path = state
-        .data_dir
-        .join("applicationData")
-        .join(&app_id)
-        .join(format!("{version}.json"));
+    if let Some(r) = invalid_scope(&scope) {
+        return r;
+    }
+    let file_path = app_data_dir(&state.data_dir, &scope, &app_id).join(format!("{version}.json"));
 
     match tokio::fs::read_to_string(&file_path).await {
         Ok(contents) => match serde_json::from_str::<Value>(&contents) {
@@ -474,12 +497,15 @@ pub async fn get_app_data(
     }
 }
 
-/// POST /signalk/v1/applicationData/{appId}/{version} — store application data.
+/// POST /signalk/v1/applicationData/{scope}/{appId}/{version} — store application data.
 pub async fn set_app_data(
     State(state): State<Arc<ServerState>>,
-    Path((app_id, version)): Path<(String, String)>,
+    Path((scope, app_id, version)): Path<(String, String, String)>,
     Json(body): Json<Value>,
 ) -> Response {
+    if let Some(r) = invalid_scope(&scope) {
+        return r;
+    }
     // Validate: appId and version must be simple names (no path traversal)
     if app_id.contains('/')
         || app_id.contains("..")
@@ -493,7 +519,7 @@ pub async fn set_app_data(
             .into_response();
     }
 
-    let dir = state.data_dir.join("applicationData").join(&app_id);
+    let dir = app_data_dir(&state.data_dir, &scope, &app_id);
     let file_path = dir.join(format!("{version}.json"));
 
     if let Err(e) = tokio::fs::create_dir_all(&dir).await {
@@ -527,16 +553,15 @@ pub async fn set_app_data(
     }
 }
 
-/// GET /signalk/v1/applicationData/{appId}/{version}/{*key} — read sub-key.
+/// GET /signalk/v1/applicationData/{scope}/{appId}/{version}/{*key} — read sub-key.
 pub async fn get_app_data_key(
     State(state): State<Arc<ServerState>>,
-    Path((app_id, version, key)): Path<(String, String, String)>,
+    Path((scope, app_id, version, key)): Path<(String, String, String, String)>,
 ) -> Response {
-    let file_path = state
-        .data_dir
-        .join("applicationData")
-        .join(&app_id)
-        .join(format!("{version}.json"));
+    if let Some(r) = invalid_scope(&scope) {
+        return r;
+    }
+    let file_path = app_data_dir(&state.data_dir, &scope, &app_id).join(format!("{version}.json"));
 
     let contents = match tokio::fs::read_to_string(&file_path).await {
         Ok(c) => c,
@@ -578,12 +603,15 @@ pub async fn get_app_data_key(
     }
 }
 
-/// POST /signalk/v1/applicationData/{appId}/{version}/{*key} — write sub-key.
+/// POST /signalk/v1/applicationData/{scope}/{appId}/{version}/{*key} — write sub-key.
 pub async fn set_app_data_key(
     State(state): State<Arc<ServerState>>,
-    Path((app_id, version, key)): Path<(String, String, String)>,
+    Path((scope, app_id, version, key)): Path<(String, String, String, String)>,
     Json(body): Json<Value>,
 ) -> Response {
+    if let Some(r) = invalid_scope(&scope) {
+        return r;
+    }
     if app_id.contains('/')
         || app_id.contains("..")
         || version.contains('/')
@@ -596,7 +624,7 @@ pub async fn set_app_data_key(
             .into_response();
     }
 
-    let dir = state.data_dir.join("applicationData").join(&app_id);
+    let dir = app_data_dir(&state.data_dir, &scope, &app_id);
     let file_path = dir.join(format!("{version}.json"));
 
     // Read existing data (or start with empty object)

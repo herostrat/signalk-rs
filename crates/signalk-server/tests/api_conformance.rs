@@ -361,7 +361,7 @@ async fn put_path_wildcard_handler_bridge_unreachable() {
 async fn app_data_missing_returns_404() {
     let tmp = tempfile::tempdir().unwrap();
     let app = test_app_with_data_dir(tmp.path());
-    let (status, _) = get(app, "/signalk/v1/applicationData/my-app/1.0.0").await;
+    let (status, _) = get(app, "/signalk/v1/applicationData/global/my-app/1.0.0").await;
     assert_eq!(status, 404, "Missing app data should return 404");
 }
 
@@ -373,13 +373,13 @@ async fn app_data_post_and_get() {
     let data = json!({"layout": "grid", "panels": [1, 2, 3]});
     let (status, _) = post_json(
         app.clone(),
-        "/signalk/v1/applicationData/my-app/1.0.0",
+        "/signalk/v1/applicationData/global/my-app/1.0.0",
         data.clone(),
     )
     .await;
     assert_eq!(status, 200, "POST app data should return 200");
 
-    let (status, body) = get(app, "/signalk/v1/applicationData/my-app/1.0.0").await;
+    let (status, body) = get(app, "/signalk/v1/applicationData/global/my-app/1.0.0").await;
     assert_eq!(status, 200, "GET app data should return 200 after POST");
     assert_eq!(
         body, data,
@@ -395,14 +395,14 @@ async fn app_data_sub_key_get() {
     let data = json!({"settings": {"theme": "dark", "lang": "de"}});
     post_json(
         app.clone(),
-        "/signalk/v1/applicationData/my-app/1.0.0",
+        "/signalk/v1/applicationData/global/my-app/1.0.0",
         data,
     )
     .await;
 
     let (status, body) = get(
         app,
-        "/signalk/v1/applicationData/my-app/1.0.0/settings/theme",
+        "/signalk/v1/applicationData/global/my-app/1.0.0/settings/theme",
     )
     .await;
     assert_eq!(status, 200);
@@ -417,7 +417,7 @@ async fn app_data_sub_key_post() {
     // Create initial data
     post_json(
         app.clone(),
-        "/signalk/v1/applicationData/my-app/1.0.0",
+        "/signalk/v1/applicationData/global/my-app/1.0.0",
         json!({"existing": true}),
     )
     .await;
@@ -425,14 +425,14 @@ async fn app_data_sub_key_post() {
     // Set a sub-key
     let (status, _) = post_json(
         app.clone(),
-        "/signalk/v1/applicationData/my-app/1.0.0/settings/theme",
+        "/signalk/v1/applicationData/global/my-app/1.0.0/settings/theme",
         json!("dark"),
     )
     .await;
     assert_eq!(status, 200);
 
     // Verify the entire structure
-    let (_, body) = get(app, "/signalk/v1/applicationData/my-app/1.0.0").await;
+    let (_, body) = get(app, "/signalk/v1/applicationData/global/my-app/1.0.0").await;
     assert_eq!(body["existing"], true, "Existing data should be preserved");
     assert_eq!(
         body["settings"]["theme"], "dark",
@@ -447,19 +447,23 @@ async fn app_data_different_versions() {
 
     post_json(
         app.clone(),
-        "/signalk/v1/applicationData/my-app/1.0.0",
+        "/signalk/v1/applicationData/global/my-app/1.0.0",
         json!({"version": "one"}),
     )
     .await;
     post_json(
         app.clone(),
-        "/signalk/v1/applicationData/my-app/2.0.0",
+        "/signalk/v1/applicationData/global/my-app/2.0.0",
         json!({"version": "two"}),
     )
     .await;
 
-    let (_, v1) = get(app.clone(), "/signalk/v1/applicationData/my-app/1.0.0").await;
-    let (_, v2) = get(app, "/signalk/v1/applicationData/my-app/2.0.0").await;
+    let (_, v1) = get(
+        app.clone(),
+        "/signalk/v1/applicationData/global/my-app/1.0.0",
+    )
+    .await;
+    let (_, v2) = get(app, "/signalk/v1/applicationData/global/my-app/2.0.0").await;
     assert_eq!(v1["version"], "one");
     assert_eq!(v2["version"], "two");
 }

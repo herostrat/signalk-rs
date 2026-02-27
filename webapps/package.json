@@ -5,6 +5,7 @@
   "description": "SignalK webapp packages for signalk-rs",
   "dependencies": {
     "@signalk/instrumentpanel": "*",
+    "@signalk/server-admin-ui": "*",
     "@mxtommy/kip": "*"
   }
 }
