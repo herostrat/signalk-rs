@@ -1,0 +1,445 @@
+/// NMEA 0183 input plugin for signalk-rs.
+///
+/// Provides two plugin variants:
+/// - [`Nmea0183TcpPlugin`] — listens on a TCP port for NMEA sentences
+/// - [`Nmea0183SerialPlugin`] — reads from a serial port device
+///
+/// Both parse sentences via the shared [`sentences`] module and emit SignalK
+/// deltas through the `PluginContext::handle_message` API.
+pub mod sentences;
+
+use async_trait::async_trait;
+use signalk_plugin_api::{Plugin, PluginContext, PluginError, PluginMetadata};
+use signalk_types::{Delta, PathValue as SkPathValue, Source, Update};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tracing::{debug, error, info, warn};
+
+// ─── Shared parsing helper ──────────────────────────────────────────────────
+
+/// Parse a raw NMEA sentence string and convert to a SignalK Delta.
+/// Returns `None` if the sentence type is unsupported or fails to parse.
+pub fn sentence_to_delta(raw: &str, source_label: &str) -> Option<Delta> {
+    let parsed = nmea::parse_str(raw)
+        .map_err(|e| debug!(sentence = %raw, "NMEA parse error: {e:?}"))
+        .ok()?;
+
+    let path_values: Vec<sentences::PathValue> = match parsed {
+        nmea::ParseResult::RMC(rmc) => sentences::from_rmc(&rmc),
+        nmea::ParseResult::GGA(gga) => sentences::from_gga(&gga),
+        nmea::ParseResult::VTG(vtg) => sentences::from_vtg(&vtg),
+        nmea::ParseResult::HDT(hdt) => sentences::from_hdt(&hdt),
+        nmea::ParseResult::MWV(mwv) => sentences::from_mwv(&mwv),
+        nmea::ParseResult::DPT(dpt) => sentences::from_dpt(&dpt),
+        _ => return None,
+    };
+
+    if path_values.is_empty() {
+        return None;
+    }
+
+    let sk_values: Vec<SkPathValue> = path_values
+        .into_iter()
+        .map(|pv| SkPathValue::new(pv.path, pv.value))
+        .collect();
+
+    let talker = raw
+        .strip_prefix('$')
+        .and_then(|s| s.get(..2))
+        .unwrap_or("UN");
+
+    let source = Source::nmea0183(source_label, talker);
+    let update = Update::new(source, sk_values);
+    Some(Delta::self_vessel(vec![update]))
+}
+
+// ─── TCP Plugin ─────────────────────────────────────────────────────────────
+
+/// NMEA 0183 TCP input plugin.
+///
+/// Listens on a TCP port for NMEA sentence streams (e.g. from a multiplexer
+/// like Yacht Devices YDWG-02 or an OpenCPN NMEA server).
+///
+/// Config:
+/// ```json
+/// { "addr": "0.0.0.0:10110", "source_label": "gps" }
+/// ```
+pub struct Nmea0183TcpPlugin {
+    abort_handle: Option<tokio::task::AbortHandle>,
+}
+
+impl Nmea0183TcpPlugin {
+    pub fn new() -> Self {
+        Nmea0183TcpPlugin {
+            abort_handle: None,
+        }
+    }
+}
+
+impl Default for Nmea0183TcpPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Plugin for Nmea0183TcpPlugin {
+    fn metadata(&self) -> PluginMetadata {
+        PluginMetadata::new(
+            "nmea0183-tcp",
+            "NMEA 0183 TCP",
+            "TCP input for NMEA 0183 sentences",
+            "0.1.0",
+        )
+    }
+
+    fn schema(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "type": "object",
+            "required": ["addr"],
+            "properties": {
+                "addr": {
+                    "type": "string",
+                    "description": "Bind address (host:port)",
+                    "default": "0.0.0.0:10110"
+                },
+                "source_label": {
+                    "type": "string",
+                    "description": "Source label for SignalK deltas",
+                    "default": "nmea0183-tcp"
+                }
+            }
+        }))
+    }
+
+    async fn start(
+        &mut self,
+        config: serde_json::Value,
+        ctx: Arc<dyn PluginContext>,
+    ) -> Result<(), PluginError> {
+        let addr: SocketAddr = config["addr"]
+            .as_str()
+            .ok_or_else(|| PluginError::config("missing 'addr'"))?
+            .parse()
+            .map_err(|e| PluginError::config(format!("invalid addr: {e}")))?;
+
+        let source_label = config["source_label"]
+            .as_str()
+            .unwrap_or("nmea0183-tcp")
+            .to_string();
+
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_tcp_listener(addr, &source_label, ctx).await {
+                error!("NMEA TCP plugin error: {e}");
+            }
+        })
+        .abort_handle();
+
+        self.abort_handle = Some(handle);
+        Ok(())
+    }
+
+    async fn stop(&mut self) -> Result<(), PluginError> {
+        if let Some(h) = self.abort_handle.take() {
+            h.abort();
+        }
+        Ok(())
+    }
+}
+
+async fn run_tcp_listener(
+    addr: SocketAddr,
+    source_label: &str,
+    ctx: Arc<dyn PluginContext>,
+) -> Result<(), PluginError> {
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(PluginError::Io)?;
+
+    ctx.set_status(&format!("Listening on {addr}"));
+    info!(addr = %addr, "NMEA TCP plugin listening");
+
+    loop {
+        match listener.accept().await {
+            Ok((stream, peer)) => {
+                info!(%peer, "NMEA TCP connection accepted");
+                let ctx = ctx.clone();
+                let label = source_label.to_string();
+                tokio::spawn(async move {
+                    if let Err(e) = handle_tcp_connection(stream, peer, &label, ctx).await {
+                        warn!(%peer, "NMEA TCP connection closed: {e}");
+                    }
+                });
+            }
+            Err(e) => {
+                error!("NMEA TCP accept error: {e}");
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            }
+        }
+    }
+}
+
+async fn handle_tcp_connection(
+    stream: tokio::net::TcpStream,
+    peer: SocketAddr,
+    label: &str,
+    ctx: Arc<dyn PluginContext>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let reader = BufReader::new(stream);
+    let mut lines = reader.lines();
+
+    while let Some(line) = lines.next_line().await? {
+        let sentence = line.trim().to_string();
+        if sentence.is_empty() {
+            continue;
+        }
+        debug!(%peer, %sentence, "NMEA sentence");
+
+        if let Some(delta) = sentence_to_delta(&sentence, label) {
+            ctx.handle_message(delta).await.ok();
+        }
+    }
+    Ok(())
+}
+
+// ─── Serial Plugin ──────────────────────────────────────────────────────────
+
+/// NMEA 0183 serial port input plugin.
+///
+/// Opens a serial device (e.g. `/dev/ttyUSB0`) and reads NMEA sentences.
+/// On read errors, retries after a 5 second backoff.
+///
+/// Config:
+/// ```json
+/// { "path": "/dev/ttyUSB0", "baud_rate": 4800, "source_label": "gps" }
+/// ```
+pub struct Nmea0183SerialPlugin {
+    abort_handle: Option<tokio::task::AbortHandle>,
+}
+
+impl Nmea0183SerialPlugin {
+    pub fn new() -> Self {
+        Nmea0183SerialPlugin {
+            abort_handle: None,
+        }
+    }
+}
+
+impl Default for Nmea0183SerialPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Plugin for Nmea0183SerialPlugin {
+    fn metadata(&self) -> PluginMetadata {
+        PluginMetadata::new(
+            "nmea0183-serial",
+            "NMEA 0183 Serial",
+            "Serial port input for NMEA 0183 sentences",
+            "0.1.0",
+        )
+    }
+
+    fn schema(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Serial device path (e.g. /dev/ttyUSB0)"
+                },
+                "baud_rate": {
+                    "type": "integer",
+                    "description": "Baud rate (standard NMEA: 4800, high-speed mux: 38400)",
+                    "default": 4800
+                },
+                "source_label": {
+                    "type": "string",
+                    "description": "Source label for SignalK deltas",
+                    "default": "nmea0183-serial"
+                }
+            }
+        }))
+    }
+
+    async fn start(
+        &mut self,
+        config: serde_json::Value,
+        ctx: Arc<dyn PluginContext>,
+    ) -> Result<(), PluginError> {
+        let path = config["path"]
+            .as_str()
+            .ok_or_else(|| PluginError::config("missing 'path'"))?
+            .to_string();
+
+        let baud_rate = config["baud_rate"].as_u64().unwrap_or(4800) as u32;
+
+        let source_label = config["source_label"]
+            .as_str()
+            .unwrap_or("nmea0183-serial")
+            .to_string();
+
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_serial_reader(&path, baud_rate, &source_label, ctx).await {
+                error!(path = %path, "NMEA serial plugin error: {e}");
+            }
+        })
+        .abort_handle();
+
+        self.abort_handle = Some(handle);
+        Ok(())
+    }
+
+    async fn stop(&mut self) -> Result<(), PluginError> {
+        if let Some(h) = self.abort_handle.take() {
+            h.abort();
+        }
+        Ok(())
+    }
+}
+
+async fn run_serial_reader(
+    path: &str,
+    baud_rate: u32,
+    source_label: &str,
+    ctx: Arc<dyn PluginContext>,
+) -> Result<(), PluginError> {
+    ctx.set_status(&format!("Opening {path} at {baud_rate} baud"));
+    info!(path = %path, baud_rate, "NMEA serial plugin starting");
+
+    loop {
+        match open_and_read_serial(path, baud_rate, source_label, &ctx).await {
+            Ok(()) => break,
+            Err(e) => {
+                ctx.set_error(&format!("Serial error: {e}"));
+                error!(path = %path, "Serial error: {e} — retrying in 5 s");
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn open_and_read_serial(
+    path: &str,
+    baud_rate: u32,
+    source_label: &str,
+    ctx: &Arc<dyn PluginContext>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use tokio_serial::SerialPortBuilderExt;
+
+    let port = tokio_serial::new(path, baud_rate).open_native_async()?;
+    ctx.set_status(&format!("Connected to {path}"));
+    info!(path = %path, "Serial port opened");
+
+    let mut lines = BufReader::new(port).lines();
+
+    while let Some(line) = lines.next_line().await? {
+        let sentence = line.trim().to_string();
+        if sentence.is_empty() {
+            continue;
+        }
+        debug!(sentence = %sentence, "NMEA serial sentence");
+
+        if let Some(delta) = sentence_to_delta(&sentence, source_label) {
+            ctx.handle_message(delta).await.ok();
+        }
+    }
+
+    warn!(path = %path, "Serial port EOF / closed");
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sentence_to_delta_rmc() {
+        let raw = "$GPRMC,225446.33,A,4916.45,N,12311.12,W,000.5,054.7,191194,020.3,E,A*2B";
+        let delta = sentence_to_delta(raw, "gps");
+        assert!(delta.is_some());
+        let delta = delta.unwrap();
+        let update = &delta.updates[0];
+        assert!(update.values.iter().any(|v| v.path == "navigation.position"));
+        assert!(update
+            .values
+            .iter()
+            .any(|v| v.path == "navigation.speedOverGround"));
+    }
+
+    #[test]
+    fn sentence_to_delta_source_label() {
+        let raw = "$GPRMC,225446.33,A,4916.45,N,12311.12,W,000.5,054.7,191194,020.3,E,A*2B";
+        let delta = sentence_to_delta(raw, "my-gps").unwrap();
+        assert_eq!(delta.updates[0].source.label, "my-gps");
+    }
+
+    #[test]
+    fn sentence_to_delta_talker_extracted() {
+        let raw = "$IIRMC,225446.33,A,4916.45,N,12311.12,W,000.5,054.7,191194,020.3,E,A*3C";
+        if let Some(d) = sentence_to_delta(raw, "mux") {
+            let extra = &d.updates[0].source.extra;
+            assert_eq!(extra.get("talker"), Some(&serde_json::json!("II")));
+        }
+    }
+
+    #[test]
+    fn sentence_to_delta_unsupported() {
+        let raw = "$GPGSA,A,3,04,05,,09,12,,,24,,,,,2.5,1.3,2.1*39";
+        assert!(sentence_to_delta(raw, "gps").is_none());
+    }
+
+    #[test]
+    fn sentence_to_delta_invalid() {
+        assert!(sentence_to_delta("not a sentence", "gps").is_none());
+    }
+
+    #[tokio::test]
+    async fn tcp_plugin_metadata() {
+        let plugin = Nmea0183TcpPlugin::new();
+        let meta = plugin.metadata();
+        assert_eq!(meta.id, "nmea0183-tcp");
+    }
+
+    #[tokio::test]
+    async fn serial_plugin_metadata() {
+        let plugin = Nmea0183SerialPlugin::new();
+        let meta = plugin.metadata();
+        assert_eq!(meta.id, "nmea0183-serial");
+    }
+
+    #[tokio::test]
+    async fn tcp_plugin_start_stop() {
+        use signalk_plugin_api::testing::MockPluginContext;
+
+        let mut plugin = Nmea0183TcpPlugin::new();
+        let ctx = Arc::new(MockPluginContext::new());
+
+        // Start on a random port
+        let result = plugin
+            .start(
+                serde_json::json!({"addr": "127.0.0.1:0", "source_label": "test"}),
+                ctx,
+            )
+            .await;
+        assert!(result.is_ok());
+
+        // Stop should work
+        plugin.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn tcp_plugin_rejects_missing_addr() {
+        use signalk_plugin_api::testing::MockPluginContext;
+
+        let mut plugin = Nmea0183TcpPlugin::new();
+        let ctx = Arc::new(MockPluginContext::new());
+        let result = plugin.start(serde_json::json!({}), ctx).await;
+        assert!(result.is_err());
+    }
+}

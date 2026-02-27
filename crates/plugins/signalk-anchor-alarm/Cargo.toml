@@ -1,0 +1,16 @@
+[package]
+name = "signalk-plugin-anchor-alarm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Anchor alarm plugin for signalk-rs — alerts when vessel drifts beyond radius"
+
+[dependencies]
+signalk-plugin-api.workspace = true
+signalk-types.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+async-trait.workspace = true

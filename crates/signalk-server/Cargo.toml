@@ -15,10 +15,13 @@ path = "src/lib.rs"
 
 [dependencies]
 signalk-types.workspace = true
+signalk-plugin-api = { workspace = true, features = ["testing"] }
 signalk-store.workspace = true
 signalk-internal.workspace = true
-signalk-nmea0183.workspace = true
+signalk-plugin-nmea0183.workspace = true
+signalk-plugin-anchor-alarm.workspace = true
 tokio.workspace = true
+async-trait.workspace = true
 axum.workspace = true
 axum-extra.workspace = true
 tower.workspace = true

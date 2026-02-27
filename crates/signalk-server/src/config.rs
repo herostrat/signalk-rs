@@ -7,42 +7,45 @@ pub struct ServerConfig {
     pub vessel: VesselSettings,
     pub auth: AuthSettings,
     pub internal: InternalSettings,
-    /// Input provider configurations (NMEA 0183, etc.)
+    /// Plugin configurations — everything is a plugin.
+    ///
+    /// ```toml
+    /// [[plugins]]
+    /// id = "nmea0183-tcp"
+    /// config = { addr = "0.0.0.0:10110", source_label = "gps" }
+    ///
+    /// [[plugins]]
+    /// id = "nmea0183-serial"
+    /// config = { path = "/dev/ttyUSB0", baud_rate = 4800, source_label = "depth" }
+    ///
+    /// [[plugins]]
+    /// id = "anchor-alarm"
+    /// enabled = false
+    /// config = { radius = 75.0 }
+    /// ```
     #[serde(default)]
-    pub inputs: Vec<InputConfig>,
+    pub plugins: Vec<PluginConfig>,
 }
 
-/// One input source (e.g. NMEA 0183 over TCP or serial port).
+/// Configuration for a single plugin instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case")]
-pub enum InputConfig {
-    /// NMEA 0183 sentences arriving over a TCP connection.
-    Nmea0183Tcp {
-        /// Bind address + port to listen on, e.g. "0.0.0.0:10110"
-        addr: String,
-        /// Source label reported in SignalK deltas (e.g. "gps", "ais-mux")
-        #[serde(default = "default_source_label")]
-        source_label: String,
-    },
-    /// NMEA 0183 sentences from a local serial port.
-    Nmea0183Serial {
-        /// Serial device path, e.g. "/dev/ttyUSB0" or "/dev/ttyS0"
-        path: String,
-        /// Baud rate — standard NMEA 0183 is 4800; high-speed muxes use 38400
-        #[serde(default = "default_baud_rate")]
-        baud_rate: u32,
-        /// Source label reported in SignalK deltas
-        #[serde(default = "default_source_label")]
-        source_label: String,
-    },
+pub struct PluginConfig {
+    /// Plugin identifier, e.g. "nmea0183-tcp", "anchor-alarm".
+    pub id: String,
+    /// Whether this plugin is enabled (default: true).
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    /// Plugin-specific configuration (passed to `Plugin::start`).
+    #[serde(default = "default_plugin_config")]
+    pub config: serde_json::Value,
 }
 
-fn default_source_label() -> String {
-    "nmea0183".to_string()
+fn default_enabled() -> bool {
+    true
 }
 
-fn default_baud_rate() -> u32 {
-    4800
+fn default_plugin_config() -> serde_json::Value {
+    serde_json::json!({})
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,7 +131,7 @@ impl Default for ServerConfig {
                 http_bridge_port: 3002,
                 bridge_token: String::new(),
             },
-            inputs: Vec::new(),
+            plugins: Vec::new(),
         }
     }
 }

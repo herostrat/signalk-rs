@@ -2376,14 +2376,54 @@ dependencies = [
 ]
 
 [[package]]
-name = "signalk-nmea0183"
+name = "signalk-plugin-anchor-alarm"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "chrono",
- "nmea",
+ "async-trait",
  "serde",
  "serde_json",
+ "signalk-plugin-api",
+ "signalk-types",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "signalk-plugin-api"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "signalk-types",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "signalk-plugin-client"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "hyper",
+ "hyper-util",
+ "serde",
+ "serde_json",
+ "signalk-plugin-api",
+ "signalk-types",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "signalk-plugin-nmea0183"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "nmea",
+ "serde_json",
+ "signalk-plugin-api",
  "signalk-types",
  "tokio",
  "tokio-serial",
@@ -2395,6 +2435,7 @@ name = "signalk-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "axum-extra",
  "chrono",
@@ -2407,7 +2448,9 @@ dependencies = [
  "serde",
  "serde_json",
  "signalk-internal",
- "signalk-nmea0183",
+ "signalk-plugin-anchor-alarm",
+ "signalk-plugin-api",
+ "signalk-plugin-nmea0183",
  "signalk-store",
  "signalk-types",
  "thiserror",

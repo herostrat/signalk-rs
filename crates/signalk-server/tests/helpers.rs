@@ -118,7 +118,14 @@ pub fn test_app_with_handler(handler_path: &str, plugin_id: &str, bridge_socket:
     )])));
     let plugin_routes: Arc<RwLock<HashMap<String, String>>> =
         Arc::new(RwLock::new(HashMap::new()));
-    let state = signalk_server::ServerState::new_shared(config, store, put_handlers, plugin_routes);
+    let state = signalk_server::ServerState::new_shared(
+        config,
+        store,
+        put_handlers,
+        plugin_routes,
+        Arc::new(signalk_server::plugins::host::PutHandlerRegistry::new()),
+        Arc::new(signalk_server::plugins::routes::PluginRouteTable::new()),
+    );
     build_router(state)
 }
 

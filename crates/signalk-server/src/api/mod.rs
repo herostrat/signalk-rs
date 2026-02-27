@@ -128,7 +128,7 @@ pub async fn snapshot() -> Response {
 
 /// PUT /signalk/v1/api/{*path} — send a command/write request.
 ///
-/// Delegates to registered PUT handlers. Forwards to the bridge via UDS.
+/// Checks Tier 1 (local Rust) handlers first, then falls back to Tier 2 (bridge).
 /// Returns 404 if no handler is registered, 503 if the bridge is unreachable.
 pub async fn put_path(
     State(state): State<Arc<ServerState>>,
@@ -137,19 +137,54 @@ pub async fn put_path(
 ) -> Response {
     let parts: Vec<&str> = url_path.split('/').filter(|s| !s.is_empty()).collect();
 
-    // Convert URL path segments to dot-path
-    // e.g. vessels/self/steering/autopilot/target/headingTrue
-    //   → steering.autopilot.target.headingTrue (after vessels/self prefix)
     let sk_path = if parts.len() >= 2 && parts[0] == "vessels" {
-        // Skip "vessels" and vessel-id segments
         parts[2..].join(".")
     } else {
         parts.join(".")
     };
 
-    let handlers = state.put_handlers.read().await;
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let sk_value = body.get("value").cloned().unwrap_or(body);
 
-    // Find a registered handler for this path (map: pattern → plugin_id)
+    // ── Tier 1: check local Rust PUT handlers first ─────────────────────
+    if let Some((_plugin_id, handler)) = state.put_handler_registry.find(&sk_path).await {
+        let cmd = signalk_plugin_api::PutCommand {
+            path: sk_path.clone(),
+            value: sk_value.clone(),
+            source: None,
+            request_id: request_id.clone(),
+        };
+        match handler(cmd).await {
+            Ok(signalk_plugin_api::PutHandlerResult::Completed) => {
+                return Json(serde_json::json!({"state": "COMPLETED", "statusCode": 200}))
+                    .into_response();
+            }
+            Ok(signalk_plugin_api::PutHandlerResult::Pending) => {
+                return (
+                    StatusCode::ACCEPTED,
+                    Json(serde_json::json!({"state": "PENDING", "statusCode": 202})),
+                )
+                    .into_response();
+            }
+            Ok(signalk_plugin_api::PutHandlerResult::Failed(msg)) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"state": "FAILED", "statusCode": 500, "message": msg})),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"state": "FAILED", "statusCode": 500, "message": e.to_string()})),
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    // ── Tier 2: fall back to bridge handlers ────────────────────────────
+    let handlers = state.put_handlers.read().await;
     let plugin_id = handlers.iter().find_map(|(pattern, id)| {
         if signalk_types::matches_pattern(pattern, &sk_path) {
             Some(id.clone())
@@ -161,9 +196,6 @@ pub async fn put_path(
 
     match plugin_id {
         Some(plugin_id) => {
-            let request_id = uuid::Uuid::new_v4().to_string();
-            // SignalK PUT body is { "value": X }; extract the inner value to forward.
-            let sk_value = body.get("value").cloned().unwrap_or(body);
             let bridge_path = format!("/put/{}/{}", plugin_id, sk_path.replace('.', "/"));
             let bridge_socket = std::path::Path::new(&state.config.internal.uds_bridge_socket);
             let payload = serde_json::json!({
@@ -206,19 +238,14 @@ pub async fn put_path(
     }
 }
 
-/// ANY /plugins/{plugin_id}[/{*rest}] — reverse-proxy to the bridge plugin router.
+/// ANY /plugins/{plugin_id}[/{*rest}] — plugin route dispatch.
 ///
-/// Plugins register their REST routes via `registerWithRouter()`. signalk-rs proxies
-/// all requests under `/plugins/{plugin_id}/` to the bridge, which dispatches to the
-/// plugin's Express router.
-///
-/// Returns 404 if the plugin has no registered route prefix, 503 if the bridge is
-/// unreachable.
+/// Checks Tier 1 (local Rust) routes first, then falls back to Tier 2 (bridge proxy).
+/// Returns 404 if the plugin has no registered routes, 503 if the bridge is unreachable.
 pub async fn proxy_plugin_route(
     State(state): State<Arc<ServerState>>,
     request: axum::extract::Request,
 ) -> Response {
-    // Extract plugin_id from URI: /plugins/{plugin_id}[/{rest}]
     let uri = request.uri().clone();
     let path = uri.path();
     let plugin_id = path
@@ -237,6 +264,69 @@ pub async fn proxy_plugin_route(
             .into_response();
     }
 
+    let method = request.method().as_str().to_string();
+    let path_and_query = uri
+        .path_and_query()
+        .map(|pq| pq.as_str().to_string())
+        .unwrap_or_else(|| path.to_string());
+    let query = uri.query().map(str::to_string);
+
+    // Compute the relative path (after /plugins/{plugin_id})
+    let prefix = format!("/plugins/{}", plugin_id);
+    let relative_path = path.strip_prefix(&prefix).unwrap_or("/").to_string();
+    let relative_path = if relative_path.is_empty() {
+        "/".to_string()
+    } else {
+        relative_path
+    };
+
+    // Extract all request info before consuming the body
+    let req_headers: Vec<(String, String)> = request
+        .headers()
+        .iter()
+        .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string())))
+        .collect();
+    let content_type = request
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+
+    let body_bytes = match axum::body::to_bytes(request.into_body(), 10 * 1024 * 1024).await {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"message": format!("Failed to read body: {e}")})),
+            )
+                .into_response();
+        }
+    };
+
+    // ── Tier 1: check local Rust plugin routes first ────────────────────
+    if state.route_table.has_routes(&plugin_id).await {
+        let plugin_req = signalk_plugin_api::PluginRequest {
+            method: method.clone(),
+            path: relative_path.clone(),
+            query: query.clone(),
+            headers: req_headers.clone(),
+            body: body_bytes.to_vec(),
+        };
+
+        if let Some(plugin_resp) =
+            state.route_table.handle(&plugin_id, &method, &relative_path, plugin_req).await
+        {
+            let mut builder = axum::response::Response::builder().status(plugin_resp.status);
+            for (k, v) in &plugin_resp.headers {
+                builder = builder.header(k.as_str(), v.as_str());
+            }
+            return builder
+                .body(Body::from(plugin_resp.body))
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+        }
+    }
+
+    // ── Tier 2: fall back to bridge proxy ───────────────────────────────
     {
         let routes = state.plugin_routes.read().await;
         if !routes.contains_key(&plugin_id) {
@@ -250,29 +340,6 @@ pub async fn proxy_plugin_route(
         }
     }
 
-    let method = request.method().as_str().to_string();
-    let path_and_query = uri
-        .path_and_query()
-        .map(|pq| pq.as_str().to_string())
-        .unwrap_or_else(|| path.to_string());
-
-    let content_type = request
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_string);
-
-    let body_bytes = match axum::body::to_bytes(request.into_body(), 10 * 1024 * 1024).await {
-        Ok(b) => b,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"message": format!("Failed to read request body: {e}")})),
-            )
-                .into_response();
-        }
-    };
-
     let bridge_socket = std::path::Path::new(&state.config.internal.uds_bridge_socket);
 
     match signalk_internal::uds::uds_proxy(
@@ -285,8 +352,7 @@ pub async fn proxy_plugin_route(
     .await
     {
         Ok((status, body, resp_ct)) => {
-            let mut builder =
-                axum::response::Response::builder().status(status);
+            let mut builder = axum::response::Response::builder().status(status);
             if let Some(ct) = resp_ct {
                 builder = builder.header(header::CONTENT_TYPE, ct);
             }

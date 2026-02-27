@@ -2,9 +2,12 @@
 members = [
     "crates/signalk-types",
     "crates/signalk-store",
+    "crates/signalk-plugin-api",
     "crates/signalk-server",
     "crates/signalk-internal",
-    "crates/signalk-nmea0183",
+    "crates/plugins/signalk-nmea0183",
+    "crates/plugins/signalk-anchor-alarm",
+    "crates/signalk-plugin-client",
 ]
 resolver = "2"
 
@@ -64,9 +67,12 @@ tokio-serial = { version = "5.4" }
 
 # Internal crates
 signalk-types = { path = "crates/signalk-types" }
+signalk-plugin-api = { path = "crates/signalk-plugin-api" }
 signalk-store = { path = "crates/signalk-store" }
 signalk-internal = { path = "crates/signalk-internal" }
-signalk-nmea0183 = { path = "crates/signalk-nmea0183" }
+signalk-plugin-nmea0183 = { path = "crates/plugins/signalk-nmea0183" }
+signalk-plugin-anchor-alarm = { path = "crates/plugins/signalk-anchor-alarm" }
+signalk-plugin-client = { path = "crates/signalk-plugin-client" }
 
 # Testing & Benchmarking (dev only)
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }

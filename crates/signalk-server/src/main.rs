@@ -3,11 +3,15 @@ use signalk_internal::{
     protocol::PathQueryResponse,
     server::{Callbacks, InternalState, serve_internal_api},
 };
-use signalk_nmea0183::{provider::NmeaTcpProvider, serial_provider::NmeaSerialProvider};
-use signalk_server::{ServerState, build_router, config::{InputConfig, ServerConfig}};
+use signalk_server::{
+    ServerState, build_router,
+    config::ServerConfig,
+    plugins::{host::PutHandlerRegistry, manager::PluginManager, routes::PluginRouteTable},
+};
 use signalk_store::store::SignalKStore;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
@@ -120,46 +124,54 @@ async fn main() -> Result<()> {
         }
     });
 
-    // ── Input providers (NMEA 0183, etc.) ────────────────────────────────────
-    // Deltas from all providers are fed directly into the store.
-    let (input_tx, mut input_rx) = tokio::sync::mpsc::channel::<signalk_types::Delta>(256);
+    // ── Plugin infrastructure ────────────────────────────────────────────────
+    let route_table = Arc::new(PluginRouteTable::new());
+    let put_handler_registry = Arc::new(PutHandlerRegistry::new());
 
-    for input in &config.inputs {
-        match input {
-            InputConfig::Nmea0183Tcp { addr, source_label } => {
-                let addr: SocketAddr = addr.parse()?;
-                let provider = NmeaTcpProvider::new(addr, source_label.clone());
-                let tx = input_tx.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = provider.run(tx).await {
-                        tracing::error!("NMEA TCP provider error: {e}");
-                    }
-                });
-            }
-            InputConfig::Nmea0183Serial { path, baud_rate, source_label } => {
-                let provider = NmeaSerialProvider::new(path.clone(), *baud_rate, source_label.clone());
-                let tx = input_tx.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = provider.run(tx).await {
-                        tracing::error!("NMEA serial provider error: {e}");
-                    }
-                });
-            }
-        }
-    }
+    let config_dir = PathBuf::from("/etc/signalk-rs/plugin-config");
+    let data_dir = PathBuf::from("/var/lib/signalk-rs/plugin-data");
 
-    // Fan-in: apply incoming deltas to the store.
-    let store_for_input = store.clone();
-    tokio::spawn(async move {
-        while let Some(delta) = input_rx.recv().await {
-            store_for_input.write().await.apply_delta(delta);
-        }
-    });
-    // Drop the original sender so the fan-in task exits when all providers drop their clones.
-    drop(input_tx);
+    let mut plugin_manager = PluginManager::new(
+        store.clone(),
+        route_table.clone(),
+        put_handler_registry.clone(),
+        put_handlers.clone(),
+        plugin_routes.clone(),
+        config_dir,
+        data_dir,
+    );
+
+    // Register all compiled-in Tier 1 plugins
+    plugin_manager.register(Box::new(
+        signalk_plugin_nmea0183::Nmea0183TcpPlugin::new(),
+    ));
+    plugin_manager.register(Box::new(
+        signalk_plugin_nmea0183::Nmea0183SerialPlugin::new(),
+    ));
+    plugin_manager.register(Box::new(
+        signalk_plugin_anchor_alarm::AnchorAlarmPlugin::new(),
+    ));
+
+    // Build plugin configs from [[plugins]] section
+    let plugin_configs: HashMap<String, serde_json::Value> = config
+        .plugins
+        .iter()
+        .filter(|pc| pc.enabled)
+        .map(|pc| (pc.id.clone(), pc.config.clone()))
+        .collect();
+
+    // Start all plugins that have config entries
+    plugin_manager.start_all(&plugin_configs).await;
 
     // ── Public HTTP + WebSocket server ────────────────────────────────────────
-    let state = ServerState::new_shared(config.clone(), store, put_handlers, plugin_routes);
+    let state = ServerState::new_shared(
+        config.clone(),
+        store,
+        put_handlers,
+        plugin_routes,
+        put_handler_registry,
+        route_table,
+    );
     let router = build_router(state);
 
     info!(%addr, "Listening");

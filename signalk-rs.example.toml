@@ -94,10 +94,11 @@ uds_bridge_socket = "/run/signalk/bridge.sock"
 # http_bridge_port = 3002
 
 # ---------------------------------------------------------------------------
-# [[inputs]] — Data input providers (zero or more, order does not matter)
+# [[plugins]] — Plugin configurations (zero or more)
 #
-# Each [[inputs]] block defines one data source. The `type` field selects
-# the provider. All other fields depend on the type.
+# Everything is a plugin — input providers, alarms, processors, etc.
+# Each [[plugins]] block activates one plugin by its id. The `config`
+# table is passed to the plugin on start.
 # ---------------------------------------------------------------------------
 
 # --- NMEA 0183 over TCP ---------------------------------------------------
@@ -106,44 +107,32 @@ uds_bridge_socket = "/run/signalk/bridge.sock"
 # client. Typical use: NMEA multiplexer (e.g. Yacht Devices YDWG-02,
 # OpenCPN acting as NMEA server, or Victron GX device).
 #
-# [[inputs]]
-# type = "nmea0183-tcp"
-#
-# # Address and port to listen on.
-# addr = "0.0.0.0:10110"
-#
-# # Source label used in SignalK deltas (identifies this input in the data).
-# source_label = "gps"
+# [[plugins]]
+# id = "nmea0183-tcp"
+# config = { addr = "0.0.0.0:10110", source_label = "gps" }
 
 # --- NMEA 0183 over serial port -------------------------------------------
 #
 # Reads NMEA 0183 sentences from a local serial / USB device. Automatically
 # retries after 5 seconds if the device is unplugged and reconnected.
 #
-# [[inputs]]
-# type = "nmea0183-serial"
-#
-# # Device path.
-# path = "/dev/ttyUSB0"
-#
-# # Baud rate. Standard NMEA 0183 is 4800; high-speed muxes often use 38400.
-# # Default: 4800
-# baud_rate = 4800
-#
-# # Source label used in SignalK deltas.
-# source_label = "depth-sensor"
+# [[plugins]]
+# id = "nmea0183-serial"
+# config = { path = "/dev/ttyUSB0", baud_rate = 4800, source_label = "depth-sensor" }
 
 # ---------------------------------------------------------------------------
-# Full example with two inputs
+# Full example with multiple plugins
 # ---------------------------------------------------------------------------
 #
-# [[inputs]]
-# type = "nmea0183-tcp"
-# addr = "0.0.0.0:10110"
-# source_label = "mux"
+# [[plugins]]
+# id = "nmea0183-tcp"
+# config = { addr = "0.0.0.0:10110", source_label = "mux" }
 #
-# [[inputs]]
-# type = "nmea0183-serial"
-# path = "/dev/ttyUSB0"
-# baud_rate = 4800
-# source_label = "gps"
+# [[plugins]]
+# id = "nmea0183-serial"
+# config = { path = "/dev/ttyUSB0", baud_rate = 4800, source_label = "gps" }
+#
+# [[plugins]]
+# id = "anchor-alarm"
+# enabled = false
+# config = { radius = 75.0 }

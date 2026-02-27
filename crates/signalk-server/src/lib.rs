@@ -1,6 +1,7 @@
 pub mod api;
 pub mod auth;
 pub mod config;
+pub mod plugins;
 pub mod ws;
 
 use signalk_store::store::SignalKStore;
@@ -9,16 +10,21 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::config::ServerConfig;
+use crate::plugins::host::PutHandlerRegistry;
+use crate::plugins::routes::PluginRouteTable;
 
 /// Shared application state — passed as axum State to all handlers.
-#[derive(Debug)]
 pub struct ServerState {
     pub config: ServerConfig,
     pub store: Arc<RwLock<SignalKStore>>,
-    /// Registered PUT handlers: path_pattern → bridge callback info
+    /// Registered PUT handlers: path_pattern → plugin_id (shared with bridge)
     pub put_handlers: Arc<RwLock<HashMap<String, String>>>,
-    /// Registered plugin routes: plugin_id → path_prefix
+    /// Registered plugin routes: plugin_id → path_prefix (shared with bridge)
     pub plugin_routes: Arc<RwLock<HashMap<String, String>>>,
+    /// Tier 1 PUT handler registry (local Rust handlers, checked before bridge)
+    pub put_handler_registry: Arc<PutHandlerRegistry>,
+    /// Tier 1 route table (local Rust routes, checked before bridge proxy)
+    pub route_table: Arc<PluginRouteTable>,
 }
 
 impl ServerState {
@@ -28,21 +34,27 @@ impl ServerState {
             store,
             put_handlers: Arc::new(RwLock::new(HashMap::new())),
             plugin_routes: Arc::new(RwLock::new(HashMap::new())),
+            put_handler_registry: Arc::new(PutHandlerRegistry::new()),
+            route_table: Arc::new(PluginRouteTable::new()),
         })
     }
 
-    /// Create with externally-provided maps shared with InternalState.
+    /// Create with externally-provided maps and plugin infrastructure.
     pub fn new_shared(
         config: ServerConfig,
         store: Arc<RwLock<SignalKStore>>,
         put_handlers: Arc<RwLock<HashMap<String, String>>>,
         plugin_routes: Arc<RwLock<HashMap<String, String>>>,
+        put_handler_registry: Arc<PutHandlerRegistry>,
+        route_table: Arc<PluginRouteTable>,
     ) -> Arc<Self> {
         Arc::new(ServerState {
             config,
             store,
             put_handlers,
             plugin_routes,
+            put_handler_registry,
+            route_table,
         })
     }
 }

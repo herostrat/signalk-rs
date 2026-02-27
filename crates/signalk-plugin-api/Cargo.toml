@@ -1,0 +1,20 @@
+[package]
+name = "signalk-plugin-api"
+description = "Canonical plugin API for signalk-rs — defines Plugin and PluginContext traits"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+signalk-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[features]
+default = []
+testing = []
