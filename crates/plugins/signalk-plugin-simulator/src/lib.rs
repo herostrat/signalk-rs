@@ -243,7 +243,7 @@ impl Plugin for SimulatorPlugin {
 
 fn build_delta(values: &generators::SimulatedValues, enable_environment: bool) -> Delta {
     let source = Source::plugin("simulator");
-    let mut path_values = Vec::with_capacity(12);
+    let mut path_values = Vec::with_capacity(30);
 
     // Navigation (always included)
     path_values.push(PathValue::new(
@@ -270,6 +270,18 @@ fn build_delta(values: &generators::SimulatedValues, enable_environment: bool) -
         serde_json::json!(values.magnetic_variation_rad),
     ));
     path_values.push(PathValue::new(
+        "navigation.speedThroughWater",
+        serde_json::json!(values.stw_mps),
+    ));
+    path_values.push(PathValue::new(
+        "navigation.attitude",
+        serde_json::json!({
+            "roll": values.roll_rad,
+            "pitch": values.pitch_rad,
+            "yaw": 0.0
+        }),
+    ));
+    path_values.push(PathValue::new(
         "navigation.datetime",
         serde_json::json!(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
     ));
@@ -289,6 +301,10 @@ fn build_delta(values: &generators::SimulatedValues, enable_environment: bool) -
             serde_json::json!(values.depth_below_transducer_m),
         ));
         path_values.push(PathValue::new(
+            "environment.depth.surfaceToTransducer",
+            serde_json::json!(values.surface_to_transducer_m),
+        ));
+        path_values.push(PathValue::new(
             "environment.water.temperature",
             serde_json::json!(values.water_temperature_k),
         ));
@@ -306,7 +322,7 @@ fn build_delta(values: &generators::SimulatedValues, enable_environment: bool) -
         ));
     }
 
-    // Propulsion (optional)
+    // Propulsion + electrical + fuel (optional)
     if let Some(ref prop) = values.propulsion {
         path_values.push(PathValue::new(
             "propulsion.main.revolutions",
@@ -320,7 +336,37 @@ fn build_delta(values: &generators::SimulatedValues, enable_environment: bool) -
             "propulsion.main.coolantTemperature",
             serde_json::json!(prop.coolant_temperature_k),
         ));
+        path_values.push(PathValue::new(
+            "propulsion.main.fuel.rate",
+            serde_json::json!(prop.fuel_rate_m3s),
+        ));
+        path_values.push(PathValue::new(
+            "electrical.batteries.0.voltage",
+            serde_json::json!(prop.battery_voltage),
+        ));
+        path_values.push(PathValue::new(
+            "electrical.batteries.0.current",
+            serde_json::json!(prop.battery_current),
+        ));
     }
+
+    // Tanks (always included)
+    path_values.push(PathValue::new(
+        "tanks.fuel.0.currentLevel",
+        serde_json::json!(values.fuel_tank_level),
+    ));
+    path_values.push(PathValue::new(
+        "tanks.fuel.0.capacity",
+        serde_json::json!(values.fuel_tank_capacity_m3),
+    ));
+    path_values.push(PathValue::new(
+        "tanks.freshWater.0.currentLevel",
+        serde_json::json!(values.fresh_water_level),
+    ));
+    path_values.push(PathValue::new(
+        "tanks.freshWater.0.capacity",
+        serde_json::json!(values.fresh_water_capacity_m3),
+    ));
 
     Delta::self_vessel(vec![Update::new(source, path_values)])
 }
@@ -375,12 +421,16 @@ mod tests {
 
         assert!(paths.contains(&"navigation.position"));
         assert!(paths.contains(&"navigation.speedOverGround"));
+        assert!(paths.contains(&"navigation.speedThroughWater"));
         assert!(paths.contains(&"navigation.courseOverGroundTrue"));
         assert!(paths.contains(&"navigation.headingMagnetic"));
         assert!(paths.contains(&"navigation.magneticVariation"));
-        // No environment or propulsion
+        assert!(paths.contains(&"navigation.attitude"));
+        assert!(paths.contains(&"navigation.datetime"));
+        // No environment or propulsion (but tanks are always present)
         assert!(!paths.iter().any(|p| p.starts_with("environment.")));
         assert!(!paths.iter().any(|p| p.starts_with("propulsion.")));
+        assert!(paths.contains(&"tanks.fuel.0.currentLevel"));
     }
 
     #[test]
@@ -398,6 +448,7 @@ mod tests {
         assert!(paths.contains(&"environment.wind.angleApparent"));
         assert!(paths.contains(&"environment.wind.speedApparent"));
         assert!(paths.contains(&"environment.depth.belowTransducer"));
+        assert!(paths.contains(&"environment.depth.surfaceToTransducer"));
         assert!(paths.contains(&"environment.water.temperature"));
         assert!(paths.contains(&"environment.outside.temperature"));
         assert!(paths.contains(&"environment.outside.pressure"));
@@ -419,6 +470,9 @@ mod tests {
         assert!(paths.contains(&"propulsion.main.revolutions"));
         assert!(paths.contains(&"propulsion.main.oilTemperature"));
         assert!(paths.contains(&"propulsion.main.coolantTemperature"));
+        assert!(paths.contains(&"propulsion.main.fuel.rate"));
+        assert!(paths.contains(&"electrical.batteries.0.voltage"));
+        assert!(paths.contains(&"electrical.batteries.0.current"));
     }
 
     #[test]

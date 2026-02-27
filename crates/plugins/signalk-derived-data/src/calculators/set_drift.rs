@@ -69,14 +69,24 @@ impl Calculator for SetDrift {
         // Set direction (true) = magnetic + variation
         let set_true = normalize_angle(set_magnetic + variation);
 
-        Some(vec![
+        // Drift impact: ratio of current speed to boat speed through water.
+        // Undefined (omitted) when STW is near zero.
+        let mut results = vec![
             PathValue::new("environment.current.drift", serde_json::json!(drift)),
             PathValue::new("environment.current.setTrue", serde_json::json!(set_true)),
             PathValue::new(
                 "environment.current.setMagnetic",
                 serde_json::json!(set_magnetic),
             ),
-        ])
+        ];
+        if stw > 0.01 {
+            results.push(PathValue::new(
+                "environment.current.driftImpact",
+                serde_json::json!(drift / stw),
+            ));
+        }
+
+        Some(results)
     }
 }
 
@@ -145,6 +155,31 @@ mod tests {
         // Should be positive and plausible
         assert!(drift > 0.5, "expected positive drift, got {drift}");
         assert!(drift < 5.0, "drift too high: {drift}");
+
+        // driftImpact should be drift/stw
+        let impact = result
+            .iter()
+            .find(|pv| pv.path == "environment.current.driftImpact")
+            .unwrap()
+            .value
+            .as_f64()
+            .unwrap();
+        assert!(
+            (impact - drift / 5.0).abs() < 0.001,
+            "expected driftImpact = drift/stw, got {impact}"
+        );
+    }
+
+    #[test]
+    fn drift_impact_omitted_when_stationary() {
+        let values = make_values(0.0, 0.0, 0.0, 0.0, 0.05);
+        let result = SetDrift.calculate(&values).unwrap();
+        assert!(
+            !result
+                .iter()
+                .any(|pv| pv.path == "environment.current.driftImpact"),
+            "driftImpact should be omitted when STW is zero"
+        );
     }
 
     #[test]

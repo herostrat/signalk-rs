@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use tracing::info;
 
 pub mod calculators;
-use calculators::Calculator;
+use calculators::{Calculator, path_matches_input};
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
@@ -97,7 +97,9 @@ impl Plugin for DerivedDataPlugin {
             return Ok(());
         }
 
-        // Collect all unique input paths
+        // Collect all unique input paths / prefixes for subscription.
+        // Exact paths subscribe directly; prefix-based inputs (for dynamic-instance
+        // calculators) subscribe with a wildcard suffix.
         let mut input_paths: Vec<String> = Vec::new();
         for calc in &enabled {
             for path in calc.inputs() {
@@ -147,11 +149,12 @@ impl Plugin for DerivedDataPlugin {
                     let mut derived_values: Vec<PathValue> = Vec::new();
 
                     for calc in &enabled {
-                        // Check if any of this calculator's inputs changed
-                        let affected = calc
-                            .inputs()
-                            .iter()
-                            .any(|input| changed_paths.iter().any(|cp| cp == *input));
+                        // Check if any of this calculator's inputs changed.
+                        // Uses prefix matching for dynamic-instance calculators
+                        // (e.g. input "propulsion" matches "propulsion.main.revolutions").
+                        let affected = calc.inputs().iter().any(|input| {
+                            changed_paths.iter().any(|cp| path_matches_input(cp, input))
+                        });
 
                         if !affected {
                             continue;
@@ -357,7 +360,7 @@ mod tests {
                 d.updates.iter().find_map(|u| {
                     u.values
                         .iter()
-                        .find(|pv| pv.path == "environment.outside.density")
+                        .find(|pv| pv.path == "environment.outside.airDensity")
                 })
             });
             assert!(

@@ -1481,6 +1481,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "moon-phase"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7984c1e5817a8e5559d0e7719e766b52048ced9553d932cdfd094f82ea7b79cd"
+
+[[package]]
 name = "native-tls"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2377,10 +2383,13 @@ name = "signalk-derived-data"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
+ "moon-phase",
  "serde",
  "serde_json",
  "signalk-plugin-api",
  "signalk-types",
+ "sun",
  "tokio",
  "tracing",
 ]
@@ -2577,6 +2586,12 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "sun"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ee651f4a9b6f29759b0636638c8140836bcdc28ed2c5f332b71c5911a439433"
 
 [[package]]
 name = "syn"

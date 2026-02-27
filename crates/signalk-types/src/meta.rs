@@ -77,10 +77,14 @@ pub fn default_metadata(path: &str) -> Option<Metadata> {
         "navigation.headingTrue" => ("rad", "Heading true", "HDG(T)"),
         "navigation.headingMagnetic" => ("rad", "Heading magnetic", "HDG(M)"),
         "navigation.magneticVariation" => ("rad", "Magnetic variation", "VAR"),
+        "navigation.leewayAngle" => ("rad", "Leeway angle", "Leeway"),
+        "navigation.attitude" => ("", "Vessel attitude (roll/pitch/yaw)", "Attitude"),
         // Depth
         "environment.depth.belowTransducer" => ("m", "Depth below transducer", "DBT"),
         "environment.depth.belowKeel" => ("m", "Depth below keel", "DBK"),
         "environment.depth.belowSurface" => ("m", "Depth below surface", "DBS"),
+        "environment.depth.surfaceToTransducer" => ("m", "Surface to transducer", "S→T"),
+        "environment.depth.transducerToKeel" => ("m", "Transducer to keel", "T→K"),
         // Wind
         "environment.wind.speedApparent" => ("m/s", "Apparent wind speed", "AWS"),
         "environment.wind.angleApparent" => ("rad", "Apparent wind angle", "AWA"),
@@ -89,19 +93,28 @@ pub fn default_metadata(path: &str) -> Option<Metadata> {
         "environment.wind.angleTrueWater" => ("rad", "True wind angle (water ref)", "TWA(W)"),
         "environment.wind.directionTrue" => ("rad", "True wind direction", "TWD"),
         "environment.wind.directionMagnetic" => ("rad", "Wind direction (magnetic)", "MWD"),
+        "environment.wind.speedOverGround" => ("m/s", "True wind speed (ground ref)", "GWS"),
+        "environment.wind.directionGround" => ("rad", "True wind direction (ground ref)", "GWD"),
         // Temperature & pressure
         "environment.outside.temperature" => ("K", "Outside air temperature", "Air"),
         "environment.outside.pressure" => ("Pa", "Atmospheric pressure", "Baro"),
         "environment.outside.humidity" => ("ratio", "Relative humidity", "Hum"),
         "environment.outside.dewPointTemperature" => ("K", "Dew point temperature", "Dew"),
-        "environment.outside.density" => ("kg/m3", "Air density", "Rho"),
+        "environment.outside.airDensity" => ("kg/m³", "Air density", "ρ"),
+        "environment.outside.heatIndexTemperature" => ("K", "Heat index temperature", "HI"),
+        "environment.outside.apparentWindChillTemperature" => ("K", "Wind chill temperature", "WC"),
         "environment.water.temperature" => ("K", "Water temperature", "Water"),
         // Current
         "environment.current.setTrue" => ("rad", "Current set (true)", "Set(T)"),
         "environment.current.setMagnetic" => ("rad", "Current set (magnetic)", "Set(M)"),
         "environment.current.drift" => ("m/s", "Current drift", "Drift"),
-        // VMG
+        "environment.current.driftImpact" => ("ratio", "Current drift impact", "Impact"),
+        // Navigation / Course
+        "navigation.course.estimatedTimeOfArrival" => ("s", "ETA in seconds", "ETA"),
+        "navigation.course.steerError" => ("rad", "Steering error", "XTE"),
+        // VMG / Performance
         "performance.velocityMadeGood" => ("m/s", "Velocity made good", "VMG"),
+        "performance.velocityMadeGoodToWaypoint" => ("m/s", "VMG to waypoint (STW)", "VMG(W)"),
         _ => return None,
     };
 

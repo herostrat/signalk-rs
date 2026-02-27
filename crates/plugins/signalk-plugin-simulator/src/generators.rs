@@ -218,6 +218,14 @@ pub struct SimulatorState {
     // Navigation
     heading_noise: NoiseGenerator,
     magnetic_variation_rad: f64,
+    // STW: SOG offset by current effect
+    stw_offset: SineGenerator,
+    stw_noise: NoiseGenerator,
+    // Attitude: roll (heel) and pitch from wave action
+    roll: SineGenerator,
+    roll_noise: NoiseGenerator,
+    pitch: SineGenerator,
+    pitch_noise: NoiseGenerator,
 
     // Environment - wind
     pub wind_angle: SineGenerator,
@@ -227,6 +235,7 @@ pub struct SimulatorState {
     // Environment - depth & water
     pub depth: SineGenerator,
     depth_noise: NoiseGenerator,
+    surface_to_transducer_m: f64,
     pub water_temp: SineGenerator,
     water_temp_noise: NoiseGenerator,
 
@@ -238,13 +247,26 @@ pub struct SimulatorState {
     pub humidity: SineGenerator,
     humidity_noise: NoiseGenerator,
 
-    // Propulsion
+    // Propulsion + electrical + fuel
     pub enable_propulsion: bool,
     pub rpm: CorrelatedGenerator,
     pub oil_temp: SineGenerator,
     oil_temp_noise: NoiseGenerator,
     pub coolant_temp: SineGenerator,
     coolant_temp_noise: NoiseGenerator,
+    // Fuel rate: correlated with RPM (L/h)
+    fuel_rate: CorrelatedGenerator,
+    // Battery: voltage sine (charge cycle), current correlated with RPM
+    battery_voltage: SineGenerator,
+    battery_voltage_noise: NoiseGenerator,
+    battery_current: CorrelatedGenerator,
+
+    // Tanks
+    fuel_tank_capacity_m3: f64,
+    fresh_water_capacity_m3: f64,
+    // Drain rates (ratio per second) — fuel drains faster under load
+    fuel_drain_base: f64,
+    fresh_water_drain_rate: f64,
 }
 
 /// All simulated values for one tick.
@@ -255,6 +277,11 @@ pub struct SimulatedValues {
     pub sog_mps: f64,
     pub cog_rad: f64,
     pub heading_magnetic_rad: f64,
+    pub stw_mps: f64,
+    /// Roll angle in radians (positive = starboard heel)
+    pub roll_rad: f64,
+    /// Pitch angle in radians (positive = bow up)
+    pub pitch_rad: f64,
 
     // Environment - wind
     pub wind_angle_apparent_rad: f64,
@@ -262,6 +289,7 @@ pub struct SimulatedValues {
 
     // Environment - depth & water
     pub depth_below_transducer_m: f64,
+    pub surface_to_transducer_m: f64,
     pub water_temperature_k: f64,
 
     // Environment - atmosphere
@@ -273,8 +301,14 @@ pub struct SimulatedValues {
     // Navigation - magnetic variation (emitted as own path for derived-data)
     pub magnetic_variation_rad: f64,
 
-    // Propulsion (None if disabled)
+    // Propulsion + electrical (None if disabled)
     pub propulsion: Option<PropulsionValues>,
+
+    // Tanks (always present)
+    pub fuel_tank_level: f64,
+    pub fuel_tank_capacity_m3: f64,
+    pub fresh_water_level: f64,
+    pub fresh_water_capacity_m3: f64,
 }
 
 pub struct PropulsionValues {
@@ -284,6 +318,12 @@ pub struct PropulsionValues {
     pub oil_temperature_k: f64,
     /// Coolant temperature in Kelvin
     pub coolant_temperature_k: f64,
+    /// Fuel consumption rate in m³/s
+    pub fuel_rate_m3s: f64,
+    /// Battery voltage (V)
+    pub battery_voltage: f64,
+    /// Battery current (A, positive = charging)
+    pub battery_current: f64,
 }
 
 impl SimulatorState {
@@ -308,6 +348,18 @@ impl SimulatorState {
             heading_noise: NoiseGenerator::new(3.0_f64.to_radians(), 1.5),
             magnetic_variation_rad: magnetic_variation_deg.to_radians(),
 
+            // STW: SOG offset by current (±0.3 m/s slow drift, ±0.05 paddle wheel noise)
+            stw_offset: SineGenerator::new(-0.3, 0.3, 50.0).with_phase(13.0),
+            stw_noise: NoiseGenerator::new(0.05, 1.5),
+
+            // Attitude: wave-induced roll ±12° (7s period = typical ocean swell)
+            roll: SineGenerator::new(-12.0_f64.to_radians(), 12.0_f64.to_radians(), 7.0),
+            roll_noise: NoiseGenerator::new(3.0_f64.to_radians(), 2.0),
+            // Pitch ±4° (5s period)
+            pitch: SineGenerator::new(-4.0_f64.to_radians(), 4.0_f64.to_radians(), 5.0)
+                .with_phase(2.0),
+            pitch_noise: NoiseGenerator::new(1.5_f64.to_radians(), 2.0),
+
             // Apparent wind angle: oscillates -π to π, period 30s
             wind_angle: SineGenerator::new(-PI, PI, 30.0),
             // Apparent wind speed: 2–15 m/s, period 25s
@@ -318,37 +370,51 @@ impl SimulatorState {
             depth: SineGenerator::new(5.0, 18.0, 60.0).with_phase(10.0),
             // Sonar jitter: ±0.1m every 1s (sensor noise, wave action)
             depth_noise: NoiseGenerator::new(0.1, 1.0),
+            // Transducer is 0.5m below waterline (constant)
+            surface_to_transducer_m: 0.5,
 
             // Water temp: 283–293 K (10–20°C), period 120s
             water_temp: SineGenerator::new(283.0, 293.0, 120.0).with_phase(30.0),
-            // Sensor noise: ±0.05 K
             water_temp_noise: NoiseGenerator::new(0.05, 3.0),
 
             // Air temp: 288–298 K (15–25°C), period 180s
             air_temp: SineGenerator::new(288.0, 298.0, 180.0).with_phase(50.0),
-            // Sensor noise: ±0.1 K
             air_temp_noise: NoiseGenerator::new(0.1, 3.0),
 
             // Barometric pressure: 100800–102000 Pa, period 300s
             pressure: SineGenerator::new(100_800.0, 102_000.0, 300.0).with_phase(100.0),
-            // Sensor noise: ±15 Pa (~0.15 hPa)
             pressure_noise: NoiseGenerator::new(15.0, 3.0),
 
             // Relative humidity: 0.50–0.85, period 200s
             humidity: SineGenerator::new(0.50, 0.85, 200.0).with_phase(70.0),
-            // Sensor noise: ±0.01
             humidity_noise: NoiseGenerator::new(0.01, 3.0),
 
             // Propulsion
             enable_propulsion,
             // RPM: base 5 Hz, up to +45 Hz correlated with SOG (max ~5 m/s)
             rpm: CorrelatedGenerator::new(5.0, 45.0, 5.0, 0.5),
-            // Oil temp: 340–370 K, period 90s (warm-up cycle)
+            // Oil temp: 340–370 K, period 90s
             oil_temp: SineGenerator::new(340.0, 370.0, 90.0).with_phase(20.0),
             oil_temp_noise: NoiseGenerator::new(1.5, 4.0),
             // Coolant temp: 340–365 K, period 120s
             coolant_temp: SineGenerator::new(340.0, 365.0, 120.0).with_phase(40.0),
             coolant_temp_noise: NoiseGenerator::new(1.0, 5.0),
+            // Fuel rate: 0.5–8.0 L/h correlated with RPM (max 50 Hz)
+            // Stored as m³/s: 8 L/h = 2.22e-6 m³/s
+            fuel_rate: CorrelatedGenerator::new(1.4e-7, 2.1e-6, 50.0, 1.0e-7),
+            // Battery: 12.2–13.8V slow charge cycle (90s)
+            battery_voltage: SineGenerator::new(12.2, 13.8, 90.0).with_phase(15.0),
+            battery_voltage_noise: NoiseGenerator::new(0.05, 3.0),
+            // Battery current: 0–25A correlated with RPM (alternator output)
+            battery_current: CorrelatedGenerator::new(0.0, 25.0, 50.0, 0.5),
+
+            // Tanks (SI: m³)
+            fuel_tank_capacity_m3: 0.200,   // 200 L
+            fresh_water_capacity_m3: 0.150, // 150 L
+            // Drain rates (ratio per second): fuel ~8 L/h at cruise = 0.04/h
+            fuel_drain_base: 0.04 / 3600.0,
+            // Fresh water: ~5 L/h average usage
+            fresh_water_drain_rate: 5.0 / (150.0 * 3600.0),
         }
     }
 
@@ -364,6 +430,16 @@ impl SimulatorState {
         let heading_mag =
             (pos.cog_rad + self.magnetic_variation_rad + self.heading_noise.offset(elapsed_secs))
                 .rem_euclid(2.0 * PI);
+
+        // STW: SOG + current offset + paddle wheel noise (never negative)
+        let stw = (pos.sog_mps
+            + self.stw_offset.value(elapsed_secs)
+            + self.stw_noise.offset(elapsed_secs))
+        .max(0.0);
+
+        // Attitude: wave-induced roll and pitch
+        let roll = self.roll.value(elapsed_secs) + self.roll_noise.offset(elapsed_secs + 1000.0);
+        let pitch = self.pitch.value(elapsed_secs) + self.pitch_noise.offset(elapsed_secs + 2000.0);
 
         // Environment - wind
         let wind_speed_base = self.wind_speed.value(elapsed_secs);
@@ -384,20 +460,45 @@ impl SimulatorState {
             + self.humidity_noise.offset(elapsed_secs))
         .clamp(0.0, 1.0);
 
-        // Propulsion
+        // Propulsion + electrical + fuel
         let propulsion = if self.enable_propulsion {
             let revs = self.rpm.value(pos.sog_mps, elapsed_secs).max(0.0);
             let oil = self.oil_temp.value(elapsed_secs) + self.oil_temp_noise.offset(elapsed_secs);
             let coolant = self.coolant_temp.value(elapsed_secs)
                 + self.coolant_temp_noise.offset(elapsed_secs);
+            let fuel = self.fuel_rate.value(revs, elapsed_secs).max(0.0);
+            let voltage = self.battery_voltage.value(elapsed_secs)
+                + self.battery_voltage_noise.offset(elapsed_secs);
+            let current = self.battery_current.value(revs, elapsed_secs).max(0.0);
             Some(PropulsionValues {
                 revolutions_hz: revs,
                 oil_temperature_k: oil,
                 coolant_temperature_k: coolant,
+                fuel_rate_m3s: fuel,
+                battery_voltage: voltage,
+                battery_current: current,
             })
         } else {
             None
         };
+
+        // Tanks: slowly draining over time (wrap at 10% → refill to 95%)
+        let fuel_cycle = 0.95 - self.fuel_drain_base * elapsed_secs;
+        let fuel_level = if fuel_cycle > 0.10 {
+            fuel_cycle
+        } else {
+            // "Refueled" — wrap around
+            0.95 - (self.fuel_drain_base * elapsed_secs) % 0.85
+        }
+        .clamp(0.10, 0.95);
+
+        let water_cycle = 0.90 - self.fresh_water_drain_rate * elapsed_secs;
+        let water_level = if water_cycle > 0.15 {
+            water_cycle
+        } else {
+            0.90 - (self.fresh_water_drain_rate * elapsed_secs) % 0.75
+        }
+        .clamp(0.15, 0.90);
 
         SimulatedValues {
             latitude: pos.latitude,
@@ -405,15 +506,23 @@ impl SimulatorState {
             sog_mps: pos.sog_mps,
             cog_rad: pos.cog_rad,
             heading_magnetic_rad: heading_mag,
+            stw_mps: stw,
+            roll_rad: roll,
+            pitch_rad: pitch,
             wind_angle_apparent_rad: self.wind_angle.value(elapsed_secs),
             wind_speed_apparent_mps: wind_speed,
             depth_below_transducer_m: depth,
+            surface_to_transducer_m: self.surface_to_transducer_m,
             water_temperature_k: water_temp,
             air_temperature_k: air_temp,
             pressure_pa: pressure,
             humidity_ratio: humidity,
             magnetic_variation_rad: self.magnetic_variation_rad,
             propulsion,
+            fuel_tank_level: fuel_level,
+            fuel_tank_capacity_m3: self.fuel_tank_capacity_m3,
+            fresh_water_level: water_level,
+            fresh_water_capacity_m3: self.fresh_water_capacity_m3,
         }
     }
 
@@ -540,24 +649,43 @@ mod tests {
         let state = SimulatorState::new(54.5, 10.0, 200.0, 300.0, 2.5, true);
         let values = state.tick();
 
+        // Navigation
         assert!(values.latitude > 54.0 && values.latitude < 55.0);
         assert!(values.longitude > 9.5 && values.longitude < 10.5);
-        assert!(values.sog_mps > 0.0);
+        assert!(values.sog_mps >= 0.0);
         assert!(values.cog_rad >= 0.0 && values.cog_rad < 2.0 * PI);
         assert!(values.heading_magnetic_rad >= 0.0 && values.heading_magnetic_rad < 2.0 * PI);
+        assert!(values.stw_mps >= 0.0 && values.stw_mps < 10.0);
+        // Roll: ±12° base + ±3° noise → max ~±15° (~0.26 rad)
+        assert!(values.roll_rad.abs() < 0.35, "roll: {}", values.roll_rad);
+        // Pitch: ±4° base + ±1.5° noise → max ~±5.5° (~0.10 rad)
+        assert!(values.pitch_rad.abs() < 0.15, "pitch: {}", values.pitch_rad);
+
+        // Environment
         assert!(values.wind_speed_apparent_mps >= 0.0);
         assert!(values.depth_below_transducer_m >= 0.5);
+        assert!((values.surface_to_transducer_m - 0.5).abs() < f64::EPSILON);
         assert!(values.water_temperature_k > 280.0);
         assert!(values.air_temperature_k > 285.0);
         assert!(values.pressure_pa > 100_000.0);
         assert!(values.humidity_ratio >= 0.0 && values.humidity_ratio <= 1.0);
         assert!((values.magnetic_variation_rad - 2.5_f64.to_radians()).abs() < 0.01);
-        assert!(values.propulsion.is_some());
 
+        // Propulsion + electrical
+        assert!(values.propulsion.is_some());
         let prop = values.propulsion.unwrap();
         assert!(prop.revolutions_hz >= 0.0);
         assert!(prop.oil_temperature_k > 330.0);
         assert!(prop.coolant_temperature_k > 330.0);
+        assert!(prop.fuel_rate_m3s >= 0.0);
+        assert!(prop.battery_voltage > 11.0 && prop.battery_voltage < 15.0);
+        assert!(prop.battery_current >= 0.0);
+
+        // Tanks
+        assert!(values.fuel_tank_level > 0.0 && values.fuel_tank_level <= 1.0);
+        assert!((values.fuel_tank_capacity_m3 - 0.200).abs() < f64::EPSILON);
+        assert!(values.fresh_water_level > 0.0 && values.fresh_water_level <= 1.0);
+        assert!((values.fresh_water_capacity_m3 - 0.150).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -577,10 +705,15 @@ mod tests {
         assert_eq!(a.sog_mps, b.sog_mps);
         assert_eq!(a.cog_rad, b.cog_rad);
         assert_eq!(a.heading_magnetic_rad, b.heading_magnetic_rad);
+        assert_eq!(a.stw_mps, b.stw_mps);
+        assert_eq!(a.roll_rad, b.roll_rad);
+        assert_eq!(a.pitch_rad, b.pitch_rad);
         assert_eq!(a.wind_angle_apparent_rad, b.wind_angle_apparent_rad);
         assert_eq!(a.pressure_pa, b.pressure_pa);
         assert_eq!(a.humidity_ratio, b.humidity_ratio);
         assert_eq!(a.magnetic_variation_rad, b.magnetic_variation_rad);
+        assert_eq!(a.fuel_tank_level, b.fuel_tank_level);
+        assert_eq!(a.fresh_water_level, b.fresh_water_level);
     }
 
     #[test]
@@ -588,9 +721,10 @@ mod tests {
         let state = SimulatorState::new(54.5, 10.0, 200.0, 300.0, 2.5, true);
         let a = state.tick_at(0.0);
         let b = state.tick_at(10.0);
-        // Position should differ after 10 seconds of orbiting
         assert_ne!(a.latitude, b.latitude);
         assert_ne!(a.cog_rad, b.cog_rad);
+        assert_ne!(a.stw_mps, b.stw_mps);
+        assert_ne!(a.roll_rad, b.roll_rad);
     }
 
     #[test]
