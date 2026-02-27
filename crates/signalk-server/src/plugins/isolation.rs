@@ -37,8 +37,7 @@ mod tests {
 
     #[tokio::test]
     async fn guarded_ok_result_passes_through() {
-        let result: Result<i32, PluginError> =
-            guarded("test", async { Ok(42) }).await;
+        let result: Result<i32, PluginError> = guarded("test", async { Ok(42) }).await;
         assert_eq!(result.unwrap(), 42);
     }
 

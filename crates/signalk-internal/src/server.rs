@@ -33,7 +33,10 @@ use crate::uds::bind_unix_socket;
 
 /// Async query function type: maps a PathQuery to an optional response.
 pub type AsyncQueryFn = Box<
-    dyn Fn(PathQuery) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<PathQueryResponse>> + Send>>
+    dyn Fn(
+            PathQuery,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<PathQueryResponse>> + Send>>
         + Send
         + Sync,
 >;

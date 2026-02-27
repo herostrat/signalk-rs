@@ -102,7 +102,10 @@ pub fn from_gga(gga: &nmea::sentences::GgaData) -> Vec<PathValue> {
             FixType::Manual => "manual",
             FixType::Simulation => "simulation",
         };
-        out.push(PathValue::new("navigation.gnss.methodQuality", json!(method)));
+        out.push(PathValue::new(
+            "navigation.gnss.methodQuality",
+            json!(method),
+        ));
     }
 
     out
@@ -174,10 +177,16 @@ pub fn from_mwv(mwv: &nmea::sentences::MwvData) -> Vec<PathValue> {
     match mwv.reference {
         Some(MwvReference::Relative) => {
             if let Some(angle) = angle_rad {
-                out.push(PathValue::new("environment.wind.angleApparent", json!(angle)));
+                out.push(PathValue::new(
+                    "environment.wind.angleApparent",
+                    json!(angle),
+                ));
             }
             if let Some(speed) = speed_ms {
-                out.push(PathValue::new("environment.wind.speedApparent", json!(speed)));
+                out.push(PathValue::new(
+                    "environment.wind.speedApparent",
+                    json!(speed),
+                ));
             }
         }
         Some(MwvReference::Theoretical) => {
@@ -256,7 +265,10 @@ mod tests {
             .find(|p| p.path == "navigation.speedOverGround")
             .unwrap();
         let v = sog.value.as_f64().unwrap();
-        assert!((v - KNOTS_TO_MS).abs() < 1e-6, "Expected ~0.514444, got {v}");
+        assert!(
+            (v - KNOTS_TO_MS).abs() < 1e-6,
+            "Expected ~0.514444, got {v}"
+        );
     }
 
     #[test]
@@ -294,7 +306,10 @@ mod tests {
             .find(|p| p.path == "navigation.headingTrue")
             .unwrap();
         let v = hdg.value.as_f64().unwrap();
-        assert!((v - std::f64::consts::PI).abs() < 1e-6, "Expected PI, got {v}");
+        assert!(
+            (v - std::f64::consts::PI).abs() < 1e-6,
+            "Expected PI, got {v}"
+        );
     }
 
     #[test]

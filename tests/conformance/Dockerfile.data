@@ -1,0 +1,4 @@
+FROM node:20-alpine
+WORKDIR /runner
+COPY data_compare.js .
+CMD ["node", "data_compare.js"]

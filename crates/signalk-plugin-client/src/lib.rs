@@ -251,7 +251,10 @@ impl PluginContext for RemotePluginContext {
     }
 
     fn data_dir(&self) -> PathBuf {
-        PathBuf::from(format!("/var/lib/signalk-rs/plugin-data/{}", self.plugin_id))
+        PathBuf::from(format!(
+            "/var/lib/signalk-rs/plugin-data/{}",
+            self.plugin_id
+        ))
     }
 
     fn set_status(&self, msg: &str) {

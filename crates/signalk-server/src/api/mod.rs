@@ -313,8 +313,10 @@ pub async fn proxy_plugin_route(
             body: body_bytes.to_vec(),
         };
 
-        if let Some(plugin_resp) =
-            state.route_table.handle(&plugin_id, &method, &relative_path, plugin_req).await
+        if let Some(plugin_resp) = state
+            .route_table
+            .handle(&plugin_id, &method, &relative_path, plugin_req)
+            .await
         {
             let mut builder = axum::response::Response::builder().status(plugin_resp.status);
             for (k, v) in &plugin_resp.headers {
@@ -384,6 +386,20 @@ fn traverse_json<'a>(value: &'a Value, parts: &[&str]) -> Option<&'a Value> {
         }
         _ => None,
     }
+}
+
+/// POST /test/inject — accept a raw delta and apply it to the store.
+///
+/// Only available when the `simulator` feature is enabled (development/testing builds).
+/// Used by the conformance test runner to inject identical data into both servers.
+#[cfg(feature = "simulator")]
+pub async fn test_inject_delta(
+    State(state): State<Arc<ServerState>>,
+    Json(delta): Json<signalk_types::Delta>,
+) -> Response {
+    let mut store = state.store.write().await;
+    store.apply_delta(delta);
+    Json(serde_json::json!({"success": true})).into_response()
 }
 
 #[cfg(test)]

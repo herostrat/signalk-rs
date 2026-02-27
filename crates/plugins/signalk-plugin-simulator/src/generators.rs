@@ -216,6 +216,7 @@ pub struct SimulatorState {
     // Environment - atmosphere
     pub air_temp: SineGenerator,
     pub pressure: SineGenerator,
+    pub humidity: SineGenerator,
 
     // Propulsion
     pub enable_propulsion: bool,
@@ -245,6 +246,11 @@ pub struct SimulatedValues {
     // Environment - atmosphere
     pub air_temperature_k: f64,
     pub pressure_pa: f64,
+    /// Relative humidity as ratio (0.0–1.0)
+    pub humidity_ratio: f64,
+
+    // Navigation - magnetic variation (emitted as own path for derived-data)
+    pub magnetic_variation_rad: f64,
 
     // Propulsion (None if disabled)
     pub propulsion: Option<PropulsionValues>,
@@ -299,6 +305,9 @@ impl SimulatorState {
             // Barometric pressure: 100800–102000 Pa, very slow (1800s)
             pressure: SineGenerator::new(100_800.0, 102_000.0, 1800.0).with_phase(100.0),
 
+            // Relative humidity: 0.40–0.90 (40%–90%), very slow (1200s)
+            humidity: SineGenerator::new(0.40, 0.90, 1200.0).with_phase(70.0),
+
             // Propulsion
             enable_propulsion,
             // RPM: base 5 Hz, up to +45 Hz correlated with SOG (max ~4 m/s)
@@ -311,27 +320,28 @@ impl SimulatorState {
         }
     }
 
-    /// Generate all values for the current instant.
-    pub fn tick(&self) -> SimulatedValues {
-        let elapsed = self.start.elapsed().as_secs_f64();
-
+    /// Generate all values for a given elapsed time (seconds since start).
+    ///
+    /// This is the core generation method — deterministic for the same `elapsed_secs`.
+    /// Use this in tests for reproducible values.
+    pub fn tick_at(&self, elapsed_secs: f64) -> SimulatedValues {
         // Position & navigation
-        let pos = self.position.generate(elapsed);
+        let pos = self.position.generate(elapsed_secs);
 
         // Heading magnetic = COG + variation + compass noise
         let heading_mag =
-            (pos.cog_rad + self.magnetic_variation_rad + self.heading_noise.offset(elapsed))
+            (pos.cog_rad + self.magnetic_variation_rad + self.heading_noise.offset(elapsed_secs))
                 .rem_euclid(2.0 * PI);
 
         // Environment
-        let wind_speed_base = self.wind_speed.value(elapsed);
-        let wind_speed = (wind_speed_base + self.wind_speed_noise.offset(elapsed)).max(0.0);
+        let wind_speed_base = self.wind_speed.value(elapsed_secs);
+        let wind_speed = (wind_speed_base + self.wind_speed_noise.offset(elapsed_secs)).max(0.0);
 
         // Propulsion
         let propulsion = if self.enable_propulsion {
-            let revs = self.rpm.value(pos.sog_mps, elapsed).max(0.0);
-            let oil = self.oil_temp.value(elapsed) + self.oil_temp_noise.offset(elapsed);
-            let coolant = self.coolant_temp.value(elapsed);
+            let revs = self.rpm.value(pos.sog_mps, elapsed_secs).max(0.0);
+            let oil = self.oil_temp.value(elapsed_secs) + self.oil_temp_noise.offset(elapsed_secs);
+            let coolant = self.coolant_temp.value(elapsed_secs);
             Some(PropulsionValues {
                 revolutions_hz: revs,
                 oil_temperature_k: oil,
@@ -347,14 +357,23 @@ impl SimulatorState {
             sog_mps: pos.sog_mps,
             cog_rad: pos.cog_rad,
             heading_magnetic_rad: heading_mag,
-            wind_angle_apparent_rad: self.wind_angle.value(elapsed),
+            wind_angle_apparent_rad: self.wind_angle.value(elapsed_secs),
             wind_speed_apparent_mps: wind_speed,
-            depth_below_transducer_m: self.depth.value(elapsed),
-            water_temperature_k: self.water_temp.value(elapsed),
-            air_temperature_k: self.air_temp.value(elapsed),
-            pressure_pa: self.pressure.value(elapsed),
+            depth_below_transducer_m: self.depth.value(elapsed_secs),
+            water_temperature_k: self.water_temp.value(elapsed_secs),
+            air_temperature_k: self.air_temp.value(elapsed_secs),
+            pressure_pa: self.pressure.value(elapsed_secs),
+            humidity_ratio: self.humidity.value(elapsed_secs),
+            magnetic_variation_rad: self.magnetic_variation_rad,
             propulsion,
         }
+    }
+
+    /// Generate all values for the current instant.
+    ///
+    /// Convenience wrapper around `tick_at()` using wall-clock elapsed time.
+    pub fn tick(&self) -> SimulatedValues {
+        self.tick_at(self.start.elapsed().as_secs_f64())
     }
 }
 
@@ -405,10 +424,7 @@ mod tests {
             let t = i as f64 * 0.05;
             let v = ng.offset(t);
             // pseudo_normal can exceed [-1,1] slightly, so allow 2x amplitude
-            assert!(
-                v.abs() <= 10.0,
-                "noise {v} exceeds 2x amplitude at t={t}"
-            );
+            assert!(v.abs() <= 10.0, "noise {v} exceeds 2x amplitude at t={t}");
         }
     }
 
@@ -471,6 +487,8 @@ mod tests {
         assert!(values.water_temperature_k > 280.0);
         assert!(values.air_temperature_k > 285.0);
         assert!(values.pressure_pa > 100_000.0);
+        assert!(values.humidity_ratio >= 0.3 && values.humidity_ratio <= 1.0);
+        assert!((values.magnetic_variation_rad - 2.5_f64.to_radians()).abs() < 0.01);
         assert!(values.propulsion.is_some());
 
         let prop = values.propulsion.unwrap();
@@ -484,6 +502,32 @@ mod tests {
         let state = SimulatorState::new(54.5, 10.0, 200.0, 300.0, 2.5, false);
         let values = state.tick();
         assert!(values.propulsion.is_none());
+    }
+
+    #[test]
+    fn tick_at_is_deterministic() {
+        let state = SimulatorState::new(54.5, 10.0, 200.0, 300.0, 2.5, true);
+        let a = state.tick_at(42.0);
+        let b = state.tick_at(42.0);
+        assert_eq!(a.latitude, b.latitude);
+        assert_eq!(a.longitude, b.longitude);
+        assert_eq!(a.sog_mps, b.sog_mps);
+        assert_eq!(a.cog_rad, b.cog_rad);
+        assert_eq!(a.heading_magnetic_rad, b.heading_magnetic_rad);
+        assert_eq!(a.wind_angle_apparent_rad, b.wind_angle_apparent_rad);
+        assert_eq!(a.pressure_pa, b.pressure_pa);
+        assert_eq!(a.humidity_ratio, b.humidity_ratio);
+        assert_eq!(a.magnetic_variation_rad, b.magnetic_variation_rad);
+    }
+
+    #[test]
+    fn tick_at_different_times_differ() {
+        let state = SimulatorState::new(54.5, 10.0, 200.0, 300.0, 2.5, true);
+        let a = state.tick_at(0.0);
+        let b = state.tick_at(10.0);
+        // Position should differ after 10 seconds of orbiting
+        assert_ne!(a.latitude, b.latitude);
+        assert_ne!(a.cog_rad, b.cog_rad);
     }
 
     #[test]

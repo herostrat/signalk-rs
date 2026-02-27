@@ -1,21 +1,28 @@
 # Side-by-side conformance comparison:
-#   signalk-original  (port 3000)  ← official signalk-server (Node.js)
-#   signalk-rs        (port 3001)  ← this project
-#   conformance-runner              ← sends identical requests to both, diffs responses
+#   signalk-original  (port 3000)  <- official signalk-server (Node.js)
+#   signalk-rs        (port 3001)  <- this project
+#   conformance-runner              <- sends identical requests to both, diffs responses
+#   data-compare-runner             <- injects identical deltas, compares REST output
 #
 # Usage:
+#   # API conformance only:
 #   docker compose -f docker-compose.test.yml up --build --exit-code-from conformance-runner
 #
-# The runner exits 0 if all comparisons pass, non-zero on divergence.
+#   # Data conformance only:
+#   docker compose -f docker-compose.test.yml up --build --exit-code-from data-compare-runner
+#
+# The runners exit 0 if all comparisons pass, non-zero on divergence.
 
 services:
-  # ── Official SignalK server (reference implementation) ─────────────────────
+  # -- Official SignalK server (reference implementation) ----------------------
   signalk-original:
     image: signalk/signalk-server:latest
     ports:
       - "3000:3000"
     volumes:
       - ./tests/conformance/config:/root/.signalk:ro
+      # Mount the test-injector plugin for data injection
+      - ./tests/conformance/test-injector:/root/.signalk/node_modules/signalk-test-injector:ro
     environment:
       - SIGNALK_SETTINGS_FILE=/root/.signalk/settings.json
     healthcheck:
@@ -24,11 +31,13 @@ services:
       timeout: 3s
       retries: 10
 
-  # ── signalk-rs (Rust implementation) ────────────────────────────────────────
+  # -- signalk-rs (Rust implementation) ----------------------------------------
   signalk-rs:
     build:
       context: .
       dockerfile: docker/Dockerfile.rs
+      args:
+        FEATURES: "simulator"
     ports:
       - "3001:3000"
     volumes:
@@ -41,7 +50,7 @@ services:
       timeout: 3s
       retries: 10
 
-  # ── Conformance runner ───────────────────────────────────────────────────────
+  # -- API conformance runner --------------------------------------------------
   conformance-runner:
     build:
       context: ./tests/conformance
@@ -55,3 +64,17 @@ services:
       - ORIGINAL_URL=http://signalk-original:3000
       - RS_URL=http://signalk-rs:3000
     # Runner exits with the number of failed comparisons (0 = all pass)
+
+  # -- Data conformance runner -------------------------------------------------
+  data-compare-runner:
+    build:
+      context: ./tests/conformance
+      dockerfile: Dockerfile.data
+    depends_on:
+      signalk-original:
+        condition: service_healthy
+      signalk-rs:
+        condition: service_healthy
+    environment:
+      - ORIGINAL_URL=http://signalk-original:3000
+      - RS_URL=http://signalk-rs:3000

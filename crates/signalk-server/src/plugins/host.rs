@@ -22,7 +22,9 @@ use super::routes::PluginRouteTable;
 
 /// Shared PUT handler function — Arc-wrapped for cloning across threads.
 pub type SharedPutHandler = Arc<
-    dyn Fn(PutCommand) -> Pin<Box<dyn Future<Output = Result<PutHandlerResult, PluginError>> + Send>>
+    dyn Fn(
+            PutCommand,
+        ) -> Pin<Box<dyn Future<Output = Result<PutHandlerResult, PluginError>> + Send>>
         + Send
         + Sync
         + 'static,
@@ -155,7 +157,9 @@ impl PluginContext for RustPluginContext {
             } else {
                 vessel_uri.to_string()
             };
-            Ok(store.get_vessel_path(&uri, sk_path).map(|v| v.value.clone()))
+            Ok(store
+                .get_vessel_path(&uri, sk_path)
+                .map(|v| v.value.clone()))
         } else {
             // Fallback: try as self path
             Ok(store.get_self_path(full_path).map(|v| v.value.clone()))
@@ -275,13 +279,10 @@ impl PluginContext for RustPluginContext {
         self.route_table.register(&self.plugin_id, routes).await;
 
         // Register in the shared discovery map
-        self.plugin_routes_map
-            .write()
-            .await
-            .insert(
-                self.plugin_id.clone(),
-                format!("/plugins/{}", self.plugin_id),
-            );
+        self.plugin_routes_map.write().await.insert(
+            self.plugin_id.clone(),
+            format!("/plugins/{}", self.plugin_id),
+        );
 
         tracing::info!(
             plugin = %self.plugin_id,
@@ -385,17 +386,21 @@ mod tests {
         let (ctx, store) = make_test_context();
 
         // Insert data into the store
-        store.write().await.apply_delta(Delta::self_vessel(vec![
-            Update::new(
+        store
+            .write()
+            .await
+            .apply_delta(Delta::self_vessel(vec![Update::new(
                 Source::plugin("test"),
                 vec![PathValue::new(
                     "navigation.speedOverGround",
                     serde_json::json!(3.5),
                 )],
-            ),
-        ]));
+            )]));
 
-        let result = ctx.get_self_path("navigation.speedOverGround").await.unwrap();
+        let result = ctx
+            .get_self_path("navigation.speedOverGround")
+            .await
+            .unwrap();
         assert_eq!(result, Some(serde_json::json!(3.5)));
     }
 
@@ -450,15 +455,16 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
         // Apply a delta to the store (triggers broadcast)
-        store.write().await.apply_delta(Delta::self_vessel(vec![
-            Update::new(
+        store
+            .write()
+            .await
+            .apply_delta(Delta::self_vessel(vec![Update::new(
                 Source::plugin("test"),
                 vec![PathValue::new(
                     "navigation.speedOverGround",
                     serde_json::json!(3.5),
                 )],
-            ),
-        ]));
+            )]));
 
         // Small delay for the subscription callback to fire
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -491,20 +497,25 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
         // This delta should NOT be received
-        store.write().await.apply_delta(Delta::self_vessel(vec![
-            Update::new(
+        store
+            .write()
+            .await
+            .apply_delta(Delta::self_vessel(vec![Update::new(
                 Source::plugin("test"),
                 vec![PathValue::new(
                     "navigation.speedOverGround",
                     serde_json::json!(5.0),
                 )],
-            ),
-        ]));
+            )]));
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let count = received.lock().unwrap().len();
-        assert_eq!(count, 0, "Expected 0 deltas after unsubscribe, got {}", count);
+        assert_eq!(
+            count, 0,
+            "Expected 0 deltas after unsubscribe, got {}",
+            count
+        );
     }
 
     #[tokio::test]

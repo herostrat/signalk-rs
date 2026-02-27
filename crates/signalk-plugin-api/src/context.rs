@@ -96,7 +96,9 @@ pub enum PutHandlerResult {
 
 /// Async PUT handler function type.
 pub type PutHandler = Box<
-    dyn Fn(PutCommand) -> Pin<Box<dyn Future<Output = Result<PutHandlerResult, PluginError>> + Send>>
+    dyn Fn(
+            PutCommand,
+        ) -> Pin<Box<dyn Future<Output = Result<PutHandlerResult, PluginError>> + Send>>
         + Send
         + Sync
         + 'static,

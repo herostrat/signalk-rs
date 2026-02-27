@@ -34,7 +34,7 @@ jobs:
         run: docker compose -f tests/plugin-compat/docker-compose.yml down
 
   compare:
-    name: Compare vs. original signalk-server
+    name: API conformance vs. original
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -55,10 +55,47 @@ jobs:
             run --rm conformance-runner \
             sh -c 'until curl -sf $ORIGINAL_URL/signalk && curl -sf $RS_URL/signalk; do sleep 2; done'
 
-      - name: Run comparison
+      - name: Run API comparison
         run: |
           docker compose -f docker-compose.test.yml \
             run --rm conformance-runner
+
+      - name: Print logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.test.yml logs signalk-original
+          docker compose -f docker-compose.test.yml logs signalk-rs
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.test.yml down
+
+  data-compare:
+    name: Data conformance vs. original
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Start both servers
+        run: |
+          docker compose -f docker-compose.test.yml up \
+            --build \
+            --detach \
+            signalk-original signalk-rs
+
+      - name: Wait for health checks
+        run: |
+          docker compose -f docker-compose.test.yml \
+            run --rm data-compare-runner \
+            sh -c 'until curl -sf $ORIGINAL_URL/signalk && curl -sf $RS_URL/signalk; do sleep 2; done'
+
+      - name: Run data comparison
+        run: |
+          docker compose -f docker-compose.test.yml \
+            run --rm data-compare-runner
 
       - name: Print logs on failure
         if: failure()

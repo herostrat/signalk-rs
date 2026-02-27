@@ -130,9 +130,7 @@ impl PluginContext for MockPluginContext {
 
     async fn get_path(&self, full_path: &str) -> Result<Option<serde_json::Value>, PluginError> {
         // Strip "vessels.self." prefix if present for lookup.
-        let path = full_path
-            .strip_prefix("vessels.self.")
-            .unwrap_or(full_path);
+        let path = full_path.strip_prefix("vessels.self.").unwrap_or(full_path);
         Ok(self.stored_values.lock().unwrap().get(path).cloned())
     }
 
@@ -203,10 +201,7 @@ impl PluginContext for MockPluginContext {
     }
 
     fn set_status(&self, msg: &str) {
-        self.status_messages
-            .lock()
-            .unwrap()
-            .push(msg.to_string());
+        self.status_messages.lock().unwrap().push(msg.to_string());
     }
 
     fn set_error(&self, msg: &str) {
@@ -225,7 +220,7 @@ impl PluginContext for MockPluginContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{delta_callback, SubscriptionSpec};
+    use crate::context::{SubscriptionSpec, delta_callback};
     use signalk_types::{Delta, PathValue, Source, Subscription, Update};
 
     #[tokio::test]

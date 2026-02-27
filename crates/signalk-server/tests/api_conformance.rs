@@ -304,7 +304,10 @@ async fn put_path_no_handler_returns_404() {
         json!({"value": 3.5}),
     )
     .await;
-    assert_eq!(status, 404, "PUT with no registered handler must return 404");
+    assert_eq!(
+        status, 404,
+        "PUT with no registered handler must return 404"
+    );
 }
 
 #[tokio::test]

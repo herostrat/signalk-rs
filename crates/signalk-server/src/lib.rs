@@ -64,7 +64,7 @@ pub fn build_router(state: Arc<ServerState>) -> axum::Router {
     use axum::routing::{any, get, post, put};
     use tower_http::cors::CorsLayer;
 
-    axum::Router::new()
+    let router = axum::Router::new()
         // Discovery
         .route("/signalk", get(api::discovery))
         // REST data API
@@ -82,8 +82,11 @@ pub fn build_router(state: Arc<ServerState>) -> axum::Router {
         .route("/signalk/v1/stream", get(ws::handler))
         // Plugin routes — proxied to the bridge
         .route("/plugins/{plugin_id}", any(api::proxy_plugin_route))
-        .route("/plugins/{plugin_id}/{*rest}", any(api::proxy_plugin_route))
-        // CORS for browser clients
-        .layer(CorsLayer::permissive())
-        .with_state(state)
+        .route("/plugins/{plugin_id}/{*rest}", any(api::proxy_plugin_route));
+
+    // Test-only delta injection endpoint (simulator feature)
+    #[cfg(feature = "simulator")]
+    let router = router.route("/test/inject", post(api::test_inject_delta));
+
+    router.layer(CorsLayer::permissive()).with_state(state)
 }

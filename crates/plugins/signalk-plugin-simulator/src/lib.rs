@@ -114,9 +114,7 @@ pub struct SimulatorPlugin {
 
 impl SimulatorPlugin {
     pub fn new() -> Self {
-        SimulatorPlugin {
-            abort_handle: None,
-        }
+        SimulatorPlugin { abort_handle: None }
     }
 }
 
@@ -243,10 +241,7 @@ impl Plugin for SimulatorPlugin {
 
 // ─── Delta builder ──────────────────────────────────────────────────────────
 
-fn build_delta(
-    values: &generators::SimulatedValues,
-    enable_environment: bool,
-) -> Delta {
+fn build_delta(values: &generators::SimulatedValues, enable_environment: bool) -> Delta {
     let source = Source::plugin("simulator");
     let mut path_values = Vec::with_capacity(12);
 
@@ -269,6 +264,10 @@ fn build_delta(
     path_values.push(PathValue::new(
         "navigation.headingMagnetic",
         serde_json::json!(values.heading_magnetic_rad),
+    ));
+    path_values.push(PathValue::new(
+        "navigation.magneticVariation",
+        serde_json::json!(values.magnetic_variation_rad),
     ));
 
     // Environment (optional)
@@ -296,6 +295,10 @@ fn build_delta(
         path_values.push(PathValue::new(
             "environment.outside.pressure",
             serde_json::json!(values.pressure_pa),
+        ));
+        path_values.push(PathValue::new(
+            "environment.outside.humidity",
+            serde_json::json!(values.humidity_ratio),
         ));
     }
 
@@ -370,6 +373,7 @@ mod tests {
         assert!(paths.contains(&"navigation.speedOverGround"));
         assert!(paths.contains(&"navigation.courseOverGroundTrue"));
         assert!(paths.contains(&"navigation.headingMagnetic"));
+        assert!(paths.contains(&"navigation.magneticVariation"));
         // No environment or propulsion
         assert!(!paths.iter().any(|p| p.starts_with("environment.")));
         assert!(!paths.iter().any(|p| p.starts_with("propulsion.")));
@@ -393,6 +397,7 @@ mod tests {
         assert!(paths.contains(&"environment.water.temperature"));
         assert!(paths.contains(&"environment.outside.temperature"));
         assert!(paths.contains(&"environment.outside.pressure"));
+        assert!(paths.contains(&"environment.outside.humidity"));
     }
 
     #[test]

@@ -5,7 +5,6 @@
     "mmsi": "123456789"
   },
   "interfaces": {
-    "plugins": false,
     "appstore": false
   },
   "security": {

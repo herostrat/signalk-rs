@@ -71,9 +71,7 @@ pub struct Nmea0183TcpPlugin {
 
 impl Nmea0183TcpPlugin {
     pub fn new() -> Self {
-        Nmea0183TcpPlugin {
-            abort_handle: None,
-        }
+        Nmea0183TcpPlugin { abort_handle: None }
     }
 }
 
@@ -220,9 +218,7 @@ pub struct Nmea0183SerialPlugin {
 
 impl Nmea0183SerialPlugin {
     pub fn new() -> Self {
-        Nmea0183SerialPlugin {
-            abort_handle: None,
-        }
+        Nmea0183SerialPlugin { abort_handle: None }
     }
 }
 
@@ -365,11 +361,18 @@ mod tests {
         assert!(delta.is_some());
         let delta = delta.unwrap();
         let update = &delta.updates[0];
-        assert!(update.values.iter().any(|v| v.path == "navigation.position"));
-        assert!(update
-            .values
-            .iter()
-            .any(|v| v.path == "navigation.speedOverGround"));
+        assert!(
+            update
+                .values
+                .iter()
+                .any(|v| v.path == "navigation.position")
+        );
+        assert!(
+            update
+                .values
+                .iter()
+                .any(|v| v.path == "navigation.speedOverGround")
+        );
     }
 
     #[test]

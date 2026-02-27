@@ -71,11 +71,7 @@ pub async fn post_json(
 
 /// Make a PUT request with JSON body.
 #[allow(dead_code)]
-pub async fn put_json(
-    app: Router,
-    uri: &str,
-    body: serde_json::Value,
-) -> (u16, serde_json::Value) {
+pub async fn put_json(app: Router, uri: &str, body: serde_json::Value) -> (u16, serde_json::Value) {
     let response = app
         .oneshot(
             Request::put(uri)
@@ -116,8 +112,7 @@ pub fn test_app_with_handler(handler_path: &str, plugin_id: &str, bridge_socket:
         handler_path.to_string(),
         plugin_id.to_string(),
     )])));
-    let plugin_routes: Arc<RwLock<HashMap<String, String>>> =
-        Arc::new(RwLock::new(HashMap::new()));
+    let plugin_routes: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
     let state = signalk_server::ServerState::new_shared(
         config,
         store,

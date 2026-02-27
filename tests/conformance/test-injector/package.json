@@ -1,0 +1,7 @@
+{
+  "name": "signalk-test-injector",
+  "version": "0.0.1",
+  "description": "Minimal plugin for injecting deltas via REST — used by conformance tests",
+  "signalk-plugin-enabled-by-default": true,
+  "main": "index.js"
+}

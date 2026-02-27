@@ -85,10 +85,8 @@ async fn main() -> Result<()> {
     };
 
     // ── Shared maps: bridge registrations visible to the public API ──────────
-    let put_handlers: Arc<RwLock<HashMap<String, String>>> =
-        Arc::new(RwLock::new(HashMap::new()));
-    let plugin_routes: Arc<RwLock<HashMap<String, String>>> =
-        Arc::new(RwLock::new(HashMap::new()));
+    let put_handlers: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
+    let plugin_routes: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
 
     // ── Delta filter chain (shared between plugins and Internal API) ─────────
     let delta_filter = Arc::new(DeltaFilterChain::new());
@@ -153,19 +151,16 @@ async fn main() -> Result<()> {
     );
 
     // Register all compiled-in Tier 1 plugins
-    plugin_manager.register(Box::new(
-        signalk_plugin_nmea0183::Nmea0183TcpPlugin::new(),
-    ));
+    plugin_manager.register(Box::new(signalk_plugin_nmea0183::Nmea0183TcpPlugin::new()));
     plugin_manager.register(Box::new(
         signalk_plugin_nmea0183::Nmea0183SerialPlugin::new(),
     ));
     plugin_manager.register(Box::new(
         signalk_plugin_anchor_alarm::AnchorAlarmPlugin::new(),
     ));
+    plugin_manager.register(Box::new(signalk_derived_data::DerivedDataPlugin::new()));
     #[cfg(feature = "simulator")]
-    plugin_manager.register(Box::new(
-        signalk_plugin_simulator::SimulatorPlugin::new(),
-    ));
+    plugin_manager.register(Box::new(signalk_plugin_simulator::SimulatorPlugin::new()));
 
     // Build plugin configs from [[plugins]] section
     let plugin_configs: HashMap<String, serde_json::Value> = config

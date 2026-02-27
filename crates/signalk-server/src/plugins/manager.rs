@@ -330,10 +330,7 @@ mod tests {
         mgr.start_plugin("test-plugin", serde_json::json!({}))
             .await
             .unwrap();
-        assert!(matches!(
-            mgr.statuses()[0].1,
-            PluginStatus::Running(_)
-        ));
+        assert!(matches!(mgr.statuses()[0].1, PluginStatus::Running(_)));
 
         mgr.stop_plugin("test-plugin").await.unwrap();
         assert!(matches!(mgr.statuses()[0].1, PluginStatus::Stopped));
@@ -369,9 +366,6 @@ mod tests {
             .start_plugin("panic-plugin", serde_json::json!({}))
             .await;
         assert!(result.is_err());
-        assert!(matches!(
-            mgr.statuses()[0].1,
-            PluginStatus::Error(_)
-        ));
+        assert!(matches!(mgr.statuses()[0].1, PluginStatus::Error(_)));
     }
 }

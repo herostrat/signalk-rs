@@ -1,10 +1,10 @@
 [package]
-name = "signalk-plugin-simulator"
+name = "signalk-derived-data"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Simulator plugin for signalk-rs — generates realistic test data for development"
+description = "Derived data plugin for signalk-rs — computes values from raw sensor data"
 
 [dependencies]
 signalk-plugin-api.workspace = true

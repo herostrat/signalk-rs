@@ -117,7 +117,12 @@ mod tests {
             headers: vec![],
             body: vec![],
         };
-        assert!(table.handle("unknown", "GET", "/status", request).await.is_none());
+        assert!(
+            table
+                .handle("unknown", "GET", "/status", request)
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]

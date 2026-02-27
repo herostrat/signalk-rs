@@ -154,15 +154,11 @@ impl Plugin for AnchorAlarmPlugin {
                             if is_outside && !was_alarming {
                                 warn!(distance, radius, "Anchor alarm triggered!");
                                 *alarming_clone.lock().unwrap() = true;
-                                emit_notification(
-                                    &ctx_clone, distance, radius, "alarm", true,
-                                );
+                                emit_notification(&ctx_clone, distance, radius, "alarm", true);
                             } else if !is_outside && was_alarming {
                                 info!(distance, radius, "Back inside anchor radius");
                                 *alarming_clone.lock().unwrap() = false;
-                                emit_notification(
-                                    &ctx_clone, distance, radius, "normal", false,
-                                );
+                                emit_notification(&ctx_clone, distance, radius, "normal", false);
                             }
                         }
                     }

@@ -1,15 +1,23 @@
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
 FROM rust:slim AS builder
 
+ARG FEATURES=""
+
 WORKDIR /app
 
 # Cache dependency compilation by building with stub sources first.
 # Only the Cargo manifests and lockfile are copied in this layer.
 COPY Cargo.toml Cargo.lock ./
-COPY crates/signalk-types/Cargo.toml  crates/signalk-types/
-COPY crates/signalk-store/Cargo.toml  crates/signalk-store/
-COPY crates/signalk-internal/Cargo.toml crates/signalk-internal/
-COPY crates/signalk-server/Cargo.toml  crates/signalk-server/
+COPY crates/signalk-types/Cargo.toml       crates/signalk-types/
+COPY crates/signalk-store/Cargo.toml       crates/signalk-store/
+COPY crates/signalk-internal/Cargo.toml    crates/signalk-internal/
+COPY crates/signalk-plugin-api/Cargo.toml  crates/signalk-plugin-api/
+COPY crates/signalk-plugin-client/Cargo.toml crates/signalk-plugin-client/
+COPY crates/signalk-server/Cargo.toml      crates/signalk-server/
+COPY crates/plugins/signalk-nmea0183/Cargo.toml      crates/plugins/signalk-nmea0183/
+COPY crates/plugins/signalk-anchor-alarm/Cargo.toml   crates/plugins/signalk-anchor-alarm/
+COPY crates/plugins/signalk-plugin-simulator/Cargo.toml crates/plugins/signalk-plugin-simulator/
+COPY crates/plugins/signalk-derived-data/Cargo.toml    crates/plugins/signalk-derived-data/
 
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && \
     rm -rf /var/lib/apt/lists/*
@@ -18,19 +26,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libs
 RUN mkdir -p crates/signalk-types/src \
              crates/signalk-store/src \
              crates/signalk-internal/src \
-             crates/signalk-server/src && \
-    for d in signalk-types signalk-store signalk-internal; do \
+             crates/signalk-plugin-api/src \
+             crates/signalk-plugin-client/src \
+             crates/signalk-server/src \
+             crates/plugins/signalk-nmea0183/src \
+             crates/plugins/signalk-anchor-alarm/src \
+             crates/plugins/signalk-plugin-simulator/src \
+             crates/plugins/signalk-derived-data/src && \
+    for d in signalk-types signalk-store signalk-internal signalk-plugin-api signalk-plugin-client; do \
         echo "// stub" > crates/$d/src/lib.rs; \
+    done && \
+    for d in signalk-nmea0183 signalk-anchor-alarm signalk-plugin-simulator signalk-derived-data; do \
+        echo "// stub" > crates/plugins/$d/src/lib.rs; \
     done && \
     echo "// stub" > crates/signalk-server/src/lib.rs && \
     echo "fn main() {}" > crates/signalk-server/src/main.rs && \
-    cargo build --release -p signalk-server 2>/dev/null || true
+    cargo build --release -p signalk-server --features "${FEATURES}" 2>/dev/null || true
 
 # Now build with the real source.
 # Docker invalidates the layer cache here when crates/ changes.
 # Cargo recompiles only our project crates (external deps are already cached above).
 COPY crates/ crates/
-RUN cargo build --release -p signalk-server
+RUN cargo build --release -p signalk-server --features "${FEATURES}"
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM debian:bookworm-slim

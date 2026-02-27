@@ -55,10 +55,9 @@ pub mod testing;
 
 // Re-export core traits and commonly used types.
 pub use context::{
-    delta_callback, put_handler, route_handler, DeltaCallback, DeltaInputHandler, PluginContext,
-    PluginRequest, PluginResponse, PluginRouter, PutCommand, PutHandler, PutHandlerResult,
-    RegisteredRoute, RouteCollector, RouteHandler, RouterSetup, SubscriptionHandle,
-    SubscriptionSpec,
+    DeltaCallback, DeltaInputHandler, PluginContext, PluginRequest, PluginResponse, PluginRouter,
+    PutCommand, PutHandler, PutHandlerResult, RegisteredRoute, RouteCollector, RouteHandler,
+    RouterSetup, SubscriptionHandle, SubscriptionSpec, delta_callback, put_handler, route_handler,
 };
 pub use error::PluginError;
 pub use plugin::{Plugin, PluginMetadata, PluginStatus};
