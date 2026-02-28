@@ -15,11 +15,10 @@
 /// }
 /// ```
 use async_trait::async_trait;
-use nmea2000::address::{build_address_claim, build_cannot_claim, AddressAction, AddressManager};
+use nmea2000::address::{AddressAction, AddressManager, build_address_claim, build_cannot_claim};
 use nmea2000::{N2kTransport, PgnMessage};
 use nmea2000_pgns::{
-    cog_sog_rapid_update::CogSogRapidUpdate, vessel_heading::VesselHeading,
-    wind_data::WindData,
+    cog_sog_rapid_update::CogSogRapidUpdate, vessel_heading::VesselHeading, wind_data::WindData,
 };
 use nmea2000_types::{IsoNameBuilder, Pgn, RawMessage};
 use serde::Deserialize;

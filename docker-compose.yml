@@ -14,9 +14,11 @@ services:
       context: .
       dockerfile: docker/Dockerfile.rs
       args:
-        FEATURES: simulator
+        FEATURES: simulator,nmea2000
     ports:
       - "3000:3000"
+    cap_add:
+      - NET_ADMIN
     volumes:
       - signalk-sockets:/run/signalk
       - ./docker/signalk-rs.toml:/etc/signalk-rs/config.toml:ro

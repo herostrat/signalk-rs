@@ -235,7 +235,9 @@ mod tests {
     #[test]
     fn barometric_pressure() {
         let xdr = XdrData {
-            measurements: [make_measurement('P', 1.013, 'B', "BARO")].into_iter().collect(),
+            measurements: [make_measurement('P', 1.013, 'B', "BARO")]
+                .into_iter()
+                .collect(),
         };
         let values = from_xdr(&xdr);
         assert_eq!(values.len(), 1);
@@ -246,7 +248,9 @@ mod tests {
     #[test]
     fn water_temperature() {
         let xdr = XdrData {
-            measurements: [make_measurement('C', 18.5, 'C', "WTHI")].into_iter().collect(),
+            measurements: [make_measurement('C', 18.5, 'C', "WTHI")]
+                .into_iter()
+                .collect(),
         };
         let values = from_xdr(&xdr);
         assert_eq!(values[0].path, "environment.water.temperature");
@@ -256,7 +260,9 @@ mod tests {
     #[test]
     fn air_temperature() {
         let xdr = XdrData {
-            measurements: [make_measurement('C', 22.0, 'C', "TempAir")].into_iter().collect(),
+            measurements: [make_measurement('C', 22.0, 'C', "TempAir")]
+                .into_iter()
+                .collect(),
         };
         let values = from_xdr(&xdr);
         assert_eq!(values[0].path, "environment.outside.temperature");
@@ -285,7 +291,9 @@ mod tests {
     #[test]
     fn pitch_only() {
         let xdr = XdrData {
-            measurements: [make_measurement('A', 3.0, 'D', "PITCH")].into_iter().collect(),
+            measurements: [make_measurement('A', 3.0, 'D', "PITCH")]
+                .into_iter()
+                .collect(),
         };
         let values = from_xdr(&xdr);
         assert_eq!(values.len(), 1);
@@ -297,7 +305,9 @@ mod tests {
     #[test]
     fn humidity() {
         let xdr = XdrData {
-            measurements: [make_measurement('H', 65.0, 'P', "Humidity")].into_iter().collect(),
+            measurements: [make_measurement('H', 65.0, 'P', "Humidity")]
+                .into_iter()
+                .collect(),
         };
         let values = from_xdr(&xdr);
         assert_eq!(values[0].path, "environment.outside.humidity");
@@ -317,9 +327,21 @@ mod tests {
         };
         let values = from_xdr(&xdr);
         assert_eq!(values.len(), 3);
-        assert!(values.iter().any(|v| v.path == "environment.outside.pressure"));
-        assert!(values.iter().any(|v| v.path == "environment.outside.temperature"));
-        assert!(values.iter().any(|v| v.path == "environment.outside.humidity"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "environment.outside.pressure")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "environment.outside.temperature")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "environment.outside.humidity")
+        );
     }
 
     #[test]

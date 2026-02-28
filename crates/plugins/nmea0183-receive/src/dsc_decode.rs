@@ -5,9 +5,9 @@
 //! (with MMSI-based context). Distress calls additionally set a spec-conformant
 //! notification (e.g. `notifications.fire`) on the calling vessel.
 
+use serde_json::json;
 use signalk_types::notification::{Notification, NotificationMethod, NotificationState};
 use signalk_types::{Delta, PathValue, Source, Update};
-use serde_json::json;
 use tracing::debug;
 
 /// Map DSC "nature of distress" code to SignalK spec notification path.
@@ -123,7 +123,13 @@ mod tests {
 
     #[test]
     fn non_dsc_returns_none() {
-        assert!(try_decode_dsc("$GPRMC,225446.33,A,4916.45,N,12311.12,W,000.5,054.7,191194,020.3,E,A*2B", "test").is_none());
+        assert!(
+            try_decode_dsc(
+                "$GPRMC,225446.33,A,4916.45,N,12311.12,W,000.5,054.7,191194,020.3,E,A*2B",
+                "test"
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -139,9 +145,18 @@ mod tests {
     #[test]
     fn distress_paths() {
         assert_eq!(distress_notification_path(Some(0)), "notifications.fire");
-        assert_eq!(distress_notification_path(Some(1)), "notifications.flooding");
-        assert_eq!(distress_notification_path(Some(2)), "notifications.collision");
-        assert_eq!(distress_notification_path(Some(3)), "notifications.grounding");
+        assert_eq!(
+            distress_notification_path(Some(1)),
+            "notifications.flooding"
+        );
+        assert_eq!(
+            distress_notification_path(Some(2)),
+            "notifications.collision"
+        );
+        assert_eq!(
+            distress_notification_path(Some(3)),
+            "notifications.grounding"
+        );
         assert_eq!(distress_notification_path(Some(4)), "notifications.listing");
         assert_eq!(distress_notification_path(Some(5)), "notifications.sinking");
         assert_eq!(distress_notification_path(Some(6)), "notifications.adrift");
@@ -149,7 +164,10 @@ mod tests {
         assert_eq!(distress_notification_path(Some(9)), "notifications.piracy");
         assert_eq!(distress_notification_path(Some(10)), "notifications.mob");
         assert_eq!(distress_notification_path(None), "notifications.distress");
-        assert_eq!(distress_notification_path(Some(99)), "notifications.distress");
+        assert_eq!(
+            distress_notification_path(Some(99)),
+            "notifications.distress"
+        );
     }
 
     #[test]

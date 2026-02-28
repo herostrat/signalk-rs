@@ -522,10 +522,7 @@ pub fn from_dbs(dbs: &nmea::sentences::DbsData) -> Vec<PathValue> {
         .or_else(|| dbs.water_depth_feet.map(|f| f as f64 * FEET_TO_M))
         .or_else(|| dbs.water_depth_fathoms.map(|f| f as f64 * FATHOMS_TO_M));
     if let Some(d) = depth {
-        out.push(PathValue::new(
-            "environment.depth.belowSurface",
-            json!(d),
-        ));
+        out.push(PathValue::new("environment.depth.belowSurface", json!(d)));
     }
     out
 }
@@ -599,10 +596,7 @@ pub fn from_vwr(vwr: &nmea::sentences::VwrData) -> Vec<PathValue> {
         .map(|s| s as f64)
         .or_else(|| vwr.speed_knots.map(|s| s as f64 * KNOTS_TO_MS));
     if let Some(s) = speed {
-        out.push(PathValue::new(
-            "environment.wind.speedApparent",
-            json!(s),
-        ));
+        out.push(PathValue::new("environment.wind.speedApparent", json!(s)));
     }
     out
 }
@@ -788,17 +782,28 @@ mod tests {
         };
         let values = from_hdg(&hdg);
         assert_eq!(values.len(), 3);
-        let h = values.iter().find(|p| p.path == "navigation.headingMagnetic").unwrap();
+        let h = values
+            .iter()
+            .find(|p| p.path == "navigation.headingMagnetic")
+            .unwrap();
         assert!((h.value.as_f64().unwrap() - 90.0 * DEG_TO_RAD).abs() < 1e-6);
-        let d = values.iter().find(|p| p.path == "navigation.magneticDeviation").unwrap();
+        let d = values
+            .iter()
+            .find(|p| p.path == "navigation.magneticDeviation")
+            .unwrap();
         assert!((d.value.as_f64().unwrap() - 2.0 * DEG_TO_RAD).abs() < 1e-6);
-        let v = values.iter().find(|p| p.path == "navigation.magneticVariation").unwrap();
+        let v = values
+            .iter()
+            .find(|p| p.path == "navigation.magneticVariation")
+            .unwrap();
         assert!((v.value.as_f64().unwrap() - (-3.5) * DEG_TO_RAD).abs() < 1e-6);
     }
 
     #[test]
     fn hdm_heading_magnetic() {
-        let hdm = nmea::sentences::HdmData { heading: Some(270.0) };
+        let hdm = nmea::sentences::HdmData {
+            heading: Some(270.0),
+        };
         let values = from_hdm(&hdm);
         assert_eq!(values.len(), 1);
         assert_eq!(values[0].path, "navigation.headingMagnetic");
@@ -814,17 +819,28 @@ mod tests {
             relative_speed_kmph: None,
         };
         let values = from_vhw(&vhw);
-        let stw = values.iter().find(|p| p.path == "navigation.speedThroughWater").unwrap();
+        let stw = values
+            .iter()
+            .find(|p| p.path == "navigation.speedThroughWater")
+            .unwrap();
         assert!((stw.value.as_f64().unwrap() - 6.5 * KNOTS_TO_MS).abs() < 1e-6);
-        let ht = values.iter().find(|p| p.path == "navigation.headingTrue").unwrap();
+        let ht = values
+            .iter()
+            .find(|p| p.path == "navigation.headingTrue")
+            .unwrap();
         assert!((ht.value.as_f64().unwrap() - std::f64::consts::PI).abs() < 1e-6);
-        let hm = values.iter().find(|p| p.path == "navigation.headingMagnetic").unwrap();
+        let hm = values
+            .iter()
+            .find(|p| p.path == "navigation.headingMagnetic")
+            .unwrap();
         assert!((hm.value.as_f64().unwrap() - 177.0 * DEG_TO_RAD).abs() < 1e-6);
     }
 
     #[test]
     fn mtw_celsius_to_kelvin() {
-        let mtw = nmea::sentences::MtwData { temperature: Some(22.5) };
+        let mtw = nmea::sentences::MtwData {
+            temperature: Some(22.5),
+        };
         let values = from_mtw(&mtw);
         assert_eq!(values.len(), 1);
         assert_eq!(values[0].path, "environment.water.temperature");
@@ -868,19 +884,40 @@ mod tests {
             wind_speed_ms: Some(5.0),
         };
         let values = from_mda(&mda);
-        let p = values.iter().find(|p| p.path == "environment.outside.pressure").unwrap();
+        let p = values
+            .iter()
+            .find(|p| p.path == "environment.outside.pressure")
+            .unwrap();
         assert!((p.value.as_f64().unwrap() - 101_300.0).abs() < 1.0);
-        let air = values.iter().find(|p| p.path == "environment.outside.temperature").unwrap();
+        let air = values
+            .iter()
+            .find(|p| p.path == "environment.outside.temperature")
+            .unwrap();
         assert!((air.value.as_f64().unwrap() - 293.15).abs() < 1e-6);
-        let water = values.iter().find(|p| p.path == "environment.water.temperature").unwrap();
+        let water = values
+            .iter()
+            .find(|p| p.path == "environment.water.temperature")
+            .unwrap();
         assert!((water.value.as_f64().unwrap() - 288.15).abs() < 1e-6);
-        let hum = values.iter().find(|p| p.path == "environment.outside.humidity").unwrap();
+        let hum = values
+            .iter()
+            .find(|p| p.path == "environment.outside.humidity")
+            .unwrap();
         assert!((hum.value.as_f64().unwrap() - 0.65).abs() < 1e-6);
-        let dew = values.iter().find(|p| p.path == "environment.outside.dewPointTemperature").unwrap();
+        let dew = values
+            .iter()
+            .find(|p| p.path == "environment.outside.dewPointTemperature")
+            .unwrap();
         assert!((dew.value.as_f64().unwrap() - 286.15).abs() < 1e-6);
-        let wdir = values.iter().find(|p| p.path == "environment.wind.directionTrue").unwrap();
+        let wdir = values
+            .iter()
+            .find(|p| p.path == "environment.wind.directionTrue")
+            .unwrap();
         assert!((wdir.value.as_f64().unwrap() - std::f64::consts::PI).abs() < 1e-6);
-        let wspd = values.iter().find(|p| p.path == "environment.wind.speedTrue").unwrap();
+        let wspd = values
+            .iter()
+            .find(|p| p.path == "environment.wind.speedTrue")
+            .unwrap();
         assert!((wspd.value.as_f64().unwrap() - 5.0).abs() < 1e-6);
     }
 
@@ -893,12 +930,21 @@ mod tests {
             wind_speed_mps: Some(7.72),
         };
         let values = from_mwd(&mwd);
-        let dt = values.iter().find(|p| p.path == "environment.wind.directionTrue").unwrap();
+        let dt = values
+            .iter()
+            .find(|p| p.path == "environment.wind.directionTrue")
+            .unwrap();
         assert!((dt.value.as_f64().unwrap() - 270.0 * DEG_TO_RAD).abs() < 1e-6);
-        let dm = values.iter().find(|p| p.path == "environment.wind.directionMagnetic").unwrap();
+        let dm = values
+            .iter()
+            .find(|p| p.path == "environment.wind.directionMagnetic")
+            .unwrap();
         assert!((dm.value.as_f64().unwrap() - 267.0 * DEG_TO_RAD).abs() < 1e-6);
         // Prefers m/s over knots
-        let spd = values.iter().find(|p| p.path == "environment.wind.speedTrue").unwrap();
+        let spd = values
+            .iter()
+            .find(|p| p.path == "environment.wind.speedTrue")
+            .unwrap();
         assert!((spd.value.as_f64().unwrap() - 7.72).abs() < 1e-6);
     }
 
@@ -912,9 +958,15 @@ mod tests {
         };
         let values = from_rsa(&rsa);
         assert_eq!(values.len(), 2);
-        let sb = values.iter().find(|p| p.path == "steering.rudderAngle").unwrap();
+        let sb = values
+            .iter()
+            .find(|p| p.path == "steering.rudderAngle")
+            .unwrap();
         assert!((sb.value.as_f64().unwrap() - 5.0 * DEG_TO_RAD).abs() < 1e-6);
-        let pt = values.iter().find(|p| p.path == "steering.rudderAnglePort").unwrap();
+        let pt = values
+            .iter()
+            .find(|p| p.path == "steering.rudderAnglePort")
+            .unwrap();
         assert!((pt.value.as_f64().unwrap() - (-3.0) * DEG_TO_RAD).abs() < 1e-6);
     }
 
@@ -939,9 +991,15 @@ mod tests {
             valid: true,
         };
         let values = from_rpm(&rpm);
-        let rev = values.iter().find(|p| p.path == "propulsion.engine1.revolutions").unwrap();
+        let rev = values
+            .iter()
+            .find(|p| p.path == "propulsion.engine1.revolutions")
+            .unwrap();
         assert!((rev.value.as_f64().unwrap() - 40.0).abs() < 1e-6); // 2400/60
-        let pitch = values.iter().find(|p| p.path == "propulsion.engine1.pitch").unwrap();
+        let pitch = values
+            .iter()
+            .find(|p| p.path == "propulsion.engine1.pitch")
+            .unwrap();
         assert!((pitch.value.as_f64().unwrap() - 0.75).abs() < 1e-6); // 75/100
     }
 
@@ -1039,9 +1097,15 @@ mod tests {
             speed: Some(1.5),
         };
         let values = from_vdr(&vdr);
-        let set = values.iter().find(|p| p.path == "environment.current.setTrue").unwrap();
+        let set = values
+            .iter()
+            .find(|p| p.path == "environment.current.setTrue")
+            .unwrap();
         assert!((set.value.as_f64().unwrap() - std::f64::consts::PI).abs() < 1e-6);
-        let drift = values.iter().find(|p| p.path == "environment.current.drift").unwrap();
+        let drift = values
+            .iter()
+            .find(|p| p.path == "environment.current.drift")
+            .unwrap();
         assert!((drift.value.as_f64().unwrap() - 1.5 * KNOTS_TO_MS).abs() < 1e-6);
     }
 
@@ -1054,7 +1118,10 @@ mod tests {
             trip_ground_distance: None,
         };
         let values = from_vlw(&vlw);
-        let trip = values.iter().find(|p| p.path == "navigation.trip.log").unwrap();
+        let trip = values
+            .iter()
+            .find(|p| p.path == "navigation.trip.log")
+            .unwrap();
         assert!((trip.value.as_f64().unwrap() - 56.7 * NM_TO_M).abs() < 1.0);
         let total = values.iter().find(|p| p.path == "navigation.log").unwrap();
         assert!((total.value.as_f64().unwrap() - 1234.5 * NM_TO_M).abs() < 1.0);
@@ -1069,10 +1136,16 @@ mod tests {
             speed_kmph: None,
         };
         let values = from_vwr(&vwr);
-        let angle = values.iter().find(|p| p.path == "environment.wind.angleApparent").unwrap();
+        let angle = values
+            .iter()
+            .find(|p| p.path == "environment.wind.angleApparent")
+            .unwrap();
         assert!((angle.value.as_f64().unwrap() - (-45.0) * DEG_TO_RAD).abs() < 1e-6);
         // Prefers m/s
-        let spd = values.iter().find(|p| p.path == "environment.wind.speedApparent").unwrap();
+        let spd = values
+            .iter()
+            .find(|p| p.path == "environment.wind.speedApparent")
+            .unwrap();
         assert!((spd.value.as_f64().unwrap() - 5.14).abs() < 1e-6);
     }
 
@@ -1085,9 +1158,15 @@ mod tests {
             speed_kmph: None,
         };
         let values = from_vwt(&vwt);
-        let angle = values.iter().find(|p| p.path == "environment.wind.angleTrueWater").unwrap();
+        let angle = values
+            .iter()
+            .find(|p| p.path == "environment.wind.angleTrueWater")
+            .unwrap();
         assert!((angle.value.as_f64().unwrap() - 120.0 * DEG_TO_RAD).abs() < 1e-6);
-        let spd = values.iter().find(|p| p.path == "environment.wind.speedTrue").unwrap();
+        let spd = values
+            .iter()
+            .find(|p| p.path == "environment.wind.speedTrue")
+            .unwrap();
         assert!((spd.value.as_f64().unwrap() - 20.0 * KNOTS_TO_MS).abs() < 1e-6);
     }
 }

@@ -140,7 +140,11 @@ impl Plugin for AisStatusPlugin {
                     let values: Vec<(String, serde_json::Value)> = delta
                         .updates
                         .iter()
-                        .flat_map(|u| u.values.iter().map(|pv| (pv.path.clone(), pv.value.clone())))
+                        .flat_map(|u| {
+                            u.values
+                                .iter()
+                                .map(|pv| (pv.path.clone(), pv.value.clone()))
+                        })
                         .collect();
 
                     let transition = {

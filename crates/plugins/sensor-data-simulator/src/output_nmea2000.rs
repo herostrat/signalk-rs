@@ -123,11 +123,7 @@ fn encode_pgn<M: PgnMessage>(msg: M, pgn: u32, priority: u8) -> Option<EncodedPg
 ///
 /// Runs in a blocking thread (SocketCAN is synchronous).
 /// Receives encoded PGNs via mpsc channel from the async tick task.
-pub fn run_bus_writer(
-    interface: &str,
-    source: u8,
-    rx: std::sync::mpsc::Receiver<Vec<EncodedPgn>>,
-) {
+pub fn run_bus_writer(interface: &str, source: u8, rx: std::sync::mpsc::Receiver<Vec<EncodedPgn>>) {
     use nmea2000::N2kTransport;
 
     loop {

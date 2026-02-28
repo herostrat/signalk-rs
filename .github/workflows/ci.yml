@@ -75,6 +75,9 @@ jobs:
       - name: Install webapp packages
         run: cd webapps && npm install --production
 
+      - name: Load vcan kernel module
+        run: sudo modprobe vcan
+
       - name: Run smoke tests
         run: |
           docker compose --profile test up \

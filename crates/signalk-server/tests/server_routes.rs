@@ -155,17 +155,19 @@ async fn run_discovery_returns_200() {
 #[tokio::test]
 async fn plugins_have_keywords_array() {
     let (app, state) = test_app_with_state();
-    state.plugin_registry.write().await.register_tier1(
-        "test-kw",
-        "Test",
-        "desc",
-        "0.1.0",
-        "running",
-        true,
-    );
+    state
+        .plugin_registry
+        .write()
+        .await
+        .register_tier1("test-kw", "Test", "desc", "0.1.0", "running", true);
 
     let (_, body) = get(app, "/skServer/plugins").await;
-    let plugin = body.as_array().unwrap().iter().find(|p| p["id"] == "test-kw").unwrap();
+    let plugin = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "test-kw")
+        .unwrap();
     assert!(plugin["keywords"].is_array());
     assert!(!plugin["keywords"].as_array().unwrap().is_empty());
 }
@@ -173,14 +175,11 @@ async fn plugins_have_keywords_array() {
 #[tokio::test]
 async fn plugin_config_returns_configuration_field() {
     let (app, state) = test_app_with_state();
-    state.plugin_registry.write().await.register_tier1(
-        "cfg-test",
-        "Cfg Test",
-        "desc",
-        "0.1.0",
-        "running",
-        true,
-    );
+    state
+        .plugin_registry
+        .write()
+        .await
+        .register_tier1("cfg-test", "Cfg Test", "desc", "0.1.0", "running", true);
 
     let (status, body) = get(app, "/skServer/plugins/cfg-test/config").await;
     assert_eq!(status, 200);

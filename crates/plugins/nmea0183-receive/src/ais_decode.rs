@@ -3,8 +3,8 @@
 //! Uses the `ais` crate for fragment reassembly and message decoding,
 //! then maps decoded messages to `AisContact` for SignalK delta conversion.
 
-use ais::messages::position_report::NavigationStatus;
 use ais::messages::AisMessage;
+use ais::messages::position_report::NavigationStatus;
 use ais::{AisFragments, AisParser};
 use signalk_types::ais::AisContact;
 use signalk_types::{Delta, Source};
@@ -75,9 +75,7 @@ fn message_to_contact(message: &AisMessage) -> Option<AisContact> {
 }
 
 /// Type 1-3: Class A position report.
-fn from_position_report(
-    pos: &ais::messages::position_report::PositionReport,
-) -> AisContact {
+fn from_position_report(pos: &ais::messages::position_report::PositionReport) -> AisContact {
     let mut contact = AisContact {
         mmsi: pos.mmsi,
         position: match (pos.latitude, pos.longitude) {
@@ -169,9 +167,7 @@ fn from_class_b_extended(
 }
 
 /// Type 21: Aid to Navigation report.
-fn from_aton(
-    aton: &ais::messages::aid_to_navigation_report::AidToNavigationReport,
-) -> AisContact {
+fn from_aton(aton: &ais::messages::aid_to_navigation_report::AidToNavigationReport) -> AisContact {
     AisContact {
         mmsi: aton.mmsi,
         position: match (aton.latitude, aton.longitude) {
@@ -267,20 +263,26 @@ mod tests {
         let delta = decoder.try_decode(VDM_TYPE1);
         // May or may not decode depending on checksum; test the decoder doesn't panic
         if let Some(delta) = delta {
-            assert!(delta
-                .context
-                .as_deref()
-                .unwrap()
-                .starts_with("vessels.urn:mrn:imo:mmsi:"));
+            assert!(
+                delta
+                    .context
+                    .as_deref()
+                    .unwrap()
+                    .starts_with("vessels.urn:mrn:imo:mmsi:")
+            );
         }
     }
 
     #[test]
     fn non_ais_sentence_returns_none() {
         let mut decoder = AisDecoder::new("test");
-        assert!(decoder
-            .try_decode("$GPRMC,225446.33,A,4916.45,N,12311.12,W,000.5,054.7,191194,020.3,E,A*2B")
-            .is_none());
+        assert!(
+            decoder
+                .try_decode(
+                    "$GPRMC,225446.33,A,4916.45,N,12311.12,W,000.5,054.7,191194,020.3,E,A*2B"
+                )
+                .is_none()
+        );
     }
 
     #[test]
@@ -299,14 +301,20 @@ mod tests {
         // Second fragment → Some (complete Type 5 message)
         let delta = decoder.try_decode(VDM_TYPE5_FRAG2);
         if let Some(delta) = delta {
-            assert!(delta
-                .context
-                .as_deref()
-                .unwrap()
-                .starts_with("vessels.urn:mrn:imo:mmsi:"));
+            assert!(
+                delta
+                    .context
+                    .as_deref()
+                    .unwrap()
+                    .starts_with("vessels.urn:mrn:imo:mmsi:")
+            );
             // Type 5 should have name, callsign etc.
             let values = &delta.updates[0].values;
-            assert!(values.iter().any(|v| v.path == "name" || v.path == "communication.callsignVhf"));
+            assert!(
+                values
+                    .iter()
+                    .any(|v| v.path == "name" || v.path == "communication.callsignVhf")
+            );
         }
     }
 
@@ -336,7 +344,10 @@ mod tests {
 
     #[test]
     fn nav_status_mapping() {
-        assert_eq!(nav_status_to_code(&NavigationStatus::UnderWayUsingEngine), 0);
+        assert_eq!(
+            nav_status_to_code(&NavigationStatus::UnderWayUsingEngine),
+            0
+        );
         assert_eq!(nav_status_to_code(&NavigationStatus::AtAnchor), 1);
         assert_eq!(nav_status_to_code(&NavigationStatus::Moored), 5);
         assert_eq!(nav_status_to_code(&NavigationStatus::EngagedInFishing), 7);

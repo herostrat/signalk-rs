@@ -4,8 +4,8 @@
 //! Navigation PGNs produce self-vessel deltas; AIS PGNs produce
 //! vessel-context deltas via `AisContact::to_delta()`.
 
-use nmea2000::pgns::*;
 use nmea2000::DecodedMessage;
+use nmea2000::pgns::*;
 use signalk_types::ais::AisContact;
 use signalk_types::{Delta, PathValue, Source, Update};
 
@@ -33,9 +33,7 @@ pub fn decoded_to_delta(msg: &DecodedMessage, source: &N2kSource<'_>) -> Option<
         // ── AIS PGNs (vessel context by MMSI) ─────────────────────────
         DecodedMessage::AisClassAPositionReport(m) => from_ais_class_a_position(m, source),
         DecodedMessage::AisClassBPositionReport(m) => from_ais_class_b_position(m, source),
-        DecodedMessage::AisClassBExtendedPositionReport(m) => {
-            from_ais_class_b_extended(m, source)
-        }
+        DecodedMessage::AisClassBExtendedPositionReport(m) => from_ais_class_b_extended(m, source),
         DecodedMessage::AisClassAStaticAndVoyageRelatedData(m) => {
             from_ais_class_a_static(m, source)
         }
@@ -63,10 +61,7 @@ fn self_delta(values: Vec<PathValue>, source: &N2kSource<'_>) -> Option<Delta> {
 }
 
 /// PGN 127250: Vessel Heading
-fn from_vessel_heading(
-    m: &vessel_heading::VesselHeading,
-    source: &N2kSource<'_>,
-) -> Option<Delta> {
+fn from_vessel_heading(m: &vessel_heading::VesselHeading, source: &N2kSource<'_>) -> Option<Delta> {
     let mut values = Vec::new();
 
     if let Some(heading) = m.heading() {
@@ -207,9 +202,10 @@ fn from_wind_data(m: &wind_data::WindData, source: &N2kSource<'_>) -> Option<Del
             "environment.wind.angleApparent",
         ),
         Some(lookups::WindReference::TrueBoatReferenced)
-        | Some(lookups::WindReference::TrueWaterReferenced) => {
-            ("environment.wind.speedTrue", "environment.wind.angleTrueWater")
-        }
+        | Some(lookups::WindReference::TrueWaterReferenced) => (
+            "environment.wind.speedTrue",
+            "environment.wind.angleTrueWater",
+        ),
         Some(lookups::WindReference::TrueGroundReferencedToNorth) => (
             "environment.wind.speedTrue",
             "environment.wind.angleTrueGround",
@@ -363,7 +359,7 @@ mod tests {
     #[test]
     fn vessel_heading_true() {
         let msg = vessel_heading::VesselHeading::builder()
-            .heading(1.5)     // 1.5 rad
+            .heading(1.5) // 1.5 rad
             .reference_raw(0) // True
             .build();
         let decoded = DecodedMessage::VesselHeading(msg);
@@ -386,7 +382,11 @@ mod tests {
         let delta = decoded_to_delta(&decoded, &test_source(127250)).unwrap();
         let values = &delta.updates[0].values;
         assert_eq!(values[0].path, "navigation.headingMagnetic");
-        assert!(values.iter().any(|v| v.path == "navigation.magneticVariation"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "navigation.magneticVariation")
+        );
     }
 
     #[test]
@@ -408,15 +408,23 @@ mod tests {
     #[test]
     fn cog_sog_rapid() {
         let msg = cog_sog_rapid_update::CogSogRapidUpdate::builder()
-            .cog(1.0)           // 1.0 rad
-            .sog(5.0)           // 5.0 m/s
+            .cog(1.0) // 1.0 rad
+            .sog(5.0) // 5.0 m/s
             .cog_reference_raw(0) // True
             .build();
         let decoded = DecodedMessage::CogSogRapidUpdate(msg);
         let delta = decoded_to_delta(&decoded, &test_source(129026)).unwrap();
         let values = &delta.updates[0].values;
-        assert!(values.iter().any(|v| v.path == "navigation.courseOverGroundTrue"));
-        assert!(values.iter().any(|v| v.path == "navigation.speedOverGround"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "navigation.courseOverGroundTrue")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "navigation.speedOverGround")
+        );
     }
 
     #[test]
@@ -428,22 +436,38 @@ mod tests {
         let decoded = DecodedMessage::WaterDepth(msg);
         let delta = decoded_to_delta(&decoded, &test_source(128267)).unwrap();
         let values = &delta.updates[0].values;
-        assert!(values.iter().any(|v| v.path == "environment.depth.belowTransducer"));
-        assert!(values.iter().any(|v| v.path == "environment.depth.belowKeel"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "environment.depth.belowTransducer")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "environment.depth.belowKeel")
+        );
     }
 
     #[test]
     fn wind_data_apparent() {
         let msg = wind_data::WindData::builder()
-            .wind_speed(8.0)    // 8 m/s
-            .wind_angle(0.785)  // ~45°
-            .reference_raw(2)   // Apparent
+            .wind_speed(8.0) // 8 m/s
+            .wind_angle(0.785) // ~45°
+            .reference_raw(2) // Apparent
             .build();
         let decoded = DecodedMessage::WindData(msg);
         let delta = decoded_to_delta(&decoded, &test_source(130306)).unwrap();
         let values = &delta.updates[0].values;
-        assert!(values.iter().any(|v| v.path == "environment.wind.speedApparent"));
-        assert!(values.iter().any(|v| v.path == "environment.wind.angleApparent"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "environment.wind.speedApparent")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "environment.wind.angleApparent")
+        );
     }
 
     #[test]
@@ -459,15 +483,25 @@ mod tests {
             .build();
         let decoded = DecodedMessage::AisClassAPositionReport(msg);
         let delta = decoded_to_delta(&decoded, &test_source(129038)).unwrap();
-        assert!(delta
-            .context
-            .as_deref()
-            .unwrap()
-            .starts_with("vessels.urn:mrn:imo:mmsi:211457160"));
+        assert!(
+            delta
+                .context
+                .as_deref()
+                .unwrap()
+                .starts_with("vessels.urn:mrn:imo:mmsi:211457160")
+        );
         let values = &delta.updates[0].values;
         assert!(values.iter().any(|v| v.path == "navigation.position"));
-        assert!(values.iter().any(|v| v.path == "navigation.speedOverGround"));
-        assert!(values.iter().any(|v| v.path == "navigation.courseOverGroundTrue"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "navigation.speedOverGround")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "navigation.courseOverGroundTrue")
+        );
         assert!(values.iter().any(|v| v.path == "navigation.state"));
     }
 
@@ -481,14 +515,14 @@ mod tests {
             .build();
         let decoded = DecodedMessage::AisClassBPositionReport(msg);
         let delta = decoded_to_delta(&decoded, &test_source(129039)).unwrap();
-        assert!(delta
-            .context
-            .as_deref()
-            .unwrap()
-            .contains("366999000"));
+        assert!(delta.context.as_deref().unwrap().contains("366999000"));
         let values = &delta.updates[0].values;
         assert!(values.iter().any(|v| v.path == "navigation.position"));
-        assert!(values.iter().any(|v| v.path == "navigation.speedOverGround"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "navigation.speedOverGround")
+        );
     }
 
     #[test]
@@ -498,7 +532,11 @@ mod tests {
             .longitude(10.0)
             .build();
         let decoded = DecodedMessage::PositionRapidUpdate(msg);
-        let src = N2kSource { label: "my-n2k", src: 42, pgn: 129025 };
+        let src = N2kSource {
+            label: "my-n2k",
+            src: 42,
+            pgn: 129025,
+        };
         let delta = decoded_to_delta(&decoded, &src).unwrap();
         assert_eq!(delta.updates[0].source.type_, "NMEA2000");
         assert_eq!(delta.updates[0].source.label, "my-n2k");

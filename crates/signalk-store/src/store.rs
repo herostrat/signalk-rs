@@ -1,4 +1,6 @@
-use signalk_types::{Delta, FullModel, Metadata, SignalKValue, Source, SourceRef, VesselData};
+use signalk_types::{
+    Delta, FullModel, Metadata, SignalKValue, Source, SourceRef, SourceValue, VesselData,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast};
@@ -233,13 +235,18 @@ impl SignalKStore {
     /// Metadata is merged into SignalKValue leaves:
     /// 1. Explicit metadata (set via PUT /meta) takes highest priority
     /// 2. Spec defaults fill in for paths that have values but no explicit metadata
+    ///
+    /// Multi-source `values` are populated per spec: when 2+ sources provide a path,
+    /// a `values` map is included on the leaf node.
+    ///
+    /// Sources are serialized as a hierarchical object (label → suffix → metadata).
     pub fn full_model(&self) -> FullModel {
         let mut model = FullModel::new(format!("vessels.{}", self.self_uri));
 
         for (uri, vessel) in &self.vessels {
             let mut vessel = vessel.clone();
 
-            // Inject metadata for self vessel
+            // Inject metadata + multi-source values for self vessel
             if uri == &self.self_uri {
                 for (path, sv) in vessel.values.iter_mut() {
                     // Explicit metadata first, then spec defaults
@@ -248,20 +255,63 @@ impl SignalKStore {
                     } else if let Some(meta) = signalk_types::meta::default_metadata(path) {
                         sv.meta = Some(meta);
                     }
+
+                    // Populate per-source values when 2+ sources exist
+                    if let Some(source_map) = self.multi_source.get(path)
+                        && source_map.len() > 1
+                    {
+                        sv.values = Some(
+                            source_map
+                                .iter()
+                                .map(|(src_ref, src_val)| {
+                                    (
+                                        src_ref.clone(),
+                                        SourceValue {
+                                            value: src_val.value.clone(),
+                                            timestamp: src_val.timestamp,
+                                        },
+                                    )
+                                })
+                                .collect(),
+                        );
+                    }
                 }
             }
 
             model.vessels.insert(uri.clone(), vessel);
         }
 
-        for (ref_str, src) in &self.sources {
-            model.sources.insert(
-                ref_str.clone(),
-                serde_json::to_value(src).unwrap_or(serde_json::Value::Null),
-            );
-        }
+        model.sources = build_sources_hierarchy(&self.sources);
 
         model
+    }
+
+    /// Get the multi-source values for a self-vessel path.
+    /// Returns None if the path has 0 or 1 sources.
+    pub fn get_self_path_multi_values(&self, path: &str) -> Option<HashMap<String, SourceValue>> {
+        let source_map = self.multi_source.get(path)?;
+        if source_map.len() <= 1 {
+            return None;
+        }
+        Some(
+            source_map
+                .iter()
+                .map(|(src_ref, src_val)| {
+                    (
+                        src_ref.clone(),
+                        SourceValue {
+                            value: src_val.value.clone(),
+                            timestamp: src_val.timestamp,
+                        },
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    /// Access the raw sources registry (for building the /sources endpoint).
+    pub fn sources(&self) -> &HashMap<String, Source> {
+        &self.sources
     }
 
     /// Get a reference to vessel data for a specific URI.
@@ -313,6 +363,44 @@ impl SignalKStore {
         }
         signalk_types::meta::default_metadata(path)
     }
+}
+
+/// Build the hierarchical sources object per SignalK spec.
+///
+/// Sources with a suffix (NMEA0183/NMEA2000) are nested: `{label}.{suffix}`.
+/// Sources without a suffix (plugins) are flat: `{label}`.
+///
+/// Example output:
+/// ```json
+/// {
+///   "ttyUSB0": { "GP": { "label": "ttyUSB0", "type": "NMEA0183", "talker": "GP" } },
+///   "sensor-data-simulator": { "label": "sensor-data-simulator", "type": "Plugin" }
+/// }
+/// ```
+pub fn build_sources_hierarchy(sources: &HashMap<String, Source>) -> serde_json::Value {
+    let mut root = serde_json::Map::new();
+
+    for (ref_str, source) in sources {
+        let source_json = serde_json::to_value(source).unwrap_or(serde_json::Value::Null);
+
+        if let Some(dot_pos) = ref_str.find('.') {
+            // Two-level: label.suffix
+            let label = &ref_str[..dot_pos];
+            let suffix = &ref_str[dot_pos + 1..];
+
+            let label_entry = root
+                .entry(label.to_string())
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            if let serde_json::Value::Object(label_map) = label_entry {
+                label_map.insert(suffix.to_string(), source_json);
+            }
+        } else {
+            // Single-level: just the label (plugins, internal)
+            root.insert(ref_str.clone(), source_json);
+        }
+    }
+
+    serde_json::Value::Object(root)
 }
 
 /// Build a source reference string from a Source object.
@@ -515,7 +603,7 @@ mod tests {
 
         let model = store.full_model();
         assert!(model.vessels.contains_key("urn:mrn:signalk:uuid:test"));
-        assert!(!model.sources.is_empty());
+        assert!(!model.sources.as_object().unwrap().is_empty());
     }
 
     // ── Multi-source / priority tests ────────────────────────────────────
@@ -710,5 +798,140 @@ mod tests {
 
         // Regular navigation paths should NOT appear
         assert!(notifs.iter().all(|(p, _)| p.starts_with("notifications.")));
+    }
+
+    // ── Source hierarchy + values tests ───────────────────────────────
+
+    #[test]
+    fn build_sources_hierarchy_nmea0183() {
+        let mut sources = HashMap::new();
+        sources.insert("ttyUSB0.GP".to_string(), Source::nmea0183("ttyUSB0", "GP"));
+        sources.insert("ttyUSB0.GN".to_string(), Source::nmea0183("ttyUSB0", "GN"));
+
+        let hierarchy = build_sources_hierarchy(&sources);
+        // Should be nested: ttyUSB0 → { GP: {...}, GN: {...} }
+        assert!(hierarchy["ttyUSB0"]["GP"]["label"].is_string());
+        assert_eq!(hierarchy["ttyUSB0"]["GP"]["label"], "ttyUSB0");
+        assert_eq!(hierarchy["ttyUSB0"]["GP"]["type"], "NMEA0183");
+        assert!(hierarchy["ttyUSB0"]["GN"]["label"].is_string());
+    }
+
+    #[test]
+    fn build_sources_hierarchy_nmea2000() {
+        let mut sources = HashMap::new();
+        sources.insert(
+            "n2k.129025".to_string(),
+            Source::nmea2000("n2k", 42, 129025),
+        );
+
+        let hierarchy = build_sources_hierarchy(&sources);
+        assert_eq!(hierarchy["n2k"]["129025"]["label"], "n2k");
+        assert_eq!(hierarchy["n2k"]["129025"]["type"], "NMEA2000");
+    }
+
+    #[test]
+    fn build_sources_hierarchy_plugin_flat() {
+        let mut sources = HashMap::new();
+        sources.insert("ais".to_string(), Source::plugin("ais"));
+
+        let hierarchy = build_sources_hierarchy(&sources);
+        // Plugin has no suffix → flat at top level
+        assert_eq!(hierarchy["ais"]["label"], "ais");
+        assert_eq!(hierarchy["ais"]["type"], "Plugin");
+    }
+
+    #[test]
+    fn build_sources_hierarchy_mixed() {
+        let mut sources = HashMap::new();
+        sources.insert("ttyUSB0.GP".to_string(), Source::nmea0183("ttyUSB0", "GP"));
+        sources.insert("simulator".to_string(), Source::plugin("simulator"));
+        sources.insert(
+            "n2k.128267".to_string(),
+            Source::nmea2000("n2k", 42, 128267),
+        );
+
+        let hierarchy = build_sources_hierarchy(&sources);
+        assert!(hierarchy["ttyUSB0"]["GP"].is_object());
+        assert!(hierarchy["simulator"]["label"].is_string());
+        assert!(hierarchy["n2k"]["128267"].is_object());
+    }
+
+    #[test]
+    fn full_model_values_absent_for_single_source() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+        store.apply_delta(make_gps_delta(3.5));
+
+        let model = store.full_model();
+        let vessel = model.vessels.get("urn:mrn:signalk:uuid:test").unwrap();
+        let sog = vessel.values.get("navigation.speedOverGround").unwrap();
+        assert!(
+            sog.values.is_none(),
+            "Single source should not have values field"
+        );
+    }
+
+    #[test]
+    fn full_model_values_present_for_multi_source() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(make_ais_delta(3.8));
+
+        let model = store.full_model();
+        let vessel = model.vessels.get("urn:mrn:signalk:uuid:test").unwrap();
+        let sog = vessel.values.get("navigation.speedOverGround").unwrap();
+
+        let values = sog
+            .values
+            .as_ref()
+            .expect("Should have values for multi-source");
+        assert_eq!(values.len(), 2);
+        assert!(values.contains_key("ttyUSB0.GP"));
+        assert!(values.contains_key("ais"));
+        assert_eq!(values["ttyUSB0.GP"].value, serde_json::json!(3.5));
+        assert_eq!(values["ais"].value, serde_json::json!(3.8));
+    }
+
+    #[test]
+    fn full_model_sources_hierarchical() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(make_ais_delta(3.8));
+
+        let model = store.full_model();
+        // NMEA0183 source should be nested: ttyUSB0 → GP → {label, type, talker}
+        assert_eq!(model.sources["ttyUSB0"]["GP"]["type"], "NMEA0183");
+        // Plugin source should be flat: ais → {label, type}
+        assert_eq!(model.sources["ais"]["type"], "Plugin");
+    }
+
+    #[test]
+    fn get_self_path_multi_values_none_for_single_source() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+        store.apply_delta(make_gps_delta(3.5));
+
+        assert!(
+            store
+                .get_self_path_multi_values("navigation.speedOverGround")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn get_self_path_multi_values_some_for_multi_source() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(make_ais_delta(3.8));
+
+        let values = store
+            .get_self_path_multi_values("navigation.speedOverGround")
+            .expect("Should have multi-source values");
+        assert_eq!(values.len(), 2);
     }
 }

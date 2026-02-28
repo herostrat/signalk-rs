@@ -61,13 +61,16 @@ RUN cargo build --release -p signalk-server --features "${FEATURES}"
 FROM debian:bookworm-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl && \
+    apt-get install -y --no-install-recommends ca-certificates curl iproute2 && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/signalk-server /usr/local/bin/signalk-server
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 EXPOSE 3000
 
 ENV RUST_LOG=signalk_server=info,signalk_store=info
 
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["signalk-server"]

@@ -159,7 +159,9 @@ impl TrackedTarget {
         self.recent_messages.push(now);
 
         // Prune messages outside the confirm window
-        let window_start = now.checked_sub(self.thresholds.confirm_window).unwrap_or(now);
+        let window_start = now
+            .checked_sub(self.thresholds.confirm_window)
+            .unwrap_or(now);
         self.recent_messages.retain(|t| *t >= window_start);
 
         let old_status = self.status;
@@ -376,7 +378,11 @@ mod tests {
 
     #[test]
     fn new_target_is_unconfirmed() {
-        let t = TrackedTarget::new("211457160".into(), "vessels.urn:mrn:imo:mmsi:211457160".into(), Instant::now());
+        let t = TrackedTarget::new(
+            "211457160".into(),
+            "vessels.urn:mrn:imo:mmsi:211457160".into(),
+            Instant::now(),
+        );
         assert_eq!(t.status, TargetStatus::Unconfirmed);
         assert_eq!(t.class, TargetClass::Vessel);
         assert_eq!(t.message_count, 0);
@@ -385,7 +391,11 @@ mod tests {
     #[test]
     fn vessel_confirms_after_two_messages() {
         let now = Instant::now();
-        let mut t = TrackedTarget::new("211457160".into(), "vessels.urn:mrn:imo:mmsi:211457160".into(), now);
+        let mut t = TrackedTarget::new(
+            "211457160".into(),
+            "vessels.urn:mrn:imo:mmsi:211457160".into(),
+            now,
+        );
         assert_eq!(t.status, TargetStatus::Unconfirmed);
 
         // First message — still unconfirmed (vessel needs 2)
@@ -405,7 +415,11 @@ mod tests {
     fn aton_confirms_on_first_message() {
         // ATONs need only 1 message to confirm
         let now = Instant::now();
-        let mut t = TrackedTarget::new("970012345".into(), "vessels.urn:mrn:imo:mmsi:970012345".into(), now);
+        let mut t = TrackedTarget::new(
+            "970012345".into(),
+            "vessels.urn:mrn:imo:mmsi:970012345".into(),
+            now,
+        );
         // First record_message should confirm (confirm_count=1 for ATONs)
         let transition = t.record_message(now);
         assert!(transition.is_some());
@@ -415,7 +429,11 @@ mod tests {
     #[test]
     fn confirmed_to_lost_on_timeout() {
         let now = Instant::now();
-        let mut t = TrackedTarget::new("211457160".into(), "vessels.urn:mrn:imo:mmsi:211457160".into(), now);
+        let mut t = TrackedTarget::new(
+            "211457160".into(),
+            "vessels.urn:mrn:imo:mmsi:211457160".into(),
+            now,
+        );
         t.record_message(now); // first message
         t.record_message(now + Duration::from_secs(5)); // second → confirms
 
@@ -436,7 +454,11 @@ mod tests {
     #[test]
     fn lost_to_confirmed_on_new_message() {
         let now = Instant::now();
-        let mut t = TrackedTarget::new("211457160".into(), "vessels.urn:mrn:imo:mmsi:211457160".into(), now);
+        let mut t = TrackedTarget::new(
+            "211457160".into(),
+            "vessels.urn:mrn:imo:mmsi:211457160".into(),
+            now,
+        );
         t.record_message(now); // first
         t.record_message(now + Duration::from_secs(5)); // second → confirms
         t.status = TargetStatus::Lost; // simulate going lost
@@ -566,7 +588,11 @@ mod tests {
 
         // Create and confirm
         tracker.update_target("vessels.urn:mrn:imo:mmsi:211457160", &[], now);
-        tracker.update_target("vessels.urn:mrn:imo:mmsi:211457160", &[], now + Duration::from_secs(5));
+        tracker.update_target(
+            "vessels.urn:mrn:imo:mmsi:211457160",
+            &[],
+            now + Duration::from_secs(5),
+        );
 
         // Mark as lost
         tracker.tick(now + Duration::from_secs(370));
@@ -618,11 +644,18 @@ mod tests {
     #[test]
     fn target_updates_name_and_callsign() {
         let now = Instant::now();
-        let mut t = TrackedTarget::new("211457160".into(), "vessels.urn:mrn:imo:mmsi:211457160".into(), now);
+        let mut t = TrackedTarget::new(
+            "211457160".into(),
+            "vessels.urn:mrn:imo:mmsi:211457160".into(),
+            now,
+        );
 
         t.update_from_values(&[
             ("name".into(), serde_json::json!("PACIFIC EXPLORER")),
-            ("communication.callsignVhf".into(), serde_json::json!("DJKL")),
+            (
+                "communication.callsignVhf".into(),
+                serde_json::json!("DJKL"),
+            ),
         ]);
 
         assert_eq!(t.name.as_deref(), Some("PACIFIC EXPLORER"));

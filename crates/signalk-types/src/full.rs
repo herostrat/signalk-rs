@@ -4,10 +4,22 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// A single value from one source — used in the `values` map of a leaf node.
+///
+/// When multiple sources provide data for the same path, each source's latest
+/// value is stored here. The active (highest-priority) value is at the parent
+/// `SignalKValue` level; the `values` map provides the full picture.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SourceValue {
+    pub value: serde_json::Value,
+    pub timestamp: DateTime<Utc>,
+}
+
 /// A single leaf value in the full SignalK data model.
 ///
 /// Each measurement path stores the current value, its source reference,
-/// a timestamp, and optional metadata.
+/// a timestamp, and optional metadata. When multiple sources provide data
+/// for the same path, the `values` field holds each source's latest value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SignalKValue {
     /// The actual measurement — scalar or structured object
@@ -23,6 +35,11 @@ pub struct SignalKValue {
     /// Optional metadata (units, description, alarm zones, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Metadata>,
+
+    /// Per-source values — only present when 2+ sources provide this path.
+    /// Keys are source references (same format as `$source`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub values: Option<HashMap<String, SourceValue>>,
 }
 
 impl SignalKValue {
@@ -32,6 +49,7 @@ impl SignalKValue {
             source,
             timestamp,
             meta: None,
+            values: None,
         }
     }
 
@@ -173,9 +191,18 @@ pub struct FullModel {
 
     pub vessels: HashMap<String, VesselData>,
 
-    /// Sources registry — maps source ref strings to source info
-    #[serde(skip_serializing_if = "HashMap::is_empty", default)]
-    pub sources: HashMap<String, serde_json::Value>,
+    /// Sources registry — hierarchical structure per spec.
+    /// `sources.{label}.{suffix}` for NMEA, `sources.{label}` for plugins.
+    #[serde(skip_serializing_if = "is_empty_object", default = "empty_object")]
+    pub sources: serde_json::Value,
+}
+
+fn is_empty_object(v: &serde_json::Value) -> bool {
+    v.as_object().is_none_or(|m| m.is_empty())
+}
+
+fn empty_object() -> serde_json::Value {
+    serde_json::Value::Object(serde_json::Map::new())
 }
 
 impl FullModel {
@@ -184,7 +211,7 @@ impl FullModel {
             version: crate::SIGNALK_VERSION.to_string(),
             self_uri: self_uri.into(),
             vessels: HashMap::new(),
-            sources: HashMap::new(),
+            sources: serde_json::Value::Object(serde_json::Map::new()),
         }
     }
 }
@@ -341,5 +368,96 @@ mod tests {
                 .unwrap()
                 .contains_key("signalk-tcp")
         );
+    }
+
+    #[test]
+    fn signalk_value_without_values_field() {
+        let val = make_value(3.5, "gps.0");
+        let json = serde_json::to_value(&val).unwrap();
+        assert!(
+            !json.as_object().unwrap().contains_key("values"),
+            "values field should not appear when None"
+        );
+    }
+
+    #[test]
+    fn signalk_value_with_values_field() {
+        let ts: DateTime<Utc> = "2024-01-01T00:00:00Z".parse().unwrap();
+        let mut val = make_value(3.5, "gps.0");
+        let mut values_map = HashMap::new();
+        values_map.insert(
+            "gps.0".to_string(),
+            SourceValue {
+                value: serde_json::json!(3.5),
+                timestamp: ts,
+            },
+        );
+        values_map.insert(
+            "ais".to_string(),
+            SourceValue {
+                value: serde_json::json!(3.8),
+                timestamp: ts,
+            },
+        );
+        val.values = Some(values_map);
+
+        let json = serde_json::to_value(&val).unwrap();
+        assert!(json["values"]["gps.0"]["value"] == 3.5);
+        assert!(json["values"]["ais"]["value"] == 3.8);
+    }
+
+    #[test]
+    fn signalk_value_with_values_roundtrip() {
+        let ts: DateTime<Utc> = "2024-01-01T00:00:00Z".parse().unwrap();
+        let mut val = make_value(3.5, "gps.0");
+        let mut values_map = HashMap::new();
+        values_map.insert(
+            "gps.0".to_string(),
+            SourceValue {
+                value: serde_json::json!(3.5),
+                timestamp: ts,
+            },
+        );
+        val.values = Some(values_map);
+
+        let json = serde_json::to_string(&val).unwrap();
+        let back: SignalKValue = serde_json::from_str(&json).unwrap();
+        assert!(back.values.is_some());
+        assert_eq!(back.values.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn vessel_data_roundtrip_with_values() {
+        let ts: DateTime<Utc> = "2024-01-01T00:00:00Z".parse().unwrap();
+        let mut vessel = VesselData {
+            uuid: Some("urn:mrn:signalk:uuid:test".to_string()),
+            ..Default::default()
+        };
+        let mut val = make_value(3.5, "gps.0");
+        let mut values_map = HashMap::new();
+        values_map.insert(
+            "gps.0".to_string(),
+            SourceValue {
+                value: serde_json::json!(3.5),
+                timestamp: ts,
+            },
+        );
+        values_map.insert(
+            "ais".to_string(),
+            SourceValue {
+                value: serde_json::json!(3.8),
+                timestamp: ts,
+            },
+        );
+        val.values = Some(values_map);
+        vessel
+            .values
+            .insert("navigation.speedOverGround".to_string(), val);
+
+        let json = serde_json::to_string(&vessel).unwrap();
+        let back: VesselData = serde_json::from_str(&json).unwrap();
+        let sog = &back.values["navigation.speedOverGround"];
+        assert!(sog.values.is_some());
+        assert_eq!(sog.values.as_ref().unwrap().len(), 2);
     }
 }

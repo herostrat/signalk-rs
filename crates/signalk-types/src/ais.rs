@@ -144,10 +144,7 @@ impl AisContact {
         if let Some(beam) = self.beam
             && beam > 0.0
         {
-            values.push(PathValue::new(
-                "design.beam.value",
-                serde_json::json!(beam),
-            ));
+            values.push(PathValue::new("design.beam.value", serde_json::json!(beam)));
         }
 
         if let Some(draft) = self.draught
@@ -284,29 +281,39 @@ mod tests {
 
         let values = &delta.updates[0].values;
         assert!(values.iter().any(|v| v.path == "navigation.position"));
-        assert!(values.iter().any(|v| v.path == "navigation.speedOverGround"));
-        assert!(values
-            .iter()
-            .any(|v| v.path == "navigation.courseOverGroundTrue"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "navigation.speedOverGround")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "navigation.courseOverGroundTrue")
+        );
         assert!(values.iter().any(|v| v.path == "navigation.headingTrue"));
         assert!(values.iter().any(|v| v.path == "navigation.rateOfTurn"));
         assert!(values.iter().any(|v| v.path == "navigation.state"));
         assert!(values.iter().any(|v| v.path == "name"));
-        assert!(values
-            .iter()
-            .any(|v| v.path == "communication.callsignVhf"));
+        assert!(values.iter().any(|v| v.path == "communication.callsignVhf"));
         assert!(values.iter().any(|v| v.path == "registrations.imo"));
         assert!(values.iter().any(|v| v.path == "design.aisShipType"));
-        assert!(values
-            .iter()
-            .any(|v| v.path == "design.length.overall.value"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "design.length.overall.value")
+        );
         assert!(values.iter().any(|v| v.path == "design.beam.value"));
-        assert!(values
-            .iter()
-            .any(|v| v.path == "design.draft.value.maximum"));
-        assert!(values
-            .iter()
-            .any(|v| v.path == "navigation.destination.commonName"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "design.draft.value.maximum")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "navigation.destination.commonName")
+        );
     }
 
     #[test]

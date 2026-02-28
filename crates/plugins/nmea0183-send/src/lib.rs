@@ -152,7 +152,9 @@ fn snapshot_to_mwv(snap: &Snapshot) -> MwvData {
     MwvData {
         wind_direction: snap.wind_angle_apparent_rad.map(|v| v.to_degrees() as f32),
         reference: Some(MwvReference::Relative),
-        wind_speed: snap.wind_speed_apparent_mps.map(|v| (v * MPS_TO_KNOTS) as f32),
+        wind_speed: snap
+            .wind_speed_apparent_mps
+            .map(|v| (v * MPS_TO_KNOTS) as f32),
         wind_speed_units: Some(MwvWindSpeedUnits::Knots),
         data_valid: snap.wind_angle_apparent_rad.is_some(),
     }
@@ -340,11 +342,7 @@ impl Plugin for Nmea0183SendPlugin {
                             loop {
                                 match rx.recv().await {
                                     Ok(sentence) => {
-                                        if stream
-                                            .write_all(sentence.as_bytes())
-                                            .await
-                                            .is_err()
-                                        {
+                                        if stream.write_all(sentence.as_bytes()).await.is_err() {
                                             debug!(%peer, "NMEA output client disconnected");
                                             return;
                                         }
@@ -543,10 +541,7 @@ mod tests {
         let sentences = generate_all_sentences(&snap, "GP");
         assert_eq!(sentences.len(), 5); // RMC, HDT, MWV, DBT, VTG
 
-        let types: Vec<&str> = sentences
-            .iter()
-            .map(|s| &s[3..6])
-            .collect();
+        let types: Vec<&str> = sentences.iter().map(|s| &s[3..6]).collect();
         assert!(types.contains(&"RMC"));
         assert!(types.contains(&"HDT"));
         assert!(types.contains(&"MWV"));

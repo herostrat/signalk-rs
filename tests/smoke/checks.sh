@@ -47,8 +47,8 @@ check() {
   fi
 }
 
-# Wait for simulator to emit data
-sleep 3
+# Wait for simulator to emit data via all three paths
+sleep 5
 
 echo "HTTP Smoke Tests: $BASE"
 echo ""
@@ -186,6 +186,70 @@ check "POST global appData returns 200" \
   "$APP_DATA_STATUS" "200"
 check "GET global appData returns data" \
   "$(fetch "$BASE/signalk/v1/applicationData/global/test-app/1.0")" '"theme"'
+
+# --- Multi-Path Data Flow ---
+# The simulator outputs data via three paths simultaneously:
+#   1. Direct delta (source: sensor-data-simulator)
+#   2. NMEA 0183 TCP → nmea0183-tcp plugin (source: nmea0183-sim.GP)
+#   3. NMEA 2000 vcan → nmea2000 plugin (source: nmea2000-sim.{pgn})
+echo "  Multi-Path Data Flow"
+
+# All three paths produce navigation.position — verify it has data
+check "position has value via multi-path" \
+  "$(fetch "$BASE/signalk/v1/api/vessels/self/navigation/position")" '"latitude"'
+
+# Direct-only: propulsion data (RPM, oil temp) is only in the direct delta
+check "propulsion data flows via direct path" \
+  "$(fetch "$BASE/signalk/v1/api/vessels/self/propulsion")" '"revolutions"'
+
+# Navigation heading (from NMEA 0183 HDG + NMEA 2000 PGN 127250 + direct)
+check "headingMagnetic has value" \
+  "$(fetch "$BASE/signalk/v1/api/vessels/self/navigation/headingMagnetic")" '"value"'
+
+# Water depth (from NMEA 0183 DBT + NMEA 2000 PGN 128267 + direct)
+check "depth has value" \
+  "$(fetch "$BASE/signalk/v1/api/vessels/self/environment/depth/belowTransducer")" '"value"'
+
+# --- Source Priority ---
+# Config: nmea0183-sim.GP = 10, sensor-data-simulator = 50, nmea2000-sim.* = 100 (default)
+# The NMEA 0183 path should win for paths it provides (position, SOG, COG).
+echo "  Source Priority"
+
+# Position: all three paths provide it. NMEA 0183 (priority 10) should win.
+POS_DATA=$(fetch "$BASE/signalk/v1/api/vessels/self/navigation/position")
+check "position source is nmea0183 (highest priority)" \
+  "$POS_DATA" '"nmea0183-sim.GP"'
+
+# SOG: direct + NMEA 0183 provide it. NMEA 0183 should win.
+SOG_DATA=$(fetch "$BASE/signalk/v1/api/vessels/self/navigation/speedOverGround")
+check "SOG source is nmea0183 (highest priority)" \
+  "$SOG_DATA" '"nmea0183-sim.GP"'
+
+# Propulsion RPM: only direct provides it, so source should be simulator.
+RPM_DATA=$(fetch "$BASE/signalk/v1/api/vessels/self/propulsion/port/revolutions")
+check "propulsion source is direct (only source)" \
+  "$RPM_DATA" '"sensor-data-simulator"'
+
+# --- Multi-Source Values (spec compliance) ---
+# When 2+ sources provide the same path, a "values" object should appear.
+echo "  Multi-Source Values"
+check "position has values field (multi-source)" \
+  "$POS_DATA" '"values"'
+check "SOG has values field (multi-source)" \
+  "$SOG_DATA" '"values"'
+check "propulsion RPM has no values field (single source)" \
+  "$(echo "$RPM_DATA" | grep -c '"values"')" "0"
+
+# --- Sources Endpoint (spec compliance) ---
+# GET /signalk/v1/api/sources returns hierarchical sources
+echo "  Sources API"
+SOURCES_DATA=$(fetch "$BASE/signalk/v1/api/sources")
+check "GET /sources returns data" \
+  "$SOURCES_DATA" '"label"'
+check "sources has nmea0183-sim (hierarchical)" \
+  "$SOURCES_DATA" '"nmea0183-sim"'
+check "sources has sensor-data-simulator" \
+  "$SOURCES_DATA" '"sensor-data-simulator"'
 
 # --- Summary ---
 echo ""

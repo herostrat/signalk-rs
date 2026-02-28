@@ -184,7 +184,9 @@ impl Nmea0183Output {
 
     /// Encode values and send all sentences to the TCP server.
     pub async fn send(&mut self, values: &SimulatedValues) {
-        if self.stream.is_none() && let Err(e) = self.connect().await {
+        if self.stream.is_none()
+            && let Err(e) = self.connect().await
+        {
             debug!(error = %e, "NMEA 0183 TCP connect failed");
             return;
         }
@@ -268,7 +270,12 @@ mod tests {
         let sentences = encode(&values, "GP", true);
 
         // Should have: RMC, GGA, HDG, VHW, MWV, DBT, MTW, MDA, XDR = 9
-        assert_eq!(sentences.len(), 9, "expected 9 sentences, got {}", sentences.len());
+        assert_eq!(
+            sentences.len(),
+            9,
+            "expected 9 sentences, got {}",
+            sentences.len()
+        );
 
         // Check sentence types present
         let types: Vec<&str> = sentences
@@ -292,12 +299,14 @@ mod tests {
         let sentences = encode(&values, "GP", false);
 
         // Without environment: RMC, GGA, HDG, VHW, XDR = 5
-        assert_eq!(sentences.len(), 5, "expected 5 sentences, got {}", sentences.len());
+        assert_eq!(
+            sentences.len(),
+            5,
+            "expected 5 sentences, got {}",
+            sentences.len()
+        );
 
-        let types: Vec<&str> = sentences
-            .iter()
-            .map(|s| &s[3..6])
-            .collect();
+        let types: Vec<&str> = sentences.iter().map(|s| &s[3..6]).collect();
         assert!(!types.contains(&"MWV"));
         assert!(!types.contains(&"DBT"));
         assert!(!types.contains(&"MTW"));
@@ -384,6 +393,6 @@ mod tests {
         let fields: Vec<&str> = hdg[1..hdg.find('*').unwrap()].split(',').collect();
         // Format: GPHDG,heading,,,,variation,E/W
         let heading: f64 = fields[1].parse().unwrap();
-        assert!(heading >= 0.0 && heading < 360.0, "heading = {heading}");
+        assert!((0.0..360.0).contains(&heading), "heading = {heading}");
     }
 }

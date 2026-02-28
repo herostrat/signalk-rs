@@ -29,8 +29,28 @@ uds_rs_socket = "/run/signalk/rs.sock"
 uds_bridge_socket = "/run/signalk/bridge.sock"
 bridge_token = "dev-token-12345"
 
+# --- Source Priorities ---
+# Lower number = higher priority. Default is 100.
+# This lets us verify that when all three paths produce the same data,
+# the highest-priority source wins.
+[source_priorities]
+"nmea0183-sim.GP" = 10             # NMEA 0183 path (highest)
+"sensor-data-simulator" = 50       # Direct delta path (medium)
+# NMEA 2000 sources (nmea2000-sim.{pgn}) get default 100 (lowest)
+
 # --- Plugins ---
 
+# Simulator: all three output modes active
 [[plugins]]
 id = "sensor-data-simulator"
-config = { update_interval_ms = 1000 }
+config = { update_interval_ms = 1000, output = { direct = true, nmea0183 = { enabled = true, host = "127.0.0.1", port = 10110, talker_id = "GP" }, nmea2000 = { enabled = true, interface = "vcan0", source_address = 42 } } }
+
+# NMEA 0183 TCP receiver: listens on port 10110 for simulator sentences
+[[plugins]]
+id = "nmea0183-tcp"
+config = { addr = "0.0.0.0:10110", source_label = "nmea0183-sim" }
+
+# NMEA 2000 receiver: reads CAN frames from vcan0
+[[plugins]]
+id = "nmea2000"
+config = { interface = "vcan0", source_label = "nmea2000-sim" }
