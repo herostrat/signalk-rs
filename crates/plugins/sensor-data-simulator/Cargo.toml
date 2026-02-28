@@ -15,6 +15,9 @@ serde_json.workspace = true
 serde.workspace = true
 chrono.workspace = true
 async-trait.workspace = true
+nmea2000.workspace = true
+nmea2000-pgns.workspace = true
+nmea2000-types.workspace = true
 
 [dev-dependencies]
 signalk-plugin-api = { workspace = true, features = ["testing"] }

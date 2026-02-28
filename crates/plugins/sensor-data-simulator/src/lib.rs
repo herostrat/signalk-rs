@@ -22,12 +22,15 @@
 use async_trait::async_trait;
 use serde::Deserialize;
 use signalk_plugin_api::{Plugin, PluginContext, PluginError, PluginMetadata};
-use signalk_types::{Delta, PathValue, Source, Update};
 use std::sync::Arc;
 use tokio::task::AbortHandle;
 use tracing::info;
 
 mod generators;
+mod output_direct;
+mod output_nmea0183;
+mod output_nmea2000;
+
 use generators::SimulatorState;
 
 // ─── Config ─────────────────────────────────────────────────────────────────
@@ -54,6 +57,79 @@ struct SimulatorConfig {
 
     #[serde(default = "default_true")]
     enable_environment: bool,
+
+    #[serde(default)]
+    output: OutputConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OutputConfig {
+    #[serde(default = "default_true")]
+    direct: bool,
+
+    #[serde(default)]
+    nmea0183: Nmea0183Config,
+
+    #[serde(default)]
+    nmea2000: Nmea2000Config,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct Nmea0183Config {
+    #[serde(default)]
+    enabled: bool,
+
+    #[serde(default = "default_nmea0183_host")]
+    host: String,
+
+    #[serde(default = "default_nmea0183_port")]
+    port: u16,
+
+    #[serde(default = "default_talker_id")]
+    talker_id: String,
+}
+
+impl Default for Nmea0183Config {
+    fn default() -> Self {
+        Nmea0183Config {
+            enabled: false,
+            host: default_nmea0183_host(),
+            port: default_nmea0183_port(),
+            talker_id: default_talker_id(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct Nmea2000Config {
+    #[serde(default)]
+    enabled: bool,
+
+    #[serde(default = "default_nmea2000_interface")]
+    interface: String,
+
+    #[serde(default = "default_nmea2000_source")]
+    source_address: u8,
+}
+
+impl Default for Nmea2000Config {
+    fn default() -> Self {
+        Nmea2000Config {
+            enabled: false,
+            interface: default_nmea2000_interface(),
+            source_address: default_nmea2000_source(),
+        }
+    }
+}
+
+impl Default for OutputConfig {
+    fn default() -> Self {
+        OutputConfig {
+            direct: true,
+            nmea0183: Nmea0183Config::default(),
+            nmea2000: Nmea2000Config::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -91,6 +167,21 @@ fn default_variation() -> f64 {
 fn default_true() -> bool {
     true
 }
+fn default_nmea0183_host() -> String {
+    "127.0.0.1".to_string()
+}
+fn default_nmea0183_port() -> u16 {
+    10110
+}
+fn default_talker_id() -> String {
+    "GP".to_string()
+}
+fn default_nmea2000_interface() -> String {
+    "vcan0".to_string()
+}
+fn default_nmea2000_source() -> u8 {
+    42
+}
 
 impl Default for SimulatorConfig {
     fn default() -> Self {
@@ -102,6 +193,7 @@ impl Default for SimulatorConfig {
             magnetic_variation_deg: default_variation(),
             enable_propulsion: true,
             enable_environment: true,
+            output: OutputConfig::default(),
         }
     }
 }
@@ -176,6 +268,33 @@ impl Plugin for SimulatorPlugin {
                     "type": "boolean",
                     "description": "Simulate environmental data (wind, depth, temperature, pressure)",
                     "default": true
+                },
+                "output": {
+                    "type": "object",
+                    "properties": {
+                        "direct": {
+                            "type": "boolean",
+                            "description": "Emit SignalK deltas directly into the store",
+                            "default": true
+                        },
+                        "nmea0183": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": { "type": "boolean", "description": "Enable NMEA 0183 TCP output", "default": false },
+                                "host": { "type": "string", "description": "Host of nmea0183-receive TCP listener", "default": "127.0.0.1" },
+                                "port": { "type": "integer", "description": "Port of nmea0183-receive TCP listener", "default": 10110 },
+                                "talker_id": { "type": "string", "description": "NMEA talker ID (GP, GN, II, etc.)", "default": "GP" }
+                            }
+                        },
+                        "nmea2000": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": { "type": "boolean", "description": "Enable NMEA 2000 SocketCAN/vcan output", "default": false },
+                                "interface": { "type": "string", "description": "CAN interface (vcan0 for testing)", "default": "vcan0" },
+                                "source_address": { "type": "integer", "description": "Fixed source address (0-252)", "default": 42, "minimum": 0, "maximum": 252 }
+                            }
+                        }
+                    }
                 }
             }
         }))
@@ -211,23 +330,77 @@ impl Plugin for SimulatorPlugin {
 
         let interval = tokio::time::Duration::from_millis(sim_config.update_interval_ms);
         let enable_env = sim_config.enable_environment;
+        let output_direct_enabled = sim_config.output.direct;
+
+        let nmea0183_output = if sim_config.output.nmea0183.enabled {
+            let cfg = &sim_config.output.nmea0183;
+            info!(host = %cfg.host, port = cfg.port, talker = %cfg.talker_id, "NMEA 0183 output enabled");
+            Some(output_nmea0183::Nmea0183Output::new(
+                cfg.host.clone(),
+                cfg.port,
+                cfg.talker_id.clone(),
+                enable_env,
+            ))
+        } else {
+            None
+        };
+
+        // NMEA 2000 output: blocking thread + mpsc channel
+        let nmea2000_tx = if sim_config.output.nmea2000.enabled {
+            let cfg = &sim_config.output.nmea2000;
+            info!(interface = %cfg.interface, source = cfg.source_address, "NMEA 2000 output enabled");
+            let (tx, rx) = std::sync::mpsc::channel::<Vec<output_nmea2000::EncodedPgn>>();
+            let iface = cfg.interface.clone();
+            let source = cfg.source_address;
+            tokio::task::spawn_blocking(move || {
+                output_nmea2000::run_bus_writer(&iface, source, rx);
+            });
+            Some(tx)
+        } else {
+            None
+        };
 
         let ctx_for_spawn = ctx.clone();
         let handle = tokio::spawn(async move {
             let mut ticker = tokio::time::interval(interval);
+            let mut nmea0183 = nmea0183_output;
+            let mut n2k_sid: u8 = 0;
+
             loop {
                 ticker.tick().await;
                 let values = state.tick();
-                let delta = build_delta(&values, enable_env);
 
-                if let Err(e) = ctx_for_spawn.handle_message(delta).await {
-                    tracing::warn!(error = %e, "Simulator: failed to emit delta");
+                if output_direct_enabled {
+                    let delta = output_direct::build_delta(&values, enable_env);
+                    if let Err(e) = ctx_for_spawn.handle_message(delta).await {
+                        tracing::warn!(error = %e, "Simulator: failed to emit delta");
+                    }
+                }
+
+                if let Some(ref mut out) = nmea0183 {
+                    out.send(&values).await;
+                }
+
+                if let Some(ref tx) = nmea2000_tx {
+                    let pgns = output_nmea2000::encode(&values, &mut n2k_sid, enable_env);
+                    let _ = tx.send(pgns);
                 }
             }
         });
 
         self.abort_handle = Some(handle.abort_handle());
-        ctx.set_status("Generating data");
+
+        let mut status_parts = Vec::new();
+        if sim_config.output.direct {
+            status_parts.push("direct");
+        }
+        if sim_config.output.nmea0183.enabled {
+            status_parts.push("nmea0183");
+        }
+        if sim_config.output.nmea2000.enabled {
+            status_parts.push("nmea2000");
+        }
+        ctx.set_status(&format!("Generating data ({})", status_parts.join(", ")));
         Ok(())
     }
 
@@ -237,138 +410,6 @@ impl Plugin for SimulatorPlugin {
         }
         Ok(())
     }
-}
-
-// ─── Delta builder ──────────────────────────────────────────────────────────
-
-fn build_delta(values: &generators::SimulatedValues, enable_environment: bool) -> Delta {
-    let source = Source::plugin("sensor-data-simulator");
-    let mut path_values = Vec::with_capacity(30);
-
-    // Navigation (always included)
-    path_values.push(PathValue::new(
-        "navigation.position",
-        serde_json::json!({
-            "latitude": values.latitude,
-            "longitude": values.longitude
-        }),
-    ));
-    path_values.push(PathValue::new(
-        "navigation.speedOverGround",
-        serde_json::json!(values.sog_mps),
-    ));
-    path_values.push(PathValue::new(
-        "navigation.courseOverGroundTrue",
-        serde_json::json!(values.cog_rad),
-    ));
-    path_values.push(PathValue::new(
-        "navigation.headingMagnetic",
-        serde_json::json!(values.heading_magnetic_rad),
-    ));
-    path_values.push(PathValue::new(
-        "navigation.magneticVariation",
-        serde_json::json!(values.magnetic_variation_rad),
-    ));
-    path_values.push(PathValue::new(
-        "navigation.speedThroughWater",
-        serde_json::json!(values.stw_mps),
-    ));
-    path_values.push(PathValue::new(
-        "navigation.attitude",
-        serde_json::json!({
-            "roll": values.roll_rad,
-            "pitch": values.pitch_rad,
-            "yaw": 0.0
-        }),
-    ));
-    path_values.push(PathValue::new(
-        "navigation.datetime",
-        serde_json::json!(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
-    ));
-
-    // Environment (optional)
-    if enable_environment {
-        path_values.push(PathValue::new(
-            "environment.wind.angleApparent",
-            serde_json::json!(values.wind_angle_apparent_rad),
-        ));
-        path_values.push(PathValue::new(
-            "environment.wind.speedApparent",
-            serde_json::json!(values.wind_speed_apparent_mps),
-        ));
-        path_values.push(PathValue::new(
-            "environment.depth.belowTransducer",
-            serde_json::json!(values.depth_below_transducer_m),
-        ));
-        path_values.push(PathValue::new(
-            "environment.depth.surfaceToTransducer",
-            serde_json::json!(values.surface_to_transducer_m),
-        ));
-        path_values.push(PathValue::new(
-            "environment.water.temperature",
-            serde_json::json!(values.water_temperature_k),
-        ));
-        path_values.push(PathValue::new(
-            "environment.outside.temperature",
-            serde_json::json!(values.air_temperature_k),
-        ));
-        path_values.push(PathValue::new(
-            "environment.outside.pressure",
-            serde_json::json!(values.pressure_pa),
-        ));
-        path_values.push(PathValue::new(
-            "environment.outside.humidity",
-            serde_json::json!(values.humidity_ratio),
-        ));
-    }
-
-    // Propulsion + electrical + fuel (optional)
-    if let Some(ref prop) = values.propulsion {
-        path_values.push(PathValue::new(
-            "propulsion.main.revolutions",
-            serde_json::json!(prop.revolutions_hz),
-        ));
-        path_values.push(PathValue::new(
-            "propulsion.main.oilTemperature",
-            serde_json::json!(prop.oil_temperature_k),
-        ));
-        path_values.push(PathValue::new(
-            "propulsion.main.coolantTemperature",
-            serde_json::json!(prop.coolant_temperature_k),
-        ));
-        path_values.push(PathValue::new(
-            "propulsion.main.fuel.rate",
-            serde_json::json!(prop.fuel_rate_m3s),
-        ));
-        path_values.push(PathValue::new(
-            "electrical.batteries.0.voltage",
-            serde_json::json!(prop.battery_voltage),
-        ));
-        path_values.push(PathValue::new(
-            "electrical.batteries.0.current",
-            serde_json::json!(prop.battery_current),
-        ));
-    }
-
-    // Tanks (always included)
-    path_values.push(PathValue::new(
-        "tanks.fuel.0.currentLevel",
-        serde_json::json!(values.fuel_tank_level),
-    ));
-    path_values.push(PathValue::new(
-        "tanks.fuel.0.capacity",
-        serde_json::json!(values.fuel_tank_capacity_m3),
-    ));
-    path_values.push(PathValue::new(
-        "tanks.freshWater.0.currentLevel",
-        serde_json::json!(values.fresh_water_level),
-    ));
-    path_values.push(PathValue::new(
-        "tanks.freshWater.0.capacity",
-        serde_json::json!(values.fresh_water_capacity_m3),
-    ));
-
-    Delta::self_vessel(vec![Update::new(source, path_values)])
 }
 
 #[cfg(test)]
@@ -408,87 +449,54 @@ mod tests {
     }
 
     #[test]
-    fn build_delta_contains_navigation() {
-        let state = generators::SimulatorState::new(54.5, 10.0, 200.0, 300.0, 2.5, false);
-        let values = state.tick();
-        let delta = build_delta(&values, false);
-
-        let paths: Vec<&str> = delta.updates[0]
-            .values
-            .iter()
-            .map(|pv| pv.path.as_str())
-            .collect();
-
-        assert!(paths.contains(&"navigation.position"));
-        assert!(paths.contains(&"navigation.speedOverGround"));
-        assert!(paths.contains(&"navigation.speedThroughWater"));
-        assert!(paths.contains(&"navigation.courseOverGroundTrue"));
-        assert!(paths.contains(&"navigation.headingMagnetic"));
-        assert!(paths.contains(&"navigation.magneticVariation"));
-        assert!(paths.contains(&"navigation.attitude"));
-        assert!(paths.contains(&"navigation.datetime"));
-        // No environment or propulsion (but tanks are always present)
-        assert!(!paths.iter().any(|p| p.starts_with("environment.")));
-        assert!(!paths.iter().any(|p| p.starts_with("propulsion.")));
-        assert!(paths.contains(&"tanks.fuel.0.currentLevel"));
+    fn output_config_defaults() {
+        let config: SimulatorConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(config.output.direct);
+        assert!(!config.output.nmea0183.enabled);
+        assert_eq!(config.output.nmea0183.host, "127.0.0.1");
+        assert_eq!(config.output.nmea0183.port, 10110);
+        assert_eq!(config.output.nmea0183.talker_id, "GP");
+        assert!(!config.output.nmea2000.enabled);
+        assert_eq!(config.output.nmea2000.interface, "vcan0");
+        assert_eq!(config.output.nmea2000.source_address, 42);
     }
 
     #[test]
-    fn build_delta_with_environment() {
-        let state = generators::SimulatorState::new(54.5, 10.0, 200.0, 300.0, 2.5, false);
-        let values = state.tick();
-        let delta = build_delta(&values, true);
-
-        let paths: Vec<&str> = delta.updates[0]
-            .values
-            .iter()
-            .map(|pv| pv.path.as_str())
-            .collect();
-
-        assert!(paths.contains(&"environment.wind.angleApparent"));
-        assert!(paths.contains(&"environment.wind.speedApparent"));
-        assert!(paths.contains(&"environment.depth.belowTransducer"));
-        assert!(paths.contains(&"environment.depth.surfaceToTransducer"));
-        assert!(paths.contains(&"environment.water.temperature"));
-        assert!(paths.contains(&"environment.outside.temperature"));
-        assert!(paths.contains(&"environment.outside.pressure"));
-        assert!(paths.contains(&"environment.outside.humidity"));
+    fn output_config_with_nmea2000() {
+        let config: SimulatorConfig = serde_json::from_value(serde_json::json!({
+            "output": {
+                "nmea2000": {
+                    "enabled": true,
+                    "interface": "can0",
+                    "source_address": 100
+                }
+            }
+        }))
+        .unwrap();
+        assert!(config.output.nmea2000.enabled);
+        assert_eq!(config.output.nmea2000.interface, "can0");
+        assert_eq!(config.output.nmea2000.source_address, 100);
     }
 
     #[test]
-    fn build_delta_with_propulsion() {
-        let state = generators::SimulatorState::new(54.5, 10.0, 200.0, 300.0, 2.5, true);
-        let values = state.tick();
-        let delta = build_delta(&values, false);
-
-        let paths: Vec<&str> = delta.updates[0]
-            .values
-            .iter()
-            .map(|pv| pv.path.as_str())
-            .collect();
-
-        assert!(paths.contains(&"propulsion.main.revolutions"));
-        assert!(paths.contains(&"propulsion.main.oilTemperature"));
-        assert!(paths.contains(&"propulsion.main.coolantTemperature"));
-        assert!(paths.contains(&"propulsion.main.fuel.rate"));
-        assert!(paths.contains(&"electrical.batteries.0.voltage"));
-        assert!(paths.contains(&"electrical.batteries.0.current"));
-    }
-
-    #[test]
-    fn build_delta_position_has_lat_lon() {
-        let state = generators::SimulatorState::new(54.5, 10.0, 200.0, 300.0, 2.5, false);
-        let values = state.tick();
-        let delta = build_delta(&values, false);
-
-        let pos_pv = delta.updates[0]
-            .values
-            .iter()
-            .find(|pv| pv.path == "navigation.position")
-            .unwrap();
-
-        assert!(pos_pv.value.get("latitude").is_some());
-        assert!(pos_pv.value.get("longitude").is_some());
+    fn output_config_with_nmea0183() {
+        let config: SimulatorConfig = serde_json::from_value(serde_json::json!({
+            "output": {
+                "direct": false,
+                "nmea0183": {
+                    "enabled": true,
+                    "host": "192.168.1.10",
+                    "port": 10111,
+                    "talker_id": "II"
+                }
+            }
+        }))
+        .unwrap();
+        assert!(!config.output.direct);
+        assert!(config.output.nmea0183.enabled);
+        assert_eq!(config.output.nmea0183.host, "192.168.1.10");
+        assert_eq!(config.output.nmea0183.port, 10111);
+        assert_eq!(config.output.nmea0183.talker_id, "II");
     }
 
     #[tokio::test]

@@ -2509,6 +2509,9 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "nmea2000",
+ "nmea2000-pgns",
+ "nmea2000-types",
  "serde",
  "serde_json",
  "signalk-plugin-api",
