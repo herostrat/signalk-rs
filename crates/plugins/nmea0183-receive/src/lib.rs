@@ -8,7 +8,9 @@
 /// deltas through the `PluginContext::handle_message` API.
 /// AIS VDM/VDO sentences are decoded via the [`ais_decode`] module.
 pub mod ais_decode;
+pub mod dsc_decode;
 pub mod sentences;
+pub mod xdr;
 
 use async_trait::async_trait;
 use signalk_plugin_api::{Plugin, PluginContext, PluginError, PluginMetadata};
@@ -34,6 +36,24 @@ pub fn sentence_to_delta(raw: &str, source_label: &str) -> Option<Delta> {
         nmea::ParseResult::HDT(hdt) => sentences::from_hdt(&hdt),
         nmea::ParseResult::MWV(mwv) => sentences::from_mwv(&mwv),
         nmea::ParseResult::DPT(dpt) => sentences::from_dpt(&dpt),
+        nmea::ParseResult::HDG(hdg) => sentences::from_hdg(&hdg),
+        nmea::ParseResult::HDM(hdm) => sentences::from_hdm(&hdm),
+        nmea::ParseResult::VHW(vhw) => sentences::from_vhw(&vhw),
+        nmea::ParseResult::MTW(mtw) => sentences::from_mtw(&mtw),
+        nmea::ParseResult::ROT(rot) => sentences::from_rot(&rot),
+        nmea::ParseResult::MDA(mda) => sentences::from_mda(&mda),
+        nmea::ParseResult::MWD(mwd) => sentences::from_mwd(&mwd),
+        nmea::ParseResult::RSA(rsa) => sentences::from_rsa(&rsa),
+        nmea::ParseResult::RPM(rpm) => sentences::from_rpm(&rpm),
+        nmea::ParseResult::GLL(gll) => sentences::from_gll(&gll),
+        nmea::ParseResult::DBT(dbt) => sentences::from_dbt(&dbt),
+        nmea::ParseResult::DBS(dbs) => sentences::from_dbs(&dbs),
+        nmea::ParseResult::DBK(dbk) => sentences::from_dbk(&dbk),
+        nmea::ParseResult::VDR(vdr) => sentences::from_vdr(&vdr),
+        nmea::ParseResult::VLW(vlw) => sentences::from_vlw(&vlw),
+        nmea::ParseResult::VWR(vwr) => sentences::from_vwr(&vwr),
+        nmea::ParseResult::VWT(vwt) => sentences::from_vwt(&vwt),
+        nmea::ParseResult::XDR(ref xdr) => xdr::from_xdr(xdr),
         _ => return None,
     };
 
@@ -202,7 +222,14 @@ async fn handle_tcp_connection(
             ctx.handle_message(delta).await.ok();
             continue;
         }
-        // Standard NMEA (stateless)
+        // DSC (stateless — produces other-vessel deltas + optional notification)
+        if let Some(deltas) = dsc_decode::try_decode_dsc(&sentence, label) {
+            for delta in deltas {
+                ctx.handle_message(delta).await.ok();
+            }
+            continue;
+        }
+        // Standard NMEA (stateless — self-vessel)
         if let Some(delta) = sentence_to_delta(&sentence, label) {
             ctx.handle_message(delta).await.ok();
         }
@@ -356,7 +383,14 @@ async fn open_and_read_serial(
             ctx.handle_message(delta).await.ok();
             continue;
         }
-        // Standard NMEA (stateless)
+        // DSC (stateless — produces other-vessel deltas + optional notification)
+        if let Some(deltas) = dsc_decode::try_decode_dsc(&sentence, source_label) {
+            for delta in deltas {
+                ctx.handle_message(delta).await.ok();
+            }
+            continue;
+        }
+        // Standard NMEA (stateless — self-vessel)
         if let Some(delta) = sentence_to_delta(&sentence, source_label) {
             ctx.handle_message(delta).await.ok();
         }

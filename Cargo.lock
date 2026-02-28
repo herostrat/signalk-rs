@@ -1677,7 +1677,7 @@ dependencies = [
 [[package]]
 name = "nmea"
 version = "0.7.0"
-source = "git+https://github.com/herostrat/nmea0183-rs#5a4c93d74349d0ad3e2650d6793a3c1098e5d564"
+source = "git+https://github.com/herostrat/nmea0183-rs#00d959eda858701fd548cff09d44cec2329f4945"
 dependencies = [
  "arrayvec",
  "cfg-if",

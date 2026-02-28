@@ -66,7 +66,7 @@ async-trait = { version = "0.1" }
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # NMEA parsing
-nmea = { git = "https://github.com/herostrat/nmea0183-rs" }
+nmea = { git = "https://github.com/herostrat/nmea0183-rs", features = ["sensor", "safety"] }
 
 # AIS decoding
 ais = { version = "0.12" }
