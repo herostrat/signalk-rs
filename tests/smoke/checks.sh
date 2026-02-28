@@ -86,7 +86,7 @@ check "navigation/position has latitude" \
 # --- Admin API ---
 echo "  Admin API"
 check "Plugin list includes simulator" \
-  "$(fetch "$BASE/admin/api/plugins")" '"simulator"'
+  "$(fetch "$BASE/admin/api/plugins")" 'sensor-data-simulator'
 
 # --- REST Structure ---
 echo "  REST Structure"
@@ -168,7 +168,7 @@ check "loginStatus has status field" \
 check "skServer/plugins returns 200" \
   "$(status "$BASE/skServer/plugins")" "200"
 check "skServer/plugins lists simulator" \
-  "$(fetch "$BASE/skServer/plugins")" '"simulator"'
+  "$(fetch "$BASE/skServer/plugins")" 'sensor-data-simulator'
 check "skServer/webapps returns 200" \
   "$(status "$BASE/skServer/webapps")" "200"
 check "skServer/vessel returns 200" \
