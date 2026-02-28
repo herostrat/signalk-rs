@@ -5,40 +5,54 @@
 use signalk_types::PathValue;
 use std::collections::HashMap;
 
-pub mod air_density;
-pub mod battery_power;
-pub mod course_bearing;
-pub mod course_distance;
+// ── Navigation ──────────────────────────────────────────────────────────────
 pub mod course_over_ground_magnetic;
 pub mod course_over_ground_true;
-pub mod course_xte;
-pub mod depth_below_keel;
-pub mod depth_below_surface;
-pub mod dew_point;
-pub mod eta;
-pub mod fuel_consumption;
 pub mod heading_true;
-pub mod heat_index;
 pub mod leeway;
 pub mod leeway_angle;
-pub mod moon;
-pub mod prop_slip;
-pub mod prop_state;
 pub mod set_drift;
-pub mod steer_error;
-pub mod suncalc;
-pub mod suntime;
-pub mod tank_volume;
-pub mod transducer_to_keel;
+
+// ── Wind ────────────────────────────────────────────────────────────────────
 pub mod true_wind;
 pub mod vmg;
 pub mod vmg_stw;
-pub mod wind_chill;
 pub mod wind_direction_magnetic;
 pub mod wind_direction_magnetic2;
 pub mod wind_ground;
 pub mod wind_ground_direction;
 pub mod wind_shift;
+
+// ── Course Navigation ───────────────────────────────────────────────────────
+pub mod bearing_magnetic;
+pub mod course_bearing;
+pub mod course_distance;
+pub mod course_xte;
+pub mod eta;
+pub mod previous_point_distance;
+pub mod steer_error;
+pub mod vmg_waypoint;
+
+// ── Environment ─────────────────────────────────────────────────────────────
+pub mod air_density;
+pub mod depth_below_keel;
+pub mod depth_below_surface;
+pub mod dew_point;
+pub mod heat_index;
+pub mod transducer_to_keel;
+pub mod wind_chill;
+
+// ── Astronomical ────────────────────────────────────────────────────────────
+pub mod moon;
+pub mod suncalc;
+pub mod suntime;
+
+// ── Propulsion & Energy ─────────────────────────────────────────────────────
+pub mod battery_power;
+pub mod fuel_consumption;
+pub mod prop_slip;
+pub mod prop_state;
+pub mod tank_volume;
 
 /// A calculator that derives values from raw sensor data.
 ///
@@ -75,38 +89,44 @@ pub fn path_matches_input(changed_path: &str, input: &str) -> bool {
 /// Create all available calculators.
 pub fn all_calculators() -> Vec<Box<dyn Calculator>> {
     vec![
+        // ── Navigation ──────────────────────────────────────────────────
         Box::new(heading_true::HeadingTrue),
         Box::new(course_over_ground_magnetic::CourseOverGroundMagnetic),
         Box::new(course_over_ground_true::CourseOverGroundTrue),
-        Box::new(depth_below_keel::DepthBelowKeel),
-        Box::new(depth_below_surface::DepthBelowSurface),
-        Box::new(transducer_to_keel::TransducerToKeel),
-        Box::new(air_density::AirDensity),
-        Box::new(dew_point::DewPoint),
-        Box::new(heat_index::HeatIndex),
-        Box::new(wind_chill::WindChill),
+        Box::new(leeway_angle::LeewayAngle),
+        Box::new(leeway::Leeway),
+        Box::new(set_drift::SetDrift),
+        // ── Wind ────────────────────────────────────────────────────────
         Box::new(true_wind::TrueWind),
         Box::new(vmg::VmgWind),
         Box::new(vmg_stw::VmgStw),
-        Box::new(leeway_angle::LeewayAngle),
-        Box::new(set_drift::SetDrift),
         Box::new(wind_direction_magnetic::WindDirectionMagnetic),
         Box::new(wind_direction_magnetic2::WindDirectionMagnetic2),
         Box::new(wind_ground::WindGround),
         Box::new(wind_ground_direction::WindGroundDirection),
         Box::new(wind_shift::WindShift::new()),
-        Box::new(leeway::Leeway),
+        // ── Course Navigation ───────────────────────────────────────────
+        Box::new(course_bearing::CourseBearing),
+        Box::new(bearing_magnetic::BearingMagnetic),
+        Box::new(course_distance::CourseDistance),
+        Box::new(previous_point_distance::PreviousPointDistance),
+        Box::new(course_xte::CourseXte),
+        Box::new(vmg_waypoint::VmgWaypoint),
         Box::new(eta::Eta),
         Box::new(steer_error::SteerError),
-        // Astronomical calculators
+        // ── Environment ─────────────────────────────────────────────────
+        Box::new(air_density::AirDensity),
+        Box::new(dew_point::DewPoint),
+        Box::new(heat_index::HeatIndex),
+        Box::new(wind_chill::WindChill),
+        Box::new(depth_below_keel::DepthBelowKeel),
+        Box::new(depth_below_surface::DepthBelowSurface),
+        Box::new(transducer_to_keel::TransducerToKeel),
+        // ── Astronomical ────────────────────────────────────────────────
         Box::new(suncalc::SunCalc),
         Box::new(suntime::SunTime),
         Box::new(moon::Moon),
-        // Course calculators
-        Box::new(course_bearing::CourseBearing),
-        Box::new(course_distance::CourseDistance),
-        Box::new(course_xte::CourseXte),
-        // Dynamic-instance calculators (prefix-based inputs)
+        // ── Propulsion & Energy ─────────────────────────────────────────
         Box::new(battery_power::BatteryPower),
         Box::new(prop_state::PropState),
         Box::new(fuel_consumption::FuelConsumption),

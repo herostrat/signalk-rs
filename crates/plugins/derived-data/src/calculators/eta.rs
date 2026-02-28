@@ -1,9 +1,10 @@
-/// Derives `navigation.course.estimatedTimeOfArrival` from distance and VMG.
+/// Derives `navigation.courseGreatCircle.nextPoint.estimatedTimeOfArrival` from distance and VMG.
 ///
 /// ETA seconds = distance / VMG
 ///
 /// Only produces output when actively navigating to a waypoint
-/// (distance and bearing to next point are available).
+/// (distance and VMG to next point are available). Requires `vmg_waypoint.rs`
+/// to populate `nextPoint.velocityMadeGood`.
 use super::Calculator;
 use signalk_types::PathValue;
 use std::collections::HashMap;
@@ -38,7 +39,7 @@ impl Calculator for Eta {
         let eta_seconds = distance / vmg;
 
         Some(vec![PathValue::new(
-            "navigation.course.estimatedTimeOfArrival",
+            "navigation.courseGreatCircle.nextPoint.estimatedTimeOfArrival",
             serde_json::json!(eta_seconds),
         )])
     }

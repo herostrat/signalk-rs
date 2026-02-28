@@ -114,6 +114,13 @@ pub struct ActiveRoute {
     #[serde(default)]
     pub point_index: usize,
 
+    /// Total number of waypoints in the route.
+    ///
+    /// Stored at route-set / advance time so arrival detection can determine
+    /// whether more waypoints remain without an async resource lookup.
+    #[serde(default)]
+    pub point_total: usize,
+
     /// Route name (if available).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,

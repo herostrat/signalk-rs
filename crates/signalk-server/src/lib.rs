@@ -226,6 +226,14 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
             "/signalk/v2/api/vessels/self/navigation/course/activeRoute/reverse",
             put(api::v2::course::reverse_route),
         )
+        .route(
+            "/signalk/v2/api/vessels/self/navigation/course/arrivalCircle",
+            put(api::v2::course::set_arrival_circle),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/navigation/course/calcValues",
+            get(api::v2::course::get_calc_values),
+        )
         // /skServer compatibility routes for admin UI
         .route(
             "/skServer/loginStatus",

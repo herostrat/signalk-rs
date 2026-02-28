@@ -48,6 +48,20 @@ pub fn cross_track_error(current: (f64, f64), start: (f64, f64), end: (f64, f64)
     xte * EARTH_RADIUS
 }
 
+/// Total remaining distance along a route from a given waypoint index.
+///
+/// Sums haversine distances between consecutive waypoints starting from `from_index`.
+/// Waypoints as `(latitude, longitude)` in degrees.
+pub fn route_remaining_distance(waypoints: &[(f64, f64)], from_index: usize) -> f64 {
+    if from_index + 1 >= waypoints.len() {
+        return 0.0;
+    }
+    waypoints[from_index..]
+        .windows(2)
+        .map(|pair| haversine_meters(pair[0].0, pair[0].1, pair[1].0, pair[1].1))
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,5 +115,35 @@ mod tests {
             xte.abs() > 10_000.0,
             "Expected large XTE off track, got {xte}m"
         );
+    }
+
+    #[test]
+    fn route_remaining_distance_simple() {
+        // 3 waypoints along the same meridian, each ~111km apart
+        let waypoints = vec![(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)];
+        let d = route_remaining_distance(&waypoints, 0);
+        // ~222 km total
+        assert!(
+            (200_000.0..250_000.0).contains(&d),
+            "Expected ~222km, got {d}m"
+        );
+    }
+
+    #[test]
+    fn route_remaining_distance_partial() {
+        let waypoints = vec![(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)];
+        let d = route_remaining_distance(&waypoints, 1);
+        // Only one leg remaining: ~111km
+        assert!(
+            (100_000.0..120_000.0).contains(&d),
+            "Expected ~111km, got {d}m"
+        );
+    }
+
+    #[test]
+    fn route_remaining_distance_at_end() {
+        let waypoints = vec![(0.0, 0.0), (1.0, 0.0)];
+        let d = route_remaining_distance(&waypoints, 1);
+        assert!(d.abs() < 0.01, "Expected 0 at last waypoint, got {d}");
     }
 }

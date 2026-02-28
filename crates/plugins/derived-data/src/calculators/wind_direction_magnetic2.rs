@@ -1,10 +1,11 @@
-/// Derives `environment.wind.directionMagnetic` from heading magnetic + apparent wind angle.
+/// Derives `environment.wind.directionMagneticApparent` from heading magnetic + apparent wind angle.
 ///
-/// directionMagnetic = headingMagnetic + angleApparent
+/// directionMagneticApparent = headingMagnetic + angleApparent
 ///
-/// This is the second method (windDirectionMagnetic2.js upstream) for when
-/// true wind direction is not available but heading + apparent wind are.
-/// Only used if `windDirectionMagnetic` (from directionTrue) is not producing output.
+/// Fallback method for when true wind direction is not available. Uses apparent
+/// wind angle instead of true, so the result includes vessel speed effects.
+/// Output on a separate path from `wind_direction_magnetic.rs` (which uses
+/// true wind direction) since the two methods may produce different values.
 use super::{Calculator, normalize_angle};
 use signalk_types::PathValue;
 use std::collections::HashMap;
@@ -30,7 +31,7 @@ impl Calculator for WindDirectionMagnetic2 {
         let dir_mag = normalize_angle(heading + angle_apparent);
 
         Some(vec![PathValue::new(
-            "environment.wind.directionMagnetic",
+            "environment.wind.directionMagneticApparent",
             serde_json::json!(dir_mag),
         )])
     }

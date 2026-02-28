@@ -1,10 +1,11 @@
-/// Derives `navigation.leewayAngle` from heel angle (roll) and speed through water.
+/// Derives `navigation.leewayAngleHeel` from heel angle (roll) and speed through water.
 ///
 /// Uses the empirical formula: leeway = K × heel / STW²
 /// where K is a boat-specific coefficient (default: 10).
 ///
-/// This is the "heel-based" leeway calculation, as opposed to `leeway_angle.rs`
-/// which derives leeway from headingTrue − cogTrue (GPS-based).
+/// This is the "heel-based" leeway calculation, output to a separate path from
+/// `leeway_angle.rs` (GPS-based, `navigation.leewayAngle`) since the two methods
+/// use fundamentally different inputs and may diverge.
 ///
 /// Sign convention: positive heel to starboard → negative leeway (sliding to port).
 use super::Calculator;
@@ -40,7 +41,7 @@ impl Calculator for Leeway {
         let leeway = DEFAULT_K * roll / (stw * stw);
 
         Some(vec![PathValue::new(
-            "navigation.leewayAngle",
+            "navigation.leewayAngleHeel",
             serde_json::json!(leeway),
         )])
     }

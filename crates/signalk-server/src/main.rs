@@ -264,6 +264,19 @@ async fn main() -> Result<()> {
         signalk_server::api::admin::populate_registry_from_manager(&state, &mgr).await;
     }
 
+    // ── Course manager: restore persisted state + arrival check timer ────────
+    state.course_manager.load().await;
+    {
+        let course_manager = state.course_manager.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                interval.tick().await;
+                course_manager.check_arrival().await;
+            }
+        });
+    }
+
     // Discover webapps from node_modules + collect plugin-registered webapps
     let discovered =
         signalk_server::webapps::discover_webapps(std::path::Path::new(&config.modules_dir));

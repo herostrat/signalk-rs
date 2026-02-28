@@ -1,9 +1,10 @@
-/// Derives `performance.velocityMadeGoodToWaypoint` from true wind angle + STW.
+/// Derives `performance.velocityMadeGoodWater` from true wind angle + STW.
 ///
 /// VMG (upwind/downwind using STW) = STW · cos(angleTrueWater)
 ///
-/// This is the through-water VMG, complementing the existing `vmg.rs` which uses
-/// apparent wind. Useful for polar performance analysis.
+/// This is the through-water VMG, complementing `vmg.rs` (SOG-based wind VMG).
+/// Useful for polar performance analysis. Not to be confused with VMG to waypoint
+/// (`vmg_waypoint.rs`), which uses COG and bearing instead of wind angle.
 use super::Calculator;
 use signalk_types::PathValue;
 use std::collections::HashMap;
@@ -29,7 +30,7 @@ impl Calculator for VmgStw {
         let vmg = stw * angle.cos();
 
         Some(vec![PathValue::new(
-            "performance.velocityMadeGoodToWaypoint",
+            "performance.velocityMadeGoodWater",
             serde_json::json!(vmg),
         )])
     }

@@ -5,12 +5,14 @@
 /// | Method | Route | Handler |
 /// |--------|-------|---------|
 /// | GET    | `.../course` | `get_course` |
+/// | GET    | `.../course/calcValues` | `get_calc_values` |
 /// | DELETE | `.../course` | `clear_course` |
 /// | PUT    | `.../course/destination` | `set_destination` |
 /// | PUT    | `.../course/activeRoute` | `set_active_route` |
 /// | PUT    | `.../course/activeRoute/nextPoint` | `advance_next_point` |
 /// | PUT    | `.../course/activeRoute/pointIndex` | `set_point_index` |
 /// | PUT    | `.../course/activeRoute/reverse` | `reverse_route` |
+/// | PUT    | `.../course/arrivalCircle` | `set_arrival_circle` |
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use signalk_types::v2::{
     ActiveRouteRequest, DestinationRequest, PointAdvanceRequest, PointIndexRequest,
@@ -91,4 +93,24 @@ pub async fn reverse_route(State(state): State<Arc<ServerState>>) -> impl IntoRe
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     }
+}
+
+/// `PUT /signalk/v2/api/vessels/self/navigation/course/arrivalCircle`
+pub async fn set_arrival_circle(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let radius = match req.get("value").and_then(|v| v.as_f64()) {
+        Some(r) if r >= 0.0 => r,
+        _ => return (StatusCode::BAD_REQUEST, "Invalid arrival circle radius").into_response(),
+    };
+    match state.course_manager.set_arrival_circle(radius).await {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// `GET /signalk/v2/api/vessels/self/navigation/course/calcValues`
+pub async fn get_calc_values(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
+    Json(state.course_manager.get_calc_values().await)
 }
