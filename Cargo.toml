@@ -72,8 +72,9 @@ nmea = { git = "https://github.com/herostrat/nmea0183-rs", features = ["sensor",
 ais = { version = "0.12" }
 
 # NMEA 2000
-nmea2000 = { git = "https://github.com/herostrat/nmea2000-rs" }
+nmea2000 = { git = "https://github.com/herostrat/nmea2000-rs", features = ["slcan", "actisense"] }
 nmea2000-pgns = { git = "https://github.com/herostrat/nmea2000-rs" }
+nmea2000-types = { git = "https://github.com/herostrat/nmea2000-rs" }
 
 # Serial port (async, for NMEA 0183 via serial)
 tokio-serial = { version = "5.4" }

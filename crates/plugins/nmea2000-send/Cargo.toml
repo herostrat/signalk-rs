@@ -11,6 +11,7 @@ signalk-plugin-api.workspace = true
 signalk-types.workspace = true
 nmea2000.workspace = true
 nmea2000-pgns.workspace = true
+nmea2000-types.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 serde_json.workspace = true

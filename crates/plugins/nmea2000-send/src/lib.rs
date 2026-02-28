@@ -1,29 +1,36 @@
 /// NMEA 2000 output plugin for signalk-rs.
 ///
 /// Subscribes to SignalK paths on the self vessel, converts values to
-/// NMEA 2000 PGN messages, and sends them via SocketCAN.
+/// NMEA 2000 PGN messages, and sends them via SocketCAN, SLCAN, or Actisense.
+///
+/// Performs ISO 11783-5 address claiming before sending data PGNs.
 ///
 /// Config:
 /// ```json
 /// {
 ///   "interface": "can0",
+///   "transport": "socketcan",
 ///   "source_address": 100,
 ///   "interval_ms": 1000
 /// }
 /// ```
 use async_trait::async_trait;
-use nmea2000::{N2kBus, Pgn, PgnMessage};
+use nmea2000::address::{build_address_claim, build_cannot_claim, AddressAction, AddressManager};
+use nmea2000::{N2kTransport, PgnMessage};
 use nmea2000_pgns::{
     cog_sog_rapid_update::CogSogRapidUpdate, vessel_heading::VesselHeading,
     wind_data::WindData,
 };
+use nmea2000_types::{IsoNameBuilder, Pgn, RawMessage};
 use serde::Deserialize;
 use signalk_plugin_api::{
     Plugin, PluginContext, PluginError, PluginMetadata, SubscriptionHandle, SubscriptionSpec,
     delta_callback,
 };
 use signalk_types::{Delta, Subscription};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::task::AbortHandle;
 use tracing::{debug, info, warn};
 
@@ -34,6 +41,9 @@ struct SendConfig {
     #[serde(default = "default_interface")]
     interface: String,
 
+    #[serde(default = "default_transport")]
+    transport: String,
+
     #[serde(default = "default_source_address")]
     source_address: u8,
 
@@ -43,6 +53,9 @@ struct SendConfig {
 
 fn default_interface() -> String {
     "can0".to_string()
+}
+fn default_transport() -> String {
+    "socketcan".to_string()
 }
 fn default_source_address() -> u8 {
     100
@@ -55,6 +68,7 @@ impl Default for SendConfig {
     fn default() -> Self {
         SendConfig {
             interface: default_interface(),
+            transport: default_transport(),
             source_address: default_source_address(),
             interval_ms: default_interval(),
         }
@@ -118,7 +132,6 @@ fn build_pgns(snap: &Snapshot, sid: &mut u8) -> Vec<EncodedPgn> {
     // PGN 127250 — Vessel Heading
     if let Some(heading) = snap.heading_true_rad {
         let mut builder = VesselHeading::builder().sid(*sid as u64).heading(heading);
-        // reference_raw: 0 = True, 1 = Magnetic
         builder = builder.reference_raw(0);
         if let Some(var) = snap.magnetic_variation_rad {
             builder = builder.variation(var);
@@ -139,7 +152,6 @@ fn build_pgns(snap: &Snapshot, sid: &mut u8) -> Vec<EncodedPgn> {
     // PGN 129026 — COG & SOG, Rapid Update
     if snap.cog_true_rad.is_some() || snap.sog_mps.is_some() {
         let mut builder = CogSogRapidUpdate::builder().sid(*sid as u64);
-        // cog_reference_raw: 0 = True, 1 = Magnetic
         builder = builder.cog_reference_raw(0);
         if let Some(cog) = snap.cog_true_rad {
             builder = builder.cog(cog);
@@ -163,7 +175,6 @@ fn build_pgns(snap: &Snapshot, sid: &mut u8) -> Vec<EncodedPgn> {
     // PGN 130306 — Wind Data
     if snap.wind_speed_apparent_mps.is_some() || snap.wind_angle_apparent_rad.is_some() {
         let mut builder = WindData::builder().sid(*sid as u64);
-        // reference_raw: 2 = Apparent
         builder = builder.reference_raw(2);
         if let Some(speed) = snap.wind_speed_apparent_mps {
             builder = builder.wind_speed(speed);
@@ -186,6 +197,35 @@ fn build_pgns(snap: &Snapshot, sid: &mut u8) -> Vec<EncodedPgn> {
 
     pgns
 }
+
+// ─── Transport ─────────────────────────────────────────────────────────────
+
+/// Open the configured transport, returning a boxed `N2kTransport`.
+fn open_transport(
+    interface: &str,
+    transport: &str,
+) -> Result<Box<dyn N2kTransport + Send>, String> {
+    match transport {
+        "slcan" => {
+            let bus = nmea2000::N2kBus::open_slcan(interface)
+                .map_err(|e| format!("SLCAN open {interface}: {e}"))?;
+            Ok(Box::new(bus))
+        }
+        "actisense" => {
+            let t = nmea2000::ActisenseTransport::open(interface)
+                .map_err(|e| format!("Actisense open {interface}: {e}"))?;
+            Ok(Box::new(t))
+        }
+        _ => {
+            let bus = nmea2000::N2kBus::open(interface)
+                .map_err(|e| format!("SocketCAN open {interface}: {e}"))?;
+            Ok(Box::new(bus))
+        }
+    }
+}
+
+/// Address 254 means "not claimed".
+const ADDR_NOT_CLAIMED: u8 = 254;
 
 // ─── Plugin ─────────────────────────────────────────────────────────────────
 
@@ -215,7 +255,7 @@ impl Plugin for Nmea2000SendPlugin {
         PluginMetadata::new(
             "nmea2000-send",
             "NMEA 2000 Output",
-            "Converts SignalK data to NMEA 2000 PGNs and sends via SocketCAN",
+            "Converts SignalK data to NMEA 2000 PGNs and sends via SocketCAN/SLCAN/Actisense",
             "0.1.0",
         )
     }
@@ -226,12 +266,18 @@ impl Plugin for Nmea2000SendPlugin {
             "properties": {
                 "interface": {
                     "type": "string",
-                    "description": "SocketCAN interface name",
+                    "description": "CAN interface (can0) or serial port (/dev/ttyUSB0)",
                     "default": "can0"
+                },
+                "transport": {
+                    "type": "string",
+                    "description": "Transport type: socketcan, slcan, or actisense",
+                    "default": "socketcan",
+                    "enum": ["socketcan", "slcan", "actisense"]
                 },
                 "source_address": {
                     "type": "integer",
-                    "description": "NMEA 2000 source address (0-252)",
+                    "description": "Preferred NMEA 2000 source address (0-252)",
                     "default": 100,
                     "minimum": 0,
                     "maximum": 252
@@ -256,6 +302,7 @@ impl Plugin for Nmea2000SendPlugin {
 
         info!(
             interface = %cfg.interface,
+            transport = %cfg.transport,
             source = cfg.source_address,
             interval_ms = cfg.interval_ms,
             "NMEA 2000 output starting"
@@ -283,31 +330,82 @@ impl Plugin for Nmea2000SendPlugin {
             .await?;
         self.subscription = Some(handle);
 
-        // Channel for sending encoded PGNs to the blocking thread
+        // Shared claimed address (atomic for cross-thread access)
+        let claimed_addr = Arc::new(AtomicU8::new(ADDR_NOT_CLAIMED));
+        let claimed_for_tick = claimed_addr.clone();
+
+        // Channel for sending encoded PGNs to the bus thread
         let (tx, rx) = std::sync::mpsc::channel::<EncodedPgn>();
 
-        // Blocking thread: owns the N2kBus and sends frames
+        // Blocking thread: owns transport, handles address claiming + sending
         let interface = cfg.interface.clone();
-        let source_addr = cfg.source_address;
+        let transport_type = cfg.transport.clone();
+        let preferred_addr = cfg.source_address;
         let bus_handle = tokio::task::spawn_blocking(move || {
-            let mut bus = match N2kBus::open(&interface) {
-                Ok(b) => b,
+            let mut transport = match open_transport(&interface, &transport_type) {
+                Ok(t) => t,
                 Err(e) => {
-                    warn!(error = %e, "Failed to open SocketCAN interface {interface}");
+                    warn!("{e}");
                     return;
                 }
             };
 
-            while let Ok(pgn) = rx.recv() {
-                if let Err(e) = bus.send_raw(
-                    Pgn::new(pgn.pgn),
-                    source_addr,
-                    pgn.priority,
-                    255, // broadcast
-                    &pgn.data,
-                ) {
-                    debug!(pgn = pgn.pgn, error = %e, "Failed to send PGN");
+            // ISO 11783-5 address claiming
+            let iso_name = IsoNameBuilder::new()
+                .unique_number(1) // TODO: derive from host/config
+                .manufacturer_code(2047) // development/other
+                .device_function(130) // PC Gateway
+                .device_class(25) // Inter/Intranetwork Device
+                .industry_group(4) // Marine
+                .arbitrary_address_capable(true)
+                .build();
+
+            let mut addr_mgr = AddressManager::new();
+            addr_mgr.add_device(iso_name, preferred_addr);
+
+            // Send initial address claim
+            for action in addr_mgr.drain_actions() {
+                handle_claim_action(&mut *transport, &action, &claimed_addr);
+            }
+
+            loop {
+                // 1. Poll incoming messages (non-blocking) for address claims
+                while let Ok(Some(msg)) = transport.try_receive_message() {
+                    addr_mgr.process(&msg);
                 }
+
+                // 2. Check claim timeouts
+                addr_mgr.check_timeouts(Instant::now());
+
+                // 3. Handle address claim actions
+                for action in addr_mgr.drain_actions() {
+                    handle_claim_action(&mut *transport, &action, &claimed_addr);
+                }
+
+                // 4. Process send queue (non-blocking)
+                loop {
+                    match rx.try_recv() {
+                        Ok(encoded) => {
+                            let addr = claimed_addr.load(Ordering::Relaxed);
+                            if addr < ADDR_NOT_CLAIMED {
+                                let msg = RawMessage {
+                                    pgn: Pgn::new(encoded.pgn),
+                                    source: addr,
+                                    destination: None,
+                                    priority: encoded.priority,
+                                    data: encoded.data,
+                                };
+                                if let Err(e) = transport.send_message(&msg) {
+                                    debug!(pgn = encoded.pgn, error = %e, "Failed to send PGN");
+                                }
+                            }
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
+                    }
+                }
+
+                std::thread::sleep(Duration::from_millis(10));
             }
         });
         self.abort_handles.push(bus_handle.abort_handle());
@@ -321,6 +419,10 @@ impl Plugin for Nmea2000SendPlugin {
             ticker.tick().await;
             loop {
                 ticker.tick().await;
+                // Only send if we have a claimed address
+                if claimed_for_tick.load(Ordering::Relaxed) >= ADDR_NOT_CLAIMED {
+                    continue;
+                }
                 let snap = snapshot.lock().unwrap().clone();
                 let pgns = build_pgns(&snap, &mut sid);
                 for pgn in pgns {
@@ -332,7 +434,7 @@ impl Plugin for Nmea2000SendPlugin {
         });
         self.abort_handles.push(tick_handle.abort_handle());
 
-        ctx.set_status(&format!("CAN {}", cfg.interface));
+        ctx.set_status(&format!("{} {}", cfg.transport, cfg.interface));
         Ok(())
     }
 
@@ -342,6 +444,35 @@ impl Plugin for Nmea2000SendPlugin {
             handle.abort();
         }
         Ok(())
+    }
+}
+
+/// Process an address claim action: send frames and update shared state.
+fn handle_claim_action(
+    transport: &mut dyn N2kTransport,
+    action: &AddressAction,
+    claimed_addr: &AtomicU8,
+) {
+    match action {
+        AddressAction::SendClaim { source, name } => {
+            info!(address = source, "Sending address claim");
+            transport
+                .send_message(&build_address_claim(*source, *name))
+                .ok();
+        }
+        AddressAction::SendCannotClaim { name } => {
+            warn!("Cannot claim any address");
+            transport.send_message(&build_cannot_claim(*name)).ok();
+            claimed_addr.store(ADDR_NOT_CLAIMED, Ordering::Relaxed);
+        }
+        AddressAction::AddressClaimed { address, .. } => {
+            info!(address, "Address claimed successfully");
+            claimed_addr.store(*address, Ordering::Relaxed);
+        }
+        AddressAction::AddressLost { old_address, .. } => {
+            warn!(old_address, "Address lost — reclaiming");
+            claimed_addr.store(ADDR_NOT_CLAIMED, Ordering::Relaxed);
+        }
     }
 }
 
@@ -359,8 +490,22 @@ mod tests {
     fn default_config_deserializes() {
         let config: SendConfig = serde_json::from_value(serde_json::json!({})).unwrap();
         assert_eq!(config.interface, "can0");
+        assert_eq!(config.transport, "socketcan");
         assert_eq!(config.source_address, 100);
         assert_eq!(config.interval_ms, 1000);
+    }
+
+    #[test]
+    fn config_with_transport() {
+        let config: SendConfig = serde_json::from_value(serde_json::json!({
+            "interface": "/dev/ttyUSB0",
+            "transport": "actisense",
+            "source_address": 42
+        }))
+        .unwrap();
+        assert_eq!(config.interface, "/dev/ttyUSB0");
+        assert_eq!(config.transport, "actisense");
+        assert_eq!(config.source_address, 42);
     }
 
     #[test]
@@ -496,5 +641,25 @@ mod tests {
         let pgns = build_pgns(&snap, &mut sid);
         assert_eq!(pgns.len(), 3);
         assert_eq!(sid, 1); // 254 → 255 → 0 → 1
+    }
+
+    #[test]
+    fn addr_not_claimed_is_254() {
+        assert_eq!(ADDR_NOT_CLAIMED, 254);
+    }
+
+    #[test]
+    fn iso_name_builds_correctly() {
+        let name = IsoNameBuilder::new()
+            .unique_number(1)
+            .manufacturer_code(2047)
+            .device_function(130)
+            .device_class(25)
+            .industry_group(4)
+            .arbitrary_address_capable(true)
+            .build();
+        assert!(name.arbitrary_address_capable());
+        assert_eq!(name.manufacturer_code(), 2047);
+        assert_eq!(name.industry_group(), 4);
     }
 }

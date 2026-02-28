@@ -230,15 +230,6 @@ fn from_wind_data(m: &wind_data::WindData, source: &N2kSource<'_>) -> Option<Del
 
 // ─── AIS PGN helpers ─────────────────────────────────────────────────────────
 
-/// Convert NMEA 2000 text field bytes to a trimmed String.
-///
-/// NMEA 2000 text fields are fixed-length `&[u8]` padded with `@`, `0xFF`, or nulls.
-fn bytes_to_string(bytes: &[u8]) -> Option<String> {
-    let s = std::str::from_utf8(bytes).ok()?;
-    let trimmed = s.trim_end_matches(|c: char| c == '\0' || c == '@' || c == '\u{ff}' || c.is_whitespace());
-    if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
-}
-
 /// PGN 129038: AIS Class A Position Report
 fn from_ais_class_a_position(
     m: &ais_class_a_position_report::AisClassAPositionReport,
@@ -296,7 +287,7 @@ fn from_ais_class_b_extended(
         sog_ms: m.sog(),
         cog_rad: m.cog(),
         heading_rad: m.true_heading(),
-        name: bytes_to_string(m.name()),
+        name: m.name().map(str::to_string),
         ship_type: m.type_of_ship_raw().map(|v| v as u8),
         length: m.length().filter(|&v| v > 0.0),
         beam: m.beam().filter(|&v| v > 0.0),
@@ -313,11 +304,11 @@ fn from_ais_class_a_static(
     let mmsi = m.user_id()? as u32;
     let contact = AisContact {
         mmsi,
-        name: bytes_to_string(m.name()),
-        callsign: bytes_to_string(m.callsign()),
+        name: m.name().map(str::to_string),
+        callsign: m.callsign().map(str::to_string),
         imo: m.imo_number().map(|v| v as u32),
         ship_type: m.type_of_ship_raw().map(|v| v as u8),
-        destination: bytes_to_string(m.destination()),
+        destination: m.destination().map(str::to_string),
         draught: m.draft(),
         length: m.length().filter(|&v| v > 0.0),
         beam: m.beam().filter(|&v| v > 0.0),
@@ -334,7 +325,7 @@ fn from_ais_static_24a(
     let mmsi = m.user_id()? as u32;
     let contact = AisContact {
         mmsi,
-        name: bytes_to_string(m.name()),
+        name: m.name().map(str::to_string),
         ..Default::default()
     };
     Some(contact.to_delta(make_source(source)))
@@ -348,7 +339,7 @@ fn from_ais_static_24b(
     let mmsi = m.user_id()? as u32;
     let contact = AisContact {
         mmsi,
-        callsign: bytes_to_string(m.callsign()),
+        callsign: m.callsign().map(str::to_string),
         ship_type: m.type_of_ship_raw().map(|v| v as u8),
         length: m.length().filter(|&v| v > 0.0),
         beam: m.beam().filter(|&v| v > 0.0),

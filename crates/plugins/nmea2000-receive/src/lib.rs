@@ -1,6 +1,6 @@
 /// NMEA 2000 input plugin for signalk-rs.
 ///
-/// Reads from a SocketCAN interface and converts PGNs to SignalK deltas.
+/// Reads from SocketCAN, SLCAN, or Actisense and converts PGNs to SignalK deltas.
 /// Navigation PGNs (heading, position, COG/SOG, depth, wind) produce
 /// self-vessel deltas. AIS PGNs produce vessel-context deltas via
 /// `AisContact::to_delta()`.
@@ -10,11 +10,12 @@
 /// [[plugins]]
 /// id = "nmea2000"
 /// enabled = true
-/// config = { interface = "can0", source_label = "nmea2000" }
+/// config = { interface = "can0", transport = "socketcan" }
 /// ```
 pub mod pgn_convert;
 
 use async_trait::async_trait;
+use nmea2000::N2kTransport;
 use signalk_plugin_api::{Plugin, PluginContext, PluginError, PluginMetadata};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
@@ -41,7 +42,7 @@ impl Plugin for Nmea2000Plugin {
         PluginMetadata::new(
             "nmea2000",
             "NMEA 2000",
-            "SocketCAN input for NMEA 2000 PGNs",
+            "SocketCAN/SLCAN/Actisense input for NMEA 2000 PGNs",
             env!("CARGO_PKG_VERSION"),
         )
     }
@@ -53,8 +54,14 @@ impl Plugin for Nmea2000Plugin {
             "properties": {
                 "interface": {
                     "type": "string",
-                    "description": "SocketCAN interface (e.g. can0, vcan0)",
+                    "description": "Interface: CAN interface (can0) for socketcan, serial port (/dev/ttyUSB0) for slcan/actisense",
                     "default": "can0"
+                },
+                "transport": {
+                    "type": "string",
+                    "description": "Transport type: socketcan, slcan, or actisense",
+                    "default": "socketcan",
+                    "enum": ["socketcan", "slcan", "actisense"]
                 },
                 "source_label": {
                     "type": "string",
@@ -75,15 +82,20 @@ impl Plugin for Nmea2000Plugin {
             .ok_or_else(|| PluginError::config("missing 'interface'"))?
             .to_string();
 
+        let transport = config["transport"]
+            .as_str()
+            .unwrap_or("socketcan")
+            .to_string();
+
         let source_label = config["source_label"]
             .as_str()
             .unwrap_or("nmea2000")
             .to_string();
 
-        info!(interface = %interface, "NMEA 2000 plugin starting");
+        info!(interface = %interface, transport = %transport, "NMEA 2000 plugin starting");
 
         let handle = tokio::spawn(async move {
-            run_n2k_reader(&interface, &source_label, ctx).await;
+            run_n2k_reader(&interface, &transport, &source_label, ctx).await;
         })
         .abort_handle();
 
@@ -100,26 +112,56 @@ impl Plugin for Nmea2000Plugin {
     }
 }
 
-/// Main reader loop: opens SocketCAN, reads messages, converts to deltas.
+/// Open the configured transport, returning a boxed `N2kTransport`.
+fn open_transport(
+    interface: &str,
+    transport: &str,
+) -> Result<Box<dyn N2kTransport + Send>, String> {
+    match transport {
+        "slcan" => {
+            let bus = nmea2000::N2kBus::open_slcan(interface)
+                .map_err(|e| format!("SLCAN open {interface}: {e}"))?;
+            Ok(Box::new(bus))
+        }
+        "actisense" => {
+            let t = nmea2000::ActisenseTransport::open(interface)
+                .map_err(|e| format!("Actisense open {interface}: {e}"))?;
+            Ok(Box::new(t))
+        }
+        _ => {
+            let bus = nmea2000::N2kBus::open(interface)
+                .map_err(|e| format!("SocketCAN open {interface}: {e}"))?;
+            Ok(Box::new(bus))
+        }
+    }
+}
+
+/// Main reader loop: opens transport, reads messages, converts to deltas.
 ///
-/// Uses `spawn_blocking` because `N2kBus::read_message()` is synchronous.
+/// Uses `spawn_blocking` because all transports read synchronously.
 /// Messages are passed from the blocking reader to the async handler via
 /// an mpsc channel.
-async fn run_n2k_reader(interface: &str, label: &str, ctx: Arc<dyn PluginContext>) {
+async fn run_n2k_reader(
+    interface: &str,
+    transport_type: &str,
+    label: &str,
+    ctx: Arc<dyn PluginContext>,
+) {
     let label = label.to_string();
 
     loop {
         ctx.set_status(&format!("Opening {interface}..."));
 
         let iface = interface.to_string();
-        let bus_result =
-            tokio::task::spawn_blocking(move || nmea2000::N2kBus::open(&iface)).await;
+        let ttype = transport_type.to_string();
+        let transport_result =
+            tokio::task::spawn_blocking(move || open_transport(&iface, &ttype)).await;
 
-        let mut bus = match bus_result {
-            Ok(Ok(bus)) => bus,
+        let mut transport = match transport_result {
+            Ok(Ok(t)) => t,
             Ok(Err(e)) => {
-                ctx.set_error(&format!("Failed to open {interface}: {e}"));
-                error!(interface = %interface, "SocketCAN open failed: {e}");
+                ctx.set_error(&e);
+                error!("{e}");
                 tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
                 continue;
             }
@@ -130,14 +172,14 @@ async fn run_n2k_reader(interface: &str, label: &str, ctx: Arc<dyn PluginContext
         };
 
         ctx.set_status(&format!("Connected to {interface}"));
-        info!(interface = %interface, "SocketCAN bus opened");
+        info!(interface = %interface, transport = %transport_type, "Transport opened");
 
         // Channel: blocking reader → async handler
         let (tx, mut rx) = tokio::sync::mpsc::channel(256);
 
         let reader_handle = tokio::task::spawn_blocking(move || {
             loop {
-                match bus.read_message() {
+                match transport.receive_message() {
                     Ok(raw) => {
                         if tx.blocking_send(raw).is_err() {
                             break; // receiver dropped
@@ -172,7 +214,7 @@ async fn run_n2k_reader(interface: &str, label: &str, ctx: Arc<dyn PluginContext
 
         // Reader task finished — reconnect
         let _ = reader_handle.await;
-        warn!(interface = %interface, "SocketCAN connection lost — reconnecting in 5s");
+        warn!(interface = %interface, "Connection lost — reconnecting in 5s");
         ctx.set_error(&format!("Connection lost to {interface}"));
         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
     }
@@ -197,5 +239,12 @@ mod tests {
         let ctx = Arc::new(MockPluginContext::new());
         let result = plugin.start(serde_json::json!({}), ctx).await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn default_transport_is_socketcan() {
+        let config = serde_json::json!({"interface": "can0"});
+        let transport = config["transport"].as_str().unwrap_or("socketcan");
+        assert_eq!(transport, "socketcan");
     }
 }
