@@ -45,6 +45,11 @@ bridge_token = "dev-token-12345"
 id = "sensor-data-simulator"
 config = { update_interval_ms = 1000, output = { direct = true, nmea0183 = { enabled = true, host = "127.0.0.1", port = 10110, talker_id = "GP" }, nmea2000 = { enabled = true, interface = "vcan0", source_address = 42 } } }
 
+# Tracks: records position history for all vessels
+[[plugins]]
+id = "tracks"
+config = { min_interval_secs = 5, max_points = 50000, max_age_hours = 24 }
+
 # NMEA 0183 TCP receiver: listens on port 10110 for simulator sentences
 [[plugins]]
 id = "nmea0183-tcp"

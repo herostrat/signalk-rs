@@ -234,6 +234,15 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
             "/signalk/v2/api/vessels/self/navigation/course/calcValues",
             get(api::v2::course::get_calc_values),
         )
+        // Track API — delegates to tracks plugin for spec-compliant track data
+        .route(
+            "/signalk/v1/api/tracks",
+            get(api::tracks::get_all_tracks).delete(api::tracks::delete_all_tracks),
+        )
+        .route(
+            "/signalk/v1/api/vessels/{vessel_id}/track",
+            get(api::tracks::get_vessel_track).delete(api::tracks::delete_vessel_track),
+        )
         // /skServer compatibility routes for admin UI
         .route(
             "/skServer/loginStatus",

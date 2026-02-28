@@ -238,7 +238,7 @@ check "position has values field (multi-source)" \
 check "SOG has values field (multi-source)" \
   "$SOG_DATA" '"values"'
 check "propulsion RPM has no values field (single source)" \
-  "$(echo "$RPM_DATA" | grep -c '"values"')" "0"
+  "$(echo "$RPM_DATA" | grep -c '"values"' || true)" "0"
 
 # --- Values Field Content ---
 # Verify the values field actually contains source entries with correct structure
@@ -323,6 +323,68 @@ check "nmea0183-sim has nested GP sub-key" \
   "$NMEA_SUB" "NESTED"
 check "nmea0183-sim.GP type is NMEA0183" \
   "$NMEA_SUB" "NMEA0183"
+
+# --- Track API (spec routes) ---
+# The tracks plugin records position data from the simulator.
+# After the initial sleep, there should be track points.
+echo "  Track API"
+
+TRACKS_DATA=$(fetch "$BASE/signalk/v1/api/tracks")
+check "GET /tracks returns GeoJSON FeatureCollection" \
+  "$TRACKS_DATA" '"type":"FeatureCollection"'
+check "tracks has features array" \
+  "$TRACKS_DATA" '"features"'
+check "tracks feature has LineString geometry" \
+  "$TRACKS_DATA" '"LineString"'
+
+# Self vessel track via path parameter
+SELF_TRACK=$(fetch "$BASE/signalk/v1/api/vessels/self/track")
+check "GET /vessels/self/track returns GeoJSON" \
+  "$SELF_TRACK" '"type":"FeatureCollection"'
+check "self track has features" \
+  "$SELF_TRACK" '"features"'
+
+# GPX format
+GPX_DATA=$(fetch "$BASE/signalk/v1/api/tracks?format=gpx")
+check "GET /tracks?format=gpx returns GPX XML" \
+  "$GPX_DATA" "<gpx"
+check "GPX contains track segment" \
+  "$GPX_DATA" "<trkseg"
+
+# Plugin-specific summary route
+SUMMARY=$(fetch "$BASE/plugins/tracks/summary")
+check "GET /plugins/tracks/summary returns data" \
+  "$SUMMARY" '"context"'
+check "summary has point_count" \
+  "$SUMMARY" '"point_count"'
+
+# DELETE single vessel track (spec route)
+check "DELETE /vessels/self/track returns 200" \
+  "$(http_status DELETE "$BASE/signalk/v1/api/vessels/self/track")" "200"
+
+# Verify self track is now empty
+SELF_AFTER_DELETE=$(fetch "$BASE/signalk/v1/api/vessels/self/track")
+SELF_FEATURE_COUNT=$(echo "$SELF_AFTER_DELETE" | node -e "
+  const d=require('fs').readFileSync('/dev/stdin','utf8');
+  const j=JSON.parse(d);
+  console.log(j.features ? j.features.length : 0);
+")
+check "self track empty after delete" \
+  "$SELF_FEATURE_COUNT" "0"
+
+# DELETE all tracks (spec route)
+check "DELETE /tracks returns 200" \
+  "$(http_status DELETE "$BASE/signalk/v1/api/tracks")" "200"
+
+# Verify all tracks cleared
+TRACKS_AFTER_DELETE=$(fetch "$BASE/signalk/v1/api/tracks")
+ALL_FEATURE_COUNT=$(echo "$TRACKS_AFTER_DELETE" | node -e "
+  const d=require('fs').readFileSync('/dev/stdin','utf8');
+  const j=JSON.parse(d);
+  console.log(j.features ? j.features.length : 0);
+")
+check "all tracks empty after delete" \
+  "$ALL_FEATURE_COUNT" "0"
 
 # --- Summary ---
 echo ""

@@ -215,6 +215,7 @@ async fn main() -> Result<()> {
     plugin_manager.register(Box::new(anchor_alarm::AnchorAlarmPlugin::new()));
     plugin_manager.register(Box::new(derived_data::DerivedDataPlugin::new()));
     plugin_manager.register(Box::new(ais_status::AisStatusPlugin::new()));
+    plugin_manager.register(Box::new(tracks::TracksPlugin::new()));
     #[cfg(feature = "simulator")]
     plugin_manager.register(Box::new(sensor_data_simulator::SimulatorPlugin::new()));
     #[cfg(feature = "nmea0183-output")]

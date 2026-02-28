@@ -22,6 +22,7 @@ nmea0183-receive.workspace = true
 anchor-alarm.workspace = true
 derived-data.workspace = true
 ais-status.workspace = true
+tracks.workspace = true
 sensor-data-simulator = { workspace = true, optional = true }
 nmea2000-receive = { workspace = true, optional = true }
 nmea0183-send = { workspace = true, optional = true }

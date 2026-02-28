@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod server_routes;
+pub mod tracks;
 pub mod v2;
 pub mod webapps;
 
@@ -23,6 +24,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::ServerState;
+
+/// Convert a framework-agnostic `PluginResponse` into an axum `Response`.
+///
+/// Used by plugin route dispatch and spec-level routes that delegate to plugins.
+pub fn to_axum_response(resp: signalk_plugin_api::PluginResponse) -> Response {
+    let mut builder = axum::response::Response::builder().status(resp.status);
+    for (k, v) in &resp.headers {
+        builder = builder.header(k.as_str(), v.as_str());
+    }
+    builder
+        .body(Body::from(resp.body))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
 
 /// GET /signalk — server discovery endpoint.
 ///
@@ -388,13 +402,7 @@ pub async fn proxy_plugin_route(
             .handle(&plugin_id, &method, &relative_path, plugin_req)
             .await
         {
-            let mut builder = axum::response::Response::builder().status(plugin_resp.status);
-            for (k, v) in &plugin_resp.headers {
-                builder = builder.header(k.as_str(), v.as_str());
-            }
-            return builder
-                .body(Body::from(plugin_resp.body))
-                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+            return to_axum_response(plugin_resp);
         }
     }
 

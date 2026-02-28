@@ -19,6 +19,7 @@ COPY crates/plugins/anchor-alarm/Cargo.toml           crates/plugins/anchor-alar
 COPY crates/plugins/sensor-data-simulator/Cargo.toml  crates/plugins/sensor-data-simulator/
 COPY crates/plugins/derived-data/Cargo.toml           crates/plugins/derived-data/
 COPY crates/plugins/ais-status/Cargo.toml             crates/plugins/ais-status/
+COPY crates/plugins/tracks/Cargo.toml                 crates/plugins/tracks/
 COPY crates/plugins/nmea2000-receive/Cargo.toml       crates/plugins/nmea2000-receive/
 COPY crates/plugins/nmea0183-send/Cargo.toml          crates/plugins/nmea0183-send/
 COPY crates/plugins/nmea2000-send/Cargo.toml          crates/plugins/nmea2000-send/
@@ -38,13 +39,14 @@ RUN mkdir -p crates/signalk-types/src \
              crates/plugins/sensor-data-simulator/src \
              crates/plugins/derived-data/src \
              crates/plugins/ais-status/src \
+             crates/plugins/tracks/src \
              crates/plugins/nmea2000-receive/src \
              crates/plugins/nmea0183-send/src \
              crates/plugins/nmea2000-send/src && \
     for d in signalk-types signalk-store signalk-internal signalk-plugin-api signalk-plugin-client; do \
         echo "// stub" > crates/$d/src/lib.rs; \
     done && \
-    for d in nmea0183-receive anchor-alarm sensor-data-simulator derived-data ais-status nmea2000-receive nmea0183-send nmea2000-send; do \
+    for d in nmea0183-receive anchor-alarm sensor-data-simulator derived-data ais-status tracks nmea2000-receive nmea0183-send nmea2000-send; do \
         echo "// stub" > crates/plugins/$d/src/lib.rs; \
     done && \
     echo "// stub" > crates/signalk-server/src/lib.rs && \
