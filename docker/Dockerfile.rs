@@ -23,7 +23,7 @@ COPY crates/plugins/nmea2000-receive/Cargo.toml       crates/plugins/nmea2000-re
 COPY crates/plugins/nmea0183-send/Cargo.toml          crates/plugins/nmea0183-send/
 COPY crates/plugins/nmea2000-send/Cargo.toml          crates/plugins/nmea2000-send/
 
-RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && \
+RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev libudev-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Stub source files so `cargo build` can resolve and cache all deps.
