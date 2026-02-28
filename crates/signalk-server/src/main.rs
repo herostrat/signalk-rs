@@ -78,7 +78,8 @@ async fn main() -> Result<()> {
     // ── Source priorities ─────────────────────────────────────────────────────
     if !config.source_priorities.is_empty() {
         store
-            .blocking_write()
+            .write()
+            .await
             .set_source_priorities(config.source_priorities.clone());
         info!(
             count = config.source_priorities.len(),
