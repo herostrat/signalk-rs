@@ -38,12 +38,12 @@ async fn simulator_populates_store() {
     let (_, store) = test_app_with_store();
     let mut mgr = test_plugin_manager(store.clone());
 
-    mgr.register(Box::new(signalk_plugin_simulator::SimulatorPlugin::new()));
+    mgr.register(Box::new(sensor_data_simulator::SimulatorPlugin::new()));
 
     // Start with fast interval (50ms)
     let mut configs = HashMap::new();
     configs.insert(
-        "simulator".to_string(),
+        "sensor-data-simulator".to_string(),
         serde_json::json!({ "update_interval_ms": 50 }),
     );
     mgr.start_all(&configs).await;
@@ -71,11 +71,11 @@ async fn simulator_data_visible_via_rest() {
     let (router, store) = test_app_with_store();
     let mut mgr = test_plugin_manager(store.clone());
 
-    mgr.register(Box::new(signalk_plugin_simulator::SimulatorPlugin::new()));
+    mgr.register(Box::new(sensor_data_simulator::SimulatorPlugin::new()));
 
     let mut configs = HashMap::new();
     configs.insert(
-        "simulator".to_string(),
+        "sensor-data-simulator".to_string(),
         serde_json::json!({ "update_interval_ms": 50 }),
     );
     mgr.start_all(&configs).await;
@@ -108,11 +108,11 @@ async fn simulator_emits_magnetic_variation() {
     let (_, store) = test_app_with_store();
     let mut mgr = test_plugin_manager(store.clone());
 
-    mgr.register(Box::new(signalk_plugin_simulator::SimulatorPlugin::new()));
+    mgr.register(Box::new(sensor_data_simulator::SimulatorPlugin::new()));
 
     let mut configs = HashMap::new();
     configs.insert(
-        "simulator".to_string(),
+        "sensor-data-simulator".to_string(),
         serde_json::json!({
             "update_interval_ms": 50,
             "magnetic_variation_deg": 3.0
@@ -145,11 +145,11 @@ async fn simulator_emits_environment_data() {
     let (_, store) = test_app_with_store();
     let mut mgr = test_plugin_manager(store.clone());
 
-    mgr.register(Box::new(signalk_plugin_simulator::SimulatorPlugin::new()));
+    mgr.register(Box::new(sensor_data_simulator::SimulatorPlugin::new()));
 
     let mut configs = HashMap::new();
     configs.insert(
-        "simulator".to_string(),
+        "sensor-data-simulator".to_string(),
         serde_json::json!({
             "update_interval_ms": 50,
             "enable_environment": true
@@ -189,11 +189,11 @@ async fn simulator_stop_halts_data() {
     let (_, store) = test_app_with_store();
     let mut mgr = test_plugin_manager(store.clone());
 
-    mgr.register(Box::new(signalk_plugin_simulator::SimulatorPlugin::new()));
+    mgr.register(Box::new(sensor_data_simulator::SimulatorPlugin::new()));
 
     let mut configs = HashMap::new();
     configs.insert(
-        "simulator".to_string(),
+        "sensor-data-simulator".to_string(),
         serde_json::json!({ "update_interval_ms": 50 }),
     );
     mgr.start_all(&configs).await;

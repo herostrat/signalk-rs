@@ -22,7 +22,7 @@ pub struct ServerConfig {
     /// [source_priorities]
     /// "gps.GP" = 10
     /// "ais" = 50
-    /// "simulator" = 200
+    /// "sensor-data-simulator" = 200
     /// ```
     #[serde(default)]
     pub source_priorities: std::collections::HashMap<String, u16>,

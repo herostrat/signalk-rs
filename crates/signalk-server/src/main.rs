@@ -209,17 +209,19 @@ async fn main() -> Result<()> {
     );
 
     // Register all compiled-in Tier 1 plugins
-    plugin_manager.register(Box::new(signalk_plugin_nmea0183::Nmea0183TcpPlugin::new()));
-    plugin_manager.register(Box::new(
-        signalk_plugin_nmea0183::Nmea0183SerialPlugin::new(),
-    ));
-    plugin_manager.register(Box::new(
-        signalk_plugin_anchor_alarm::AnchorAlarmPlugin::new(),
-    ));
-    plugin_manager.register(Box::new(signalk_derived_data::DerivedDataPlugin::new()));
-    plugin_manager.register(Box::new(signalk_ais_status::AisStatusPlugin::new()));
+    plugin_manager.register(Box::new(nmea0183_receive::Nmea0183TcpPlugin::new()));
+    plugin_manager.register(Box::new(nmea0183_receive::Nmea0183SerialPlugin::new()));
+    plugin_manager.register(Box::new(anchor_alarm::AnchorAlarmPlugin::new()));
+    plugin_manager.register(Box::new(derived_data::DerivedDataPlugin::new()));
+    plugin_manager.register(Box::new(ais_status::AisStatusPlugin::new()));
     #[cfg(feature = "simulator")]
-    plugin_manager.register(Box::new(signalk_plugin_simulator::SimulatorPlugin::new()));
+    plugin_manager.register(Box::new(sensor_data_simulator::SimulatorPlugin::new()));
+    #[cfg(feature = "nmea0183-output")]
+    plugin_manager.register(Box::new(nmea0183_send::Nmea0183SendPlugin::new()));
+    #[cfg(feature = "nmea2000")]
+    plugin_manager.register(Box::new(nmea2000_receive::Nmea2000Plugin::new()));
+    #[cfg(feature = "nmea2000")]
+    plugin_manager.register(Box::new(nmea2000_send::Nmea2000SendPlugin::new()));
 
     // Build plugin configs from [[plugins]] section
     let plugin_configs: HashMap<String, serde_json::Value> = config

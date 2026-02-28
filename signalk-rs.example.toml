@@ -120,6 +120,24 @@ uds_bridge_socket = "/run/signalk/bridge.sock"
 # id = "nmea0183-serial"
 # config = { path = "/dev/ttyUSB0", baud_rate = 4800, source_label = "depth-sensor" }
 
+# --- NMEA 0183 output via TCP -----------------------------------------------
+#
+# Converts SignalK data to NMEA 0183 sentences and serves them to connected
+# TCP clients. Requires the `nmea0183-output` feature at compile time.
+#
+# [[plugins]]
+# id = "nmea0183-send"
+# config = { port = 10111, talker_id = "GP", interval_ms = 1000 }
+
+# --- NMEA 2000 output via SocketCAN -----------------------------------------
+#
+# Converts SignalK data to NMEA 2000 PGN messages and sends them on the CAN
+# bus. Requires the `nmea2000` feature at compile time.
+#
+# [[plugins]]
+# id = "nmea2000-send"
+# config = { interface = "can0", source_address = 100, interval_ms = 1000 }
+
 # ---------------------------------------------------------------------------
 # Full example with multiple plugins
 # ---------------------------------------------------------------------------

@@ -14,10 +14,14 @@ COPY crates/signalk-internal/Cargo.toml    crates/signalk-internal/
 COPY crates/signalk-plugin-api/Cargo.toml  crates/signalk-plugin-api/
 COPY crates/signalk-plugin-client/Cargo.toml crates/signalk-plugin-client/
 COPY crates/signalk-server/Cargo.toml      crates/signalk-server/
-COPY crates/plugins/signalk-nmea0183/Cargo.toml      crates/plugins/signalk-nmea0183/
-COPY crates/plugins/signalk-anchor-alarm/Cargo.toml   crates/plugins/signalk-anchor-alarm/
-COPY crates/plugins/signalk-plugin-simulator/Cargo.toml crates/plugins/signalk-plugin-simulator/
-COPY crates/plugins/signalk-derived-data/Cargo.toml    crates/plugins/signalk-derived-data/
+COPY crates/plugins/nmea0183-receive/Cargo.toml      crates/plugins/nmea0183-receive/
+COPY crates/plugins/anchor-alarm/Cargo.toml           crates/plugins/anchor-alarm/
+COPY crates/plugins/sensor-data-simulator/Cargo.toml  crates/plugins/sensor-data-simulator/
+COPY crates/plugins/derived-data/Cargo.toml           crates/plugins/derived-data/
+COPY crates/plugins/ais-status/Cargo.toml             crates/plugins/ais-status/
+COPY crates/plugins/nmea2000-receive/Cargo.toml       crates/plugins/nmea2000-receive/
+COPY crates/plugins/nmea0183-send/Cargo.toml          crates/plugins/nmea0183-send/
+COPY crates/plugins/nmea2000-send/Cargo.toml          crates/plugins/nmea2000-send/
 
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && \
     rm -rf /var/lib/apt/lists/*
@@ -29,14 +33,18 @@ RUN mkdir -p crates/signalk-types/src \
              crates/signalk-plugin-api/src \
              crates/signalk-plugin-client/src \
              crates/signalk-server/src \
-             crates/plugins/signalk-nmea0183/src \
-             crates/plugins/signalk-anchor-alarm/src \
-             crates/plugins/signalk-plugin-simulator/src \
-             crates/plugins/signalk-derived-data/src && \
+             crates/plugins/nmea0183-receive/src \
+             crates/plugins/anchor-alarm/src \
+             crates/plugins/sensor-data-simulator/src \
+             crates/plugins/derived-data/src \
+             crates/plugins/ais-status/src \
+             crates/plugins/nmea2000-receive/src \
+             crates/plugins/nmea0183-send/src \
+             crates/plugins/nmea2000-send/src && \
     for d in signalk-types signalk-store signalk-internal signalk-plugin-api signalk-plugin-client; do \
         echo "// stub" > crates/$d/src/lib.rs; \
     done && \
-    for d in signalk-nmea0183 signalk-anchor-alarm signalk-plugin-simulator signalk-derived-data; do \
+    for d in nmea0183-receive anchor-alarm sensor-data-simulator derived-data ais-status nmea2000-receive nmea0183-send nmea2000-send; do \
         echo "// stub" > crates/plugins/$d/src/lib.rs; \
     done && \
     echo "// stub" > crates/signalk-server/src/lib.rs && \

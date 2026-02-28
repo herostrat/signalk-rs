@@ -6,6 +6,8 @@
 ///
 /// Both parse sentences via the shared [`sentences`] module and emit SignalK
 /// deltas through the `PluginContext::handle_message` API.
+/// AIS VDM/VDO sentences are decoded via the [`ais_decode`] module.
+pub mod ais_decode;
 pub mod sentences;
 
 use async_trait::async_trait;
@@ -186,6 +188,7 @@ async fn handle_tcp_connection(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let reader = BufReader::new(stream);
     let mut lines = reader.lines();
+    let mut ais_decoder = ais_decode::AisDecoder::new(label);
 
     while let Some(line) = lines.next_line().await? {
         let sentence = line.trim().to_string();
@@ -194,6 +197,12 @@ async fn handle_tcp_connection(
         }
         debug!(%peer, %sentence, "NMEA sentence");
 
+        // AIS first (stateful — fragment reassembly)
+        if let Some(delta) = ais_decoder.try_decode(&sentence) {
+            ctx.handle_message(delta).await.ok();
+            continue;
+        }
+        // Standard NMEA (stateless)
         if let Some(delta) = sentence_to_delta(&sentence, label) {
             ctx.handle_message(delta).await.ok();
         }
@@ -333,6 +342,7 @@ async fn open_and_read_serial(
     info!(path = %path, "Serial port opened");
 
     let mut lines = BufReader::new(port).lines();
+    let mut ais_decoder = ais_decode::AisDecoder::new(source_label);
 
     while let Some(line) = lines.next_line().await? {
         let sentence = line.trim().to_string();
@@ -341,6 +351,12 @@ async fn open_and_read_serial(
         }
         debug!(sentence = %sentence, "NMEA serial sentence");
 
+        // AIS first (stateful — fragment reassembly)
+        if let Some(delta) = ais_decoder.try_decode(&sentence) {
+            ctx.handle_message(delta).await.ok();
+            continue;
+        }
+        // Standard NMEA (stateless)
         if let Some(delta) = sentence_to_delta(&sentence, source_label) {
             ctx.handle_message(delta).await.ok();
         }

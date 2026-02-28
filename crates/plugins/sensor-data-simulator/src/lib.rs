@@ -2,7 +2,7 @@
 ///
 /// Generates realistic SignalK sensor data for development and testing.
 /// Only produces **direct sensor measurements** — derived values (true wind,
-/// true heading, STW, etc.) are left to `signalk-derived-data`.
+/// true heading, STW, etc.) are left to `derived-data`.
 ///
 /// Guarded by the `simulator` feature flag in signalk-server so it never
 /// ships in release builds.
@@ -128,8 +128,8 @@ impl Default for SimulatorPlugin {
 impl Plugin for SimulatorPlugin {
     fn metadata(&self) -> PluginMetadata {
         PluginMetadata::new(
-            "simulator",
-            "Simulator",
+            "sensor-data-simulator",
+            "Sensor Data Simulator",
             "Generates realistic SignalK sensor data for development",
             "0.1.0",
         )
@@ -242,7 +242,7 @@ impl Plugin for SimulatorPlugin {
 // ─── Delta builder ──────────────────────────────────────────────────────────
 
 fn build_delta(values: &generators::SimulatedValues, enable_environment: bool) -> Delta {
-    let source = Source::plugin("simulator");
+    let source = Source::plugin("sensor-data-simulator");
     let mut path_values = Vec::with_capacity(30);
 
     // Navigation (always included)
@@ -379,7 +379,7 @@ mod tests {
     #[test]
     fn metadata_id() {
         let plugin = SimulatorPlugin::new();
-        assert_eq!(plugin.metadata().id, "simulator");
+        assert_eq!(plugin.metadata().id, "sensor-data-simulator");
     }
 
     #[test]

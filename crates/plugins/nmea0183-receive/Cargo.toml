@@ -1,0 +1,22 @@
+[package]
+name = "nmea0183-receive"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "NMEA 0183 input plugin for signalk-rs (TCP + serial)"
+
+[dependencies]
+signalk-plugin-api.workspace = true
+signalk-types.workspace = true
+tokio = { workspace = true }
+nmea.workspace = true
+ais.workspace = true
+tokio-serial.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+signalk-plugin-api = { workspace = true, features = ["testing"] }

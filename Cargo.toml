@@ -5,11 +5,14 @@ members = [
     "crates/signalk-plugin-api",
     "crates/signalk-server",
     "crates/signalk-internal",
-    "crates/plugins/signalk-nmea0183",
-    "crates/plugins/signalk-anchor-alarm",
-    "crates/plugins/signalk-plugin-simulator",
-    "crates/plugins/signalk-derived-data",
-    "crates/plugins/signalk-ais-status",
+    "crates/plugins/nmea0183-receive",
+    "crates/plugins/anchor-alarm",
+    "crates/plugins/sensor-data-simulator",
+    "crates/plugins/derived-data",
+    "crates/plugins/ais-status",
+    "crates/plugins/nmea2000-receive",
+    "crates/plugins/nmea0183-send",
+    "crates/plugins/nmea2000-send",
     "crates/signalk-plugin-client",
 ]
 resolver = "2"
@@ -63,7 +66,14 @@ async-trait = { version = "0.1" }
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # NMEA parsing
-nmea = { version = "0.7" }
+nmea = { git = "https://github.com/herostrat/nmea0183-rs" }
+
+# AIS decoding
+ais = { version = "0.12" }
+
+# NMEA 2000
+nmea2000 = { git = "https://github.com/herostrat/nmea2000-rs" }
+nmea2000-pgns = { git = "https://github.com/herostrat/nmea2000-rs" }
 
 # Serial port (async, for NMEA 0183 via serial)
 tokio-serial = { version = "5.4" }
@@ -73,11 +83,14 @@ signalk-types = { path = "crates/signalk-types" }
 signalk-plugin-api = { path = "crates/signalk-plugin-api" }
 signalk-store = { path = "crates/signalk-store" }
 signalk-internal = { path = "crates/signalk-internal" }
-signalk-plugin-nmea0183 = { path = "crates/plugins/signalk-nmea0183" }
-signalk-plugin-anchor-alarm = { path = "crates/plugins/signalk-anchor-alarm" }
-signalk-plugin-simulator = { path = "crates/plugins/signalk-plugin-simulator" }
-signalk-derived-data = { path = "crates/plugins/signalk-derived-data" }
-signalk-ais-status = { path = "crates/plugins/signalk-ais-status" }
+nmea0183-receive = { path = "crates/plugins/nmea0183-receive" }
+anchor-alarm = { path = "crates/plugins/anchor-alarm" }
+sensor-data-simulator = { path = "crates/plugins/sensor-data-simulator" }
+derived-data = { path = "crates/plugins/derived-data" }
+ais-status = { path = "crates/plugins/ais-status" }
+nmea2000-receive = { path = "crates/plugins/nmea2000-receive" }
+nmea0183-send = { path = "crates/plugins/nmea0183-send" }
+nmea2000-send = { path = "crates/plugins/nmea2000-send" }
 signalk-plugin-client = { path = "crates/signalk-plugin-client" }
 
 # Testing & Benchmarking (dev only)

@@ -1,20 +1,21 @@
 [package]
-name = "signalk-plugin-nmea0183"
+name = "nmea2000-send"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "NMEA 0183 input plugin for signalk-rs (TCP + serial)"
+description = "NMEA 2000 output plugin for signalk-rs (SocketCAN)"
 
 [dependencies]
 signalk-plugin-api.workspace = true
 signalk-types.workspace = true
-tokio = { workspace = true }
-nmea.workspace = true
-tokio-serial.workspace = true
+nmea2000.workspace = true
+nmea2000-pgns.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 serde_json.workspace = true
+serde.workspace = true
 async-trait.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true }
+signalk-plugin-api = { workspace = true, features = ["testing"] }

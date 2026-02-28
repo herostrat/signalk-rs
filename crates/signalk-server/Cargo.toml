@@ -18,11 +18,14 @@ signalk-types.workspace = true
 signalk-plugin-api = { workspace = true, features = ["testing"] }
 signalk-store.workspace = true
 signalk-internal.workspace = true
-signalk-plugin-nmea0183.workspace = true
-signalk-plugin-anchor-alarm.workspace = true
-signalk-derived-data.workspace = true
-signalk-ais-status.workspace = true
-signalk-plugin-simulator = { workspace = true, optional = true }
+nmea0183-receive.workspace = true
+anchor-alarm.workspace = true
+derived-data.workspace = true
+ais-status.workspace = true
+sensor-data-simulator = { workspace = true, optional = true }
+nmea2000-receive = { workspace = true, optional = true }
+nmea0183-send = { workspace = true, optional = true }
+nmea2000-send = { workspace = true, optional = true }
 tokio.workspace = true
 async-trait.workspace = true
 axum.workspace = true
@@ -42,7 +45,9 @@ uuid.workspace = true
 
 [features]
 default = []
-simulator = ["signalk-plugin-simulator"]
+simulator = ["sensor-data-simulator"]
+nmea2000 = ["nmea2000-receive", "nmea2000-send"]
+nmea0183-output = ["nmea0183-send"]
 
 [dev-dependencies]
 reqwest.workspace = true

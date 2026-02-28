@@ -156,8 +156,8 @@ mod tests {
     fn register_tier1_and_tier2() {
         let mut reg = PluginRegistry::new();
         reg.register_tier1(
-            "simulator",
-            "Simulator",
+            "sensor-data-simulator",
+            "Sensor Data Simulator",
             "Test data generator",
             "0.1.0",
             "running",
@@ -174,7 +174,7 @@ mod tests {
         let all = reg.all();
         assert_eq!(all.len(), 2);
 
-        let sim = reg.get("simulator").unwrap();
+        let sim = reg.get("sensor-data-simulator").unwrap();
         assert_eq!(sim.tier, PluginTier::Rust);
         assert!(sim.enabled);
 

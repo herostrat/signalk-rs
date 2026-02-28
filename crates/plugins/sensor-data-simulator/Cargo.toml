@@ -1,0 +1,20 @@
+[package]
+name = "sensor-data-simulator"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Simulator plugin for signalk-rs — generates realistic test data for development"
+
+[dependencies]
+signalk-plugin-api.workspace = true
+signalk-types.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+signalk-plugin-api = { workspace = true, features = ["testing"] }

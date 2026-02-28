@@ -23,7 +23,7 @@ all share the same lifecycle, configuration, and API.
 Workspace members under `crates/plugins/`. Compiled into the server binary.
 Direct store access (zero IPC). Panic isolation via `tokio::spawn`.
 
-Examples: `signalk-plugin-nmea0183`, `signalk-plugin-anchor-alarm`
+Examples: `nmea0183-receive`, `anchor-alarm`, `derived-data`
 
 ### Tier 2: JS Plugins (Bridge process)
 
@@ -98,8 +98,12 @@ crates/
   signalk-server/             axum server, PluginManager, RustPluginContext
 
 crates/plugins/
-  signalk-nmea0183/           NMEA 0183 TCP + serial as Plugin
-  signalk-anchor-alarm/       Example: anchor alarm plugin
+  nmea0183-receive/           NMEA 0183 TCP + serial input
+  anchor-alarm/               Anchor alarm plugin
+  sensor-data-simulator/      Dev-only sensor data generator
+  derived-data/               Derived data calculators
+  ais-status/                 AIS target tracking
+  nmea2000-receive/           NMEA 2000 SocketCAN input
 ```
 
 ### Dependency Graph

@@ -11,6 +11,7 @@ use signalk_store::store::SignalKStore;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use tokio::sync::RwLock;
 
 use crate::config::ServerConfig;
@@ -291,14 +292,26 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
     }
 
     // Admin UI — explicit mount (no signalk-webapp keyword, like original server)
+    // The admin UI's index.html contains a `%ADDONSCRIPTS%` placeholder that the
+    // original Node.js server replaces with embedded plugin script tags. We serve
+    // a processed index.html from memory (the container FS may be read-only) and
+    // use ServeDir as fallback for all other static assets.
     let admin_ui_dir =
         std::path::Path::new(&state.config.modules_dir).join("@signalk/server-admin-ui/public");
     if admin_ui_dir.is_dir() {
-        router = router.nest_service(
-            "/admin",
-            tower_http::services::ServeDir::new(&admin_ui_dir)
-                .append_index_html_on_directories(true),
+        // Read and process index.html in memory, stripping the placeholder
+        let index_html: Arc<String> = Arc::new(
+            std::fs::read_to_string(admin_ui_dir.join("index.html"))
+                .unwrap_or_default()
+                .replace("%ADDONSCRIPTS%", ""),
         );
+
+        let serve_dir = tower_http::services::ServeDir::new(&admin_ui_dir);
+        let admin_service = AdminService {
+            index_html,
+            serve_dir,
+        };
+        router = router.nest_service("/admin", admin_service);
     }
 
     // Test-only delta injection endpoint (simulator feature)
@@ -306,4 +319,47 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
     let router = router.route("/test/inject", post(api::test_inject_delta));
 
     router.layer(CorsLayer::permissive()).with_state(state)
+}
+
+// ─── Admin UI Service ─────────────────────────────────────────────────────────
+// Wraps ServeDir but intercepts index.html requests to serve a processed
+// version with template placeholders stripped (e.g. %ADDONSCRIPTS%).
+
+#[derive(Clone)]
+struct AdminService {
+    index_html: Arc<String>,
+    serve_dir: tower_http::services::ServeDir,
+}
+
+impl tower::Service<axum::http::Request<axum::body::Body>> for AdminService {
+    type Response = axum::response::Response;
+    type Error = std::convert::Infallible;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: axum::http::Request<axum::body::Body>) -> Self::Future {
+        let path = req.uri().path();
+        // Serve processed index.html for root/directory requests
+        if path == "/" || path.is_empty() || path == "/index.html" {
+            let html = self.index_html.clone();
+            return Box::pin(async move {
+                Ok(axum::response::Response::builder()
+                    .status(200)
+                    .header("content-type", "text/html")
+                    .body(axum::body::Body::from(html.as_str().to_string()))
+                    .unwrap())
+            });
+        }
+        // All other files: delegate to ServeDir
+        let fut = self.serve_dir.call(req);
+        Box::pin(async move {
+            let resp = fut.await.map_err(|e| match e {})?;
+            Ok(resp.map(axum::body::Body::new))
+        })
+    }
 }

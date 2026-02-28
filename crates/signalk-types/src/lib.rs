@@ -10,6 +10,7 @@ pub mod path;
 pub mod resources;
 pub mod source;
 pub mod v2;
+pub mod ais;
 pub mod ws;
 
 // Re-exports for convenience

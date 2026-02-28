@@ -1,0 +1,21 @@
+[package]
+name = "nmea0183-send"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "NMEA 0183 output plugin for signalk-rs — sends sentences to TCP clients"
+
+[dependencies]
+signalk-plugin-api.workspace = true
+signalk-types.workspace = true
+nmea.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+signalk-plugin-api = { workspace = true, features = ["testing"] }
