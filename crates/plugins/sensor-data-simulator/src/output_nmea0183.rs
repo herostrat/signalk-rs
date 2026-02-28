@@ -395,4 +395,105 @@ mod tests {
         let heading: f64 = fields[1].parse().unwrap();
         assert!((0.0..360.0).contains(&heading), "heading = {heading}");
     }
+
+    #[test]
+    fn rmc_position_matches_input() {
+        let values = test_values();
+        let sentences = encode(&values, "GP", false);
+        let rmc = sentences.iter().find(|s| s[3..6] == *"RMC").unwrap();
+        let fields: Vec<&str> = rmc[1..rmc.find('*').unwrap()].split(',').collect();
+
+        // Parse lat: DDMM.MMMM
+        let lat_str = fields[3];
+        let lat_deg: f64 =
+            lat_str[..2].parse::<f64>().unwrap() + lat_str[2..].parse::<f64>().unwrap() / 60.0;
+        let lat_sign = if fields[4] == "N" { 1.0 } else { -1.0 };
+        let lat = lat_deg * lat_sign;
+
+        // Parse lon: DDDMM.MMMM
+        let lon_str = fields[5];
+        let lon_deg: f64 =
+            lon_str[..3].parse::<f64>().unwrap() + lon_str[3..].parse::<f64>().unwrap() / 60.0;
+        let lon_sign = if fields[6] == "E" { 1.0 } else { -1.0 };
+        let lon = lon_deg * lon_sign;
+
+        assert!(
+            (lat - values.latitude).abs() < 0.001,
+            "RMC lat {lat} != input {}",
+            values.latitude
+        );
+        assert!(
+            (lon - values.longitude).abs() < 0.001,
+            "RMC lon {lon} != input {}",
+            values.longitude
+        );
+    }
+
+    #[test]
+    fn rmc_sog_matches_input() {
+        let values = test_values();
+        let sentences = encode(&values, "GP", false);
+        let rmc = sentences.iter().find(|s| s[3..6] == *"RMC").unwrap();
+        let fields: Vec<&str> = rmc[1..rmc.find('*').unwrap()].split(',').collect();
+
+        let sog_kn: f64 = fields[7].parse().unwrap();
+        let sog_mps = sog_kn / MPS_TO_KNOTS;
+        assert!(
+            (sog_mps - values.sog_mps).abs() < 0.1,
+            "SOG: NMEA {sog_mps} m/s != input {} m/s",
+            values.sog_mps
+        );
+    }
+
+    #[test]
+    fn all_three_outputs_cover_same_navigation_paths() {
+        // Verify that direct, NMEA 0183, and NMEA 2000 outputs
+        // all produce data for the key navigation paths
+        use crate::output_direct;
+        use crate::output_nmea2000;
+
+        let values = test_values();
+
+        // Direct: check paths present
+        let delta = output_direct::build_delta(&values, true);
+        let direct_paths: Vec<&str> = delta.updates[0]
+            .values
+            .iter()
+            .map(|pv| pv.path.as_str())
+            .collect();
+
+        // NMEA 0183: check sentence types present
+        let nmea_sentences = encode(&values, "GP", true);
+        let nmea_types: Vec<&str> = nmea_sentences.iter().map(|s| &s[3..6]).collect();
+
+        // NMEA 2000: check PGN types present
+        let mut sid = 0u8;
+        let pgns = output_nmea2000::encode(&values, &mut sid, true);
+        let pgn_ids: Vec<u32> = pgns.iter().map(|p| p.pgn).collect();
+
+        // Position: all three must provide it
+        assert!(direct_paths.contains(&"navigation.position"));
+        assert!(nmea_types.contains(&"RMC") || nmea_types.contains(&"GGA"));
+        assert!(pgn_ids.contains(&129025)); // Position Rapid Update
+
+        // SOG/COG: all three
+        assert!(direct_paths.contains(&"navigation.speedOverGround"));
+        assert!(nmea_types.contains(&"RMC")); // RMC has SOG
+        assert!(pgn_ids.contains(&129026)); // COG/SOG
+
+        // Heading: all three
+        assert!(direct_paths.contains(&"navigation.headingMagnetic"));
+        assert!(nmea_types.contains(&"HDG"));
+        assert!(pgn_ids.contains(&127250)); // Vessel Heading
+
+        // Depth: all three (when environment enabled)
+        assert!(direct_paths.contains(&"environment.depth.belowTransducer"));
+        assert!(nmea_types.contains(&"DBT"));
+        assert!(pgn_ids.contains(&128267)); // Water Depth
+
+        // Wind: all three (when environment enabled)
+        assert!(direct_paths.contains(&"environment.wind.speedApparent"));
+        assert!(nmea_types.contains(&"MWV"));
+        assert!(pgn_ids.contains(&130306)); // Wind Data
+    }
 }

@@ -220,4 +220,103 @@ mod tests {
         assert!(pos_pv.value.get("latitude").is_some());
         assert!(pos_pv.value.get("longitude").is_some());
     }
+
+    #[test]
+    fn delta_serializes_to_valid_signalk_json() {
+        let state = generators::SimulatorState::new(54.5, 10.0, 200.0, 300.0, 2.5, true);
+        let values = state.tick();
+        let delta = build_delta(&values, true);
+
+        // Serialize to JSON and verify SignalK delta structure
+        let json = serde_json::to_value(&delta).unwrap();
+
+        // Required fields per SignalK delta spec
+        assert!(json.get("updates").is_some(), "delta must have 'updates'");
+        let updates = json["updates"].as_array().unwrap();
+        assert_eq!(updates.len(), 1);
+
+        let update = &updates[0];
+        assert!(update.get("source").is_some(), "update must have 'source'");
+        assert!(
+            update.get("timestamp").is_some(),
+            "update must have 'timestamp'"
+        );
+        assert!(update.get("values").is_some(), "update must have 'values'");
+
+        // Source should be a plugin source
+        assert_eq!(update["source"]["label"], "sensor-data-simulator");
+        assert_eq!(update["source"]["type"], "Plugin");
+
+        // Values should be an array of {path, value} objects
+        let values = update["values"].as_array().unwrap();
+        assert!(values.len() >= 20, "full delta should have 20+ path/values");
+
+        for pv in values {
+            assert!(
+                pv.get("path").is_some(),
+                "each value must have 'path': {pv}"
+            );
+            assert!(
+                pv.get("value").is_some(),
+                "each value must have 'value': {pv}"
+            );
+            assert!(pv["path"].is_string(), "path must be a string: {pv}");
+        }
+
+        // Verify specific paths have correct value types
+        let find_path = |p: &str| values.iter().find(|v| v["path"] == p).unwrap();
+
+        // Position should be an object with lat/lon
+        let pos = find_path("navigation.position");
+        assert!(pos["value"]["latitude"].is_f64());
+        assert!(pos["value"]["longitude"].is_f64());
+
+        // SOG should be a number (m/s)
+        let sog = find_path("navigation.speedOverGround");
+        assert!(sog["value"].is_f64());
+
+        // Depth should be a number (meters)
+        let depth = find_path("environment.depth.belowTransducer");
+        assert!(depth["value"].is_f64());
+
+        // Tanks should have currentLevel as a number (ratio 0-1)
+        let fuel = find_path("tanks.fuel.0.currentLevel");
+        let level = fuel["value"].as_f64().unwrap();
+        assert!(
+            (0.0..=1.0).contains(&level),
+            "tank level should be 0-1, got {level}"
+        );
+
+        // Propulsion RPM should be Hz
+        let rpm = find_path("propulsion.main.revolutions");
+        assert!(rpm["value"].is_f64());
+    }
+
+    #[test]
+    fn delta_roundtrips_through_json() {
+        let state = generators::SimulatorState::new(54.5, 10.0, 200.0, 300.0, 2.5, true);
+        let values = state.tick();
+        let delta = build_delta(&values, true);
+
+        // Serialize and deserialize — must roundtrip
+        let json = serde_json::to_string(&delta).unwrap();
+        let back: signalk_types::Delta = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(delta.updates.len(), back.updates.len());
+        assert_eq!(delta.updates[0].values.len(), back.updates[0].values.len());
+        assert_eq!(delta.updates[0].source.label, back.updates[0].source.label);
+
+        // Verify specific value roundtrips
+        let orig_paths: Vec<&str> = delta.updates[0]
+            .values
+            .iter()
+            .map(|pv| pv.path.as_str())
+            .collect();
+        let back_paths: Vec<&str> = back.updates[0]
+            .values
+            .iter()
+            .map(|pv| pv.path.as_str())
+            .collect();
+        assert_eq!(orig_paths, back_paths);
+    }
 }

@@ -934,4 +934,445 @@ mod tests {
             .expect("Should have multi-source values");
         assert_eq!(values.len(), 2);
     }
+
+    // ── 3+ source conflict tests ─────────────────────────────────────
+
+    fn make_nmea2000_delta(sog: f64) -> Delta {
+        Delta::self_vessel(vec![Update::new(
+            Source::nmea2000("n2k", 42, 129026),
+            vec![PathValue::new(
+                "navigation.speedOverGround",
+                serde_json::json!(sog),
+            )],
+        )])
+    }
+
+    #[test]
+    fn three_source_highest_priority_wins() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        let mut priorities = HashMap::new();
+        priorities.insert("ttyUSB0.GP".to_string(), 10); // GPS: highest
+        priorities.insert("ais".to_string(), 50); // AIS: medium
+        priorities.insert("n2k.129026".to_string(), 200); // NMEA2000: lowest
+        store.set_source_priorities(priorities);
+
+        // All three write in order: GPS, AIS, NMEA2000
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(make_ais_delta(3.8));
+        store.apply_delta(make_nmea2000_delta(4.1));
+
+        // GPS (priority 10) should be active
+        let active = store.get_self_path("navigation.speedOverGround").unwrap();
+        assert_eq!(active.value, serde_json::json!(3.5));
+        assert_eq!(active.source.0, "ttyUSB0.GP");
+
+        // All three in multi_source
+        let sources = store
+            .get_self_path_sources("navigation.speedOverGround")
+            .unwrap();
+        assert_eq!(sources.len(), 3);
+        assert!(sources.contains_key("ttyUSB0.GP"));
+        assert!(sources.contains_key("ais"));
+        assert!(sources.contains_key("n2k.129026"));
+    }
+
+    #[test]
+    fn three_source_middle_priority_does_not_overwrite_highest() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        let mut priorities = HashMap::new();
+        priorities.insert("ttyUSB0.GP".to_string(), 10);
+        priorities.insert("ais".to_string(), 50);
+        priorities.insert("n2k.129026".to_string(), 200);
+        store.set_source_priorities(priorities);
+
+        // Low writes first, then high, then middle
+        store.apply_delta(make_nmea2000_delta(4.1));
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(make_ais_delta(3.8)); // AIS (50) should NOT overwrite GPS (10)
+
+        let active = store.get_self_path("navigation.speedOverGround").unwrap();
+        assert_eq!(active.value, serde_json::json!(3.5));
+        assert_eq!(active.source.0, "ttyUSB0.GP");
+    }
+
+    #[test]
+    fn three_source_values_in_full_model() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(make_ais_delta(3.8));
+        store.apply_delta(make_nmea2000_delta(4.1));
+
+        let model = store.full_model();
+        let vessel = model.vessels.get("urn:mrn:signalk:uuid:test").unwrap();
+        let sog = vessel.values.get("navigation.speedOverGround").unwrap();
+
+        let values = sog
+            .values
+            .as_ref()
+            .expect("Should have values for 3-source");
+        assert_eq!(values.len(), 3);
+        assert_eq!(values["ttyUSB0.GP"].value, serde_json::json!(3.5));
+        assert_eq!(values["ais"].value, serde_json::json!(3.8));
+        assert_eq!(values["n2k.129026"].value, serde_json::json!(4.1));
+    }
+
+    #[test]
+    fn three_source_highest_updates_active_value() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        let mut priorities = HashMap::new();
+        priorities.insert("ttyUSB0.GP".to_string(), 10);
+        priorities.insert("ais".to_string(), 50);
+        priorities.insert("n2k.129026".to_string(), 200);
+        store.set_source_priorities(priorities);
+
+        // All three write
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(make_ais_delta(3.8));
+        store.apply_delta(make_nmea2000_delta(4.1));
+
+        // GPS updates with new value — should update active
+        store.apply_delta(make_gps_delta(3.9));
+
+        let active = store.get_self_path("navigation.speedOverGround").unwrap();
+        assert_eq!(active.value, serde_json::json!(3.9));
+        assert_eq!(active.source.0, "ttyUSB0.GP");
+
+        // Multi-source GPS entry should also be updated
+        let gps_val = store
+            .get_self_path_by_source("navigation.speedOverGround", "ttyUSB0.GP")
+            .unwrap();
+        assert_eq!(gps_val.value, serde_json::json!(3.9));
+    }
+
+    // ── Default priority tests ───────────────────────────────────────
+
+    #[test]
+    fn default_priority_is_100_when_not_configured() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        // Only configure GPS priority — AIS and simulator get default (100)
+        let mut priorities = HashMap::new();
+        priorities.insert("ttyUSB0.GP".to_string(), 10);
+        store.set_source_priorities(priorities);
+
+        // GPS (10) writes first
+        store.apply_delta(make_gps_delta(3.5));
+        // AIS (default 100) writes second — should NOT overwrite
+        store.apply_delta(make_ais_delta(3.8));
+
+        let active = store.get_self_path("navigation.speedOverGround").unwrap();
+        assert_eq!(
+            active.source.0, "ttyUSB0.GP",
+            "GPS (10) should beat AIS (default 100)"
+        );
+    }
+
+    #[test]
+    fn two_unconfigured_sources_use_default_100_last_write_wins() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        // No priorities configured — all sources get default 100
+        store.apply_delta(make_ais_delta(3.8));
+        store.apply_delta(make_sim_delta(9.9));
+
+        // Both at default 100 → last write wins
+        let active = store.get_self_path("navigation.speedOverGround").unwrap();
+        assert_eq!(active.value, serde_json::json!(9.9));
+        assert_eq!(active.source.0, "simulator");
+    }
+
+    #[test]
+    fn configured_low_priority_loses_to_default() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        // Only simulator configured to low priority (200)
+        // AIS not configured → default 100
+        let mut priorities = HashMap::new();
+        priorities.insert("simulator".to_string(), 200);
+        store.set_source_priorities(priorities);
+
+        // AIS writes first (default 100)
+        store.apply_delta(make_ais_delta(3.8));
+        // Simulator (200) writes second — should NOT overwrite
+        store.apply_delta(make_sim_delta(9.9));
+
+        let active = store.get_self_path("navigation.speedOverGround").unwrap();
+        assert_eq!(
+            active.source.0, "ais",
+            "AIS (default 100) should beat simulator (200)"
+        );
+    }
+
+    // ── Dynamic priority change tests ────────────────────────────────
+
+    #[test]
+    fn dynamic_priority_change_allows_lower_source_to_win() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        // Initial: GPS highest
+        let mut priorities = HashMap::new();
+        priorities.insert("ttyUSB0.GP".to_string(), 10);
+        priorities.insert("ais".to_string(), 50);
+        store.set_source_priorities(priorities);
+
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(make_ais_delta(3.8));
+
+        assert_eq!(
+            store
+                .get_self_path("navigation.speedOverGround")
+                .unwrap()
+                .source
+                .0,
+            "ttyUSB0.GP"
+        );
+
+        // Change priorities: AIS now higher than GPS
+        let mut new_priorities = HashMap::new();
+        new_priorities.insert("ttyUSB0.GP".to_string(), 50);
+        new_priorities.insert("ais".to_string(), 10);
+        store.set_source_priorities(new_priorities);
+
+        // AIS writes again — should now overwrite GPS (AIS now priority 10)
+        store.apply_delta(make_ais_delta(4.2));
+
+        let active = store.get_self_path("navigation.speedOverGround").unwrap();
+        assert_eq!(active.value, serde_json::json!(4.2));
+        assert_eq!(active.source.0, "ais", "AIS should win after priority swap");
+    }
+
+    #[test]
+    fn dynamic_priority_change_prevents_former_winner() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        // Initial: GPS highest
+        let mut priorities = HashMap::new();
+        priorities.insert("ttyUSB0.GP".to_string(), 10);
+        priorities.insert("ais".to_string(), 50);
+        store.set_source_priorities(priorities);
+
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(make_ais_delta(3.8));
+
+        // Swap: AIS now highest
+        let mut new_priorities = HashMap::new();
+        new_priorities.insert("ttyUSB0.GP".to_string(), 50);
+        new_priorities.insert("ais".to_string(), 10);
+        store.set_source_priorities(new_priorities);
+
+        // AIS takes over
+        store.apply_delta(make_ais_delta(4.2));
+        assert_eq!(
+            store
+                .get_self_path("navigation.speedOverGround")
+                .unwrap()
+                .source
+                .0,
+            "ais"
+        );
+
+        // GPS (now 50) writes — should NOT overwrite AIS (now 10)
+        store.apply_delta(make_gps_delta(5.0));
+        let active = store.get_self_path("navigation.speedOverGround").unwrap();
+        assert_eq!(
+            active.source.0, "ais",
+            "GPS (50) should not overwrite AIS (10) after swap"
+        );
+        assert_eq!(active.value, serde_json::json!(4.2));
+    }
+
+    // ── Source eviction / stale source behavior ──────────────────────
+
+    #[test]
+    fn stale_high_priority_source_blocks_lower_sources() {
+        // Documents current behavior: if a high-priority source goes offline,
+        // its last value stays "active" and lower-priority updates cannot overwrite.
+        // This is a known limitation — no timeout-based eviction exists yet.
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        let mut priorities = HashMap::new();
+        priorities.insert("ttyUSB0.GP".to_string(), 10);
+        priorities.insert("ais".to_string(), 50);
+        store.set_source_priorities(priorities);
+
+        // GPS writes once, then "goes offline" (stops sending)
+        store.apply_delta(make_gps_delta(3.5));
+
+        // AIS keeps sending — but can never overwrite GPS
+        store.apply_delta(make_ais_delta(3.8));
+        store.apply_delta(make_ais_delta(4.0));
+        store.apply_delta(make_ais_delta(4.2));
+
+        let active = store.get_self_path("navigation.speedOverGround").unwrap();
+        assert_eq!(
+            active.value,
+            serde_json::json!(3.5),
+            "Stale GPS value should persist (no eviction)"
+        );
+        assert_eq!(active.source.0, "ttyUSB0.GP");
+
+        // AIS values are still tracked in multi_source
+        let ais_val = store
+            .get_self_path_by_source("navigation.speedOverGround", "ais")
+            .unwrap();
+        assert_eq!(
+            ais_val.value,
+            serde_json::json!(4.2),
+            "AIS latest value should be in multi_source"
+        );
+    }
+
+    // ── Values field timestamps + content ────────────────────────────
+
+    #[test]
+    fn values_field_preserves_different_timestamps() {
+        use chrono::{DateTime, Utc};
+
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        // Create deltas with explicit different timestamps
+        let ts1: DateTime<Utc> = "2024-06-01T10:00:00Z".parse().unwrap();
+        let ts2: DateTime<Utc> = "2024-06-01T10:00:05Z".parse().unwrap();
+
+        let delta1 = Delta::self_vessel(vec![Update {
+            source: Source::nmea0183("ttyUSB0", "GP"),
+            timestamp: ts1,
+            values: vec![PathValue::new(
+                "navigation.speedOverGround",
+                serde_json::json!(3.5),
+            )],
+        }]);
+        let delta2 = Delta::self_vessel(vec![Update {
+            source: Source::plugin("ais"),
+            timestamp: ts2,
+            values: vec![PathValue::new(
+                "navigation.speedOverGround",
+                serde_json::json!(3.8),
+            )],
+        }]);
+
+        store.apply_delta(delta1);
+        store.apply_delta(delta2);
+
+        let model = store.full_model();
+        let vessel = model.vessels.get("urn:mrn:signalk:uuid:test").unwrap();
+        let sog = vessel.values.get("navigation.speedOverGround").unwrap();
+
+        let values = sog
+            .values
+            .as_ref()
+            .expect("Should have multi-source values");
+        assert_eq!(values["ttyUSB0.GP"].timestamp, ts1);
+        assert_eq!(values["ais"].timestamp, ts2);
+        assert_ne!(
+            values["ttyUSB0.GP"].timestamp, values["ais"].timestamp,
+            "Timestamps should differ between sources"
+        );
+    }
+
+    #[test]
+    fn values_field_appears_when_second_source_arrives() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        // Single source — no values field
+        store.apply_delta(make_gps_delta(3.5));
+        assert!(
+            store
+                .get_self_path_multi_values("navigation.speedOverGround")
+                .is_none(),
+            "Single source should not have multi_values"
+        );
+
+        let model1 = store.full_model();
+        let vessel1 = model1.vessels.get("urn:mrn:signalk:uuid:test").unwrap();
+        let sog1 = vessel1.values.get("navigation.speedOverGround").unwrap();
+        assert!(sog1.values.is_none(), "Single source → no values field");
+
+        // Second source arrives — values field should now appear
+        store.apply_delta(make_ais_delta(3.8));
+        assert!(
+            store
+                .get_self_path_multi_values("navigation.speedOverGround")
+                .is_some(),
+            "Two sources should have multi_values"
+        );
+
+        let model2 = store.full_model();
+        let vessel2 = model2.vessels.get("urn:mrn:signalk:uuid:test").unwrap();
+        let sog2 = vessel2.values.get("navigation.speedOverGround").unwrap();
+        let values = sog2.values.as_ref().expect("Two sources → values field");
+        assert_eq!(values.len(), 2);
+    }
+
+    #[test]
+    fn values_field_content_matches_multi_source_values() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        let mut priorities = HashMap::new();
+        priorities.insert("ttyUSB0.GP".to_string(), 10);
+        priorities.insert("ais".to_string(), 50);
+        priorities.insert("n2k.129026".to_string(), 200);
+        store.set_source_priorities(priorities);
+
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(make_ais_delta(3.8));
+        store.apply_delta(make_nmea2000_delta(4.1));
+
+        let model = store.full_model();
+        let vessel = model.vessels.get("urn:mrn:signalk:uuid:test").unwrap();
+        let sog = vessel.values.get("navigation.speedOverGround").unwrap();
+
+        // Active value should be GPS (highest priority)
+        assert_eq!(sog.value, serde_json::json!(3.5));
+        assert_eq!(sog.source.0, "ttyUSB0.GP");
+
+        // values field should contain all three with their individual values
+        let values = sog.values.as_ref().unwrap();
+        assert_eq!(values.len(), 3);
+        assert_eq!(values["ttyUSB0.GP"].value, serde_json::json!(3.5));
+        assert_eq!(values["ais"].value, serde_json::json!(3.8));
+        assert_eq!(values["n2k.129026"].value, serde_json::json!(4.1));
+    }
+
+    #[test]
+    fn full_model_serializes_values_correctly() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(make_ais_delta(3.8));
+
+        let model = store.full_model();
+        let json = serde_json::to_value(&model).unwrap();
+
+        // Navigate the nested JSON to the values field
+        let sog = &json["vessels"]["urn:mrn:signalk:uuid:test"]["navigation"]["speedOverGround"];
+        assert!(
+            sog["values"].is_object(),
+            "values should be an object in JSON"
+        );
+        assert_eq!(sog["values"]["ttyUSB0.GP"]["value"], 3.5);
+        assert_eq!(sog["values"]["ais"]["value"], 3.8);
+        assert!(
+            sog["values"]["ttyUSB0.GP"]["timestamp"].is_string(),
+            "values entries should have timestamp"
+        );
+    }
 }

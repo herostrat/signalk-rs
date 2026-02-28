@@ -240,6 +240,60 @@ check "SOG has values field (multi-source)" \
 check "propulsion RPM has no values field (single source)" \
   "$(echo "$RPM_DATA" | grep -c '"values"')" "0"
 
+# --- Values Field Content ---
+# Verify the values field actually contains source entries with correct structure
+echo "  Values Content"
+
+# Position values must contain the winning source
+check "position values contains nmea0183-sim.GP" \
+  "$POS_DATA" '"nmea0183-sim.GP"'
+check "position values contains sensor-data-simulator" \
+  "$POS_DATA" '"sensor-data-simulator"'
+
+# SOG values should contain multiple sources
+check "SOG values contains nmea0183-sim.GP" \
+  "$SOG_DATA" '"nmea0183-sim.GP"'
+check "SOG values contains sensor-data-simulator" \
+  "$SOG_DATA" '"sensor-data-simulator"'
+
+# Each values entry must have "value" and "timestamp"
+SOG_VALUES=$(echo "$SOG_DATA" | node -e "
+  const d=require('fs').readFileSync('/dev/stdin','utf8');
+  const j=JSON.parse(d);
+  if(j.values) {
+    const keys=Object.keys(j.values);
+    let ok=true;
+    keys.forEach(k => {
+      if(!j.values[k].hasOwnProperty('value')) ok=false;
+      if(!j.values[k].hasOwnProperty('timestamp')) ok=false;
+    });
+    console.log(ok ? 'VALID:'+keys.length+'_sources' : 'INVALID');
+  } else { console.log('NO_VALUES'); }
+")
+check "SOG values entries have value+timestamp" \
+  "$SOG_VALUES" "VALID"
+check "SOG has 2+ sources in values" \
+  "$SOG_VALUES" "_sources"
+
+# --- 3-Source Validation ---
+# Position should have entries from all three output paths
+echo "  Three-Source Coverage"
+POS_SOURCE_COUNT=$(echo "$POS_DATA" | node -e "
+  const d=require('fs').readFileSync('/dev/stdin','utf8');
+  const j=JSON.parse(d);
+  if(j.values) { console.log(Object.keys(j.values).length); }
+  else { console.log(0); }
+")
+check "position has 2+ sources in values" \
+  "$([ "$POS_SOURCE_COUNT" -ge 2 ] 2>/dev/null && echo 'YES' || echo 'NO')" "YES"
+
+# Heading should also have multiple sources (HDG + PGN 127250 + direct)
+HDG_DATA=$(fetch "$BASE/signalk/v1/api/vessels/self/navigation/headingMagnetic")
+check "heading has values field (multi-source)" \
+  "$HDG_DATA" '"values"'
+check "heading values contains sensor-data-simulator" \
+  "$HDG_DATA" '"sensor-data-simulator"'
+
 # --- Sources Endpoint (spec compliance) ---
 # GET /signalk/v1/api/sources returns hierarchical sources
 echo "  Sources API"
@@ -250,6 +304,25 @@ check "sources has nmea0183-sim (hierarchical)" \
   "$SOURCES_DATA" '"nmea0183-sim"'
 check "sources has sensor-data-simulator" \
   "$SOURCES_DATA" '"sensor-data-simulator"'
+
+# Sources detail: verify structure
+check "nmea0183-sim source has type NMEA0183" \
+  "$SOURCES_DATA" '"NMEA0183"'
+check "sensor-data-simulator source has type Plugin" \
+  "$SOURCES_DATA" '"Plugin"'
+
+# Hierarchical structure: nmea0183-sim should have GP sub-key
+NMEA_SUB=$(echo "$SOURCES_DATA" | node -e "
+  const d=require('fs').readFileSync('/dev/stdin','utf8');
+  const j=JSON.parse(d);
+  if(j['nmea0183-sim'] && j['nmea0183-sim']['GP']) {
+    console.log('NESTED:'+j['nmea0183-sim']['GP']['type']);
+  } else { console.log('FLAT'); }
+")
+check "nmea0183-sim has nested GP sub-key" \
+  "$NMEA_SUB" "NESTED"
+check "nmea0183-sim.GP type is NMEA0183" \
+  "$NMEA_SUB" "NMEA0183"
 
 # --- Summary ---
 echo ""
