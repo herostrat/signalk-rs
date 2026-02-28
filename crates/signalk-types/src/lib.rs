@@ -14,6 +14,7 @@ pub mod v2;
 pub mod ws;
 
 // Re-exports for convenience
+pub use ais::{TargetClass, classify_mmsi};
 pub use delta::{Delta, PathValue, PutRequest, PutResponse, PutSpec, PutState, Update};
 pub use full::{
     DiscoveryResponse, EndpointInfo, FullModel, LoginRequest, LoginResponse, ServerInfo,

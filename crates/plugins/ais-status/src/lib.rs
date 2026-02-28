@@ -23,7 +23,9 @@ use signalk_types::{Delta, PathValue, Source, Subscription, Update};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
 
-use crate::tracker::{AisTracker, StatusTransition, TargetClass, TargetStatus};
+use crate::tracker::{
+    AisTracker, StatusTransition, TargetClass, TargetStatus, ThresholdOverrides, TrackerConfig,
+};
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
@@ -32,6 +34,42 @@ struct AisConfig {
     /// Tick interval in seconds for checking lost/stale targets. Default: 30.
     #[serde(default = "default_tick_interval")]
     tick_interval_secs: u64,
+
+    /// Per-class threshold overrides.
+    #[serde(default)]
+    thresholds: ThresholdsConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ThresholdsConfig {
+    #[serde(default)]
+    vessel: Option<ThresholdOverride>,
+    #[serde(default)]
+    aton: Option<ThresholdOverride>,
+    #[serde(default)]
+    base: Option<ThresholdOverride>,
+    #[serde(default)]
+    sar: Option<ThresholdOverride>,
+}
+
+/// Optional overrides for class thresholds. Unset fields use defaults.
+#[derive(Debug, Clone, Deserialize)]
+struct ThresholdOverride {
+    confirm_count: Option<u32>,
+    confirm_window_secs: Option<u64>,
+    lost_after_secs: Option<u64>,
+    remove_after_secs: Option<u64>,
+}
+
+impl From<&ThresholdOverride> for ThresholdOverrides {
+    fn from(o: &ThresholdOverride) -> Self {
+        ThresholdOverrides {
+            confirm_count: o.confirm_count,
+            confirm_window_secs: o.confirm_window_secs,
+            lost_after_secs: o.lost_after_secs,
+            remove_after_secs: o.remove_after_secs,
+        }
+    }
 }
 
 fn default_tick_interval() -> u64 {
@@ -42,6 +80,7 @@ impl Default for AisConfig {
     fn default() -> Self {
         AisConfig {
             tick_interval_secs: default_tick_interval(),
+            thresholds: ThresholdsConfig::default(),
         }
     }
 }
@@ -82,6 +121,15 @@ impl Plugin for AisStatusPlugin {
     }
 
     fn schema(&self) -> Option<serde_json::Value> {
+        let threshold_schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "confirm_count": { "type": "integer", "description": "Messages needed to confirm" },
+                "confirm_window_secs": { "type": "integer", "description": "Window for confirm_count messages" },
+                "lost_after_secs": { "type": "integer", "description": "Seconds without updates before Lost" },
+                "remove_after_secs": { "type": "integer", "description": "Seconds in Lost before removal" }
+            }
+        });
         Some(serde_json::json!({
             "type": "object",
             "properties": {
@@ -89,6 +137,16 @@ impl Plugin for AisStatusPlugin {
                     "type": "integer",
                     "description": "Tick interval in seconds for checking lost/stale targets",
                     "default": 30
+                },
+                "thresholds": {
+                    "type": "object",
+                    "description": "Per-class lifecycle thresholds (vessel, aton, base, sar)",
+                    "properties": {
+                        "vessel": threshold_schema,
+                        "aton": threshold_schema,
+                        "base": threshold_schema,
+                        "sar": threshold_schema
+                    }
                 }
             }
         }))
@@ -116,7 +174,16 @@ impl Plugin for AisStatusPlugin {
             "AIS Status plugin starting"
         );
 
-        let tracker = Arc::new(Mutex::new(AisTracker::new(self_uri)));
+        let tracker_config = TrackerConfig {
+            vessel: ais_config.thresholds.vessel.as_ref().map(Into::into),
+            aton: ais_config.thresholds.aton.as_ref().map(Into::into),
+            base: ais_config.thresholds.base.as_ref().map(Into::into),
+            sar: ais_config.thresholds.sar.as_ref().map(Into::into),
+        };
+        let tracker = Arc::new(Mutex::new(AisTracker::with_config(
+            self_uri,
+            tracker_config,
+        )));
 
         // Subscribe to ALL vessel deltas
         let tracker_sub = tracker.clone();

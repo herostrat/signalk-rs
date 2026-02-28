@@ -81,8 +81,11 @@ jobs:
       - name: Install webapp packages
         run: cd webapps && npm install --production
 
-      - name: Load vcan kernel module
-        run: sudo modprobe vcan
+      - name: Install kernel extras and load vcan module
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y linux-modules-extra-$(uname -r)
+          sudo modprobe vcan
 
       - name: Run smoke tests
         run: |

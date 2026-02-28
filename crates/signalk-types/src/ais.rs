@@ -9,6 +9,34 @@
 use crate::delta::{Delta, PathValue, Update};
 use crate::source::Source;
 
+// ─── MMSI Classification (ITU-R M.585) ──────────────────────────────────────
+
+/// AIS target class based on MMSI prefix (ITU-R M.585).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetClass {
+    /// Normal vessel (Class A or B — not distinguishable from MMSI alone)
+    Vessel,
+    /// Aid to Navigation (MMSI prefix 970–979)
+    Aton,
+    /// Coast/Base station (MMSI prefix 00)
+    Base,
+    /// Search and Rescue aircraft (MMSI prefix 111)
+    Sar,
+}
+
+/// Classify an AIS target by its MMSI number string (ITU-R M.585 prefix rules).
+pub fn classify_mmsi(mmsi: &str) -> TargetClass {
+    if mmsi.starts_with("97") {
+        TargetClass::Aton
+    } else if mmsi.starts_with("00") {
+        TargetClass::Base
+    } else if mmsi.starts_with("111") {
+        TargetClass::Sar
+    } else {
+        TargetClass::Vessel
+    }
+}
+
 /// Source-agnostic AIS contact data.
 ///
 /// Both NMEA 0183 VDM and NMEA 2000 AIS PGN decoders fill this struct,
@@ -469,5 +497,30 @@ mod tests {
         let delta = contact.to_delta(Source::nmea0183("my-ais", "AI"));
         assert_eq!(delta.updates[0].source.type_, "NMEA0183");
         assert_eq!(delta.updates[0].source.label, "my-ais");
+    }
+
+    // ── MMSI Classification ─────────────────────────────────────────────
+
+    #[test]
+    fn classify_normal_vessel() {
+        assert_eq!(classify_mmsi("211457160"), TargetClass::Vessel);
+        assert_eq!(classify_mmsi("366999000"), TargetClass::Vessel);
+    }
+
+    #[test]
+    fn classify_aton() {
+        assert_eq!(classify_mmsi("970012345"), TargetClass::Aton);
+        assert_eq!(classify_mmsi("979999999"), TargetClass::Aton);
+    }
+
+    #[test]
+    fn classify_base_station() {
+        assert_eq!(classify_mmsi("002111111"), TargetClass::Base);
+        assert_eq!(classify_mmsi("003669999"), TargetClass::Base);
+    }
+
+    #[test]
+    fn classify_sar() {
+        assert_eq!(classify_mmsi("111123456"), TargetClass::Sar);
     }
 }

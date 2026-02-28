@@ -1,35 +1,10 @@
-//! AIS target tracking — MMSI classification, status state machine, target lifecycle.
+//! AIS target tracking — status state machine, target lifecycle.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-// ─── MMSI Classification (ITU-R M.585) ──────────────────────────────────────
-
-/// AIS target class based on MMSI prefix.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TargetClass {
-    /// Normal vessel (Class A or B — not distinguishable from MMSI alone)
-    Vessel,
-    /// Aid to Navigation (MMSI prefix 970–979)
-    Aton,
-    /// Coast/Base station (MMSI prefix 00)
-    Base,
-    /// Search and Rescue aircraft (MMSI prefix 111)
-    Sar,
-}
-
-/// Classify a target by its MMSI number string.
-pub fn classify_mmsi(mmsi: &str) -> TargetClass {
-    if mmsi.starts_with("97") {
-        TargetClass::Aton
-    } else if mmsi.starts_with("00") {
-        TargetClass::Base
-    } else if mmsi.starts_with("111") {
-        TargetClass::Sar
-    } else {
-        TargetClass::Vessel
-    }
-}
+// Re-export from signalk-types for convenience
+pub use signalk_types::{TargetClass, classify_mmsi};
 
 // ─── Thresholds per class ───────────────────────────────────────────────────
 
@@ -46,27 +21,44 @@ pub struct ClassThresholds {
     pub remove_after: Duration,
 }
 
+/// Optional per-field overrides for thresholds.
+#[derive(Debug, Clone, Default)]
+pub struct ThresholdOverrides {
+    pub confirm_count: Option<u32>,
+    pub confirm_window_secs: Option<u64>,
+    pub lost_after_secs: Option<u64>,
+    pub remove_after_secs: Option<u64>,
+}
+
 impl ClassThresholds {
     pub fn for_class(class: TargetClass) -> Self {
-        match class {
-            TargetClass::Vessel => ClassThresholds {
-                confirm_count: 2,
-                confirm_window: Duration::from_secs(180),
-                lost_after: Duration::from_secs(360),
-                remove_after: Duration::from_secs(540),
-            },
-            TargetClass::Aton => ClassThresholds {
-                confirm_count: 1,
-                confirm_window: Duration::from_secs(180),
-                lost_after: Duration::from_secs(900),
-                remove_after: Duration::from_secs(3600),
-            },
-            TargetClass::Base | TargetClass::Sar => ClassThresholds {
-                confirm_count: 1,
-                confirm_window: Duration::from_secs(10),
-                lost_after: Duration::from_secs(30),
-                remove_after: Duration::from_secs(180),
-            },
+        Self::for_class_with_overrides(class, None)
+    }
+
+    pub fn for_class_with_overrides(
+        class: TargetClass,
+        overrides: Option<&ThresholdOverrides>,
+    ) -> Self {
+        let defaults = match class {
+            TargetClass::Vessel => (2u32, 180u64, 360u64, 540u64),
+            TargetClass::Aton => (1, 180, 900, 3600),
+            TargetClass::Base | TargetClass::Sar => (1, 10, 30, 180),
+        };
+
+        if let Some(o) = overrides {
+            ClassThresholds {
+                confirm_count: o.confirm_count.unwrap_or(defaults.0),
+                confirm_window: Duration::from_secs(o.confirm_window_secs.unwrap_or(defaults.1)),
+                lost_after: Duration::from_secs(o.lost_after_secs.unwrap_or(defaults.2)),
+                remove_after: Duration::from_secs(o.remove_after_secs.unwrap_or(defaults.3)),
+            }
+        } else {
+            ClassThresholds {
+                confirm_count: defaults.0,
+                confirm_window: Duration::from_secs(defaults.1),
+                lost_after: Duration::from_secs(defaults.2),
+                remove_after: Duration::from_secs(defaults.3),
+            }
         }
     }
 }
@@ -129,9 +121,14 @@ pub struct TrackedTarget {
 }
 
 impl TrackedTarget {
-    pub fn new(mmsi: String, context: String, now: Instant) -> Self {
+    pub fn new(
+        mmsi: String,
+        context: String,
+        now: Instant,
+        overrides: Option<&ThresholdOverrides>,
+    ) -> Self {
         let class = classify_mmsi(&mmsi);
-        let thresholds = ClassThresholds::for_class(class);
+        let thresholds = ClassThresholds::for_class_with_overrides(class, overrides);
         TrackedTarget {
             mmsi,
             context,
@@ -230,17 +227,43 @@ impl TrackedTarget {
 
 // ─── AIS Tracker ────────────────────────────────────────────────────────────
 
+/// Per-class threshold overrides for the tracker.
+#[derive(Debug, Clone, Default)]
+pub struct TrackerConfig {
+    pub vessel: Option<ThresholdOverrides>,
+    pub aton: Option<ThresholdOverrides>,
+    pub base: Option<ThresholdOverrides>,
+    pub sar: Option<ThresholdOverrides>,
+}
+
+impl TrackerConfig {
+    fn overrides_for(&self, class: TargetClass) -> Option<&ThresholdOverrides> {
+        match class {
+            TargetClass::Vessel => self.vessel.as_ref(),
+            TargetClass::Aton => self.aton.as_ref(),
+            TargetClass::Base => self.base.as_ref(),
+            TargetClass::Sar => self.sar.as_ref(),
+        }
+    }
+}
+
 /// Central AIS target tracker. Manages all tracked targets.
 pub struct AisTracker {
     targets: HashMap<String, TrackedTarget>,
     self_uri: String,
+    config: TrackerConfig,
 }
 
 impl AisTracker {
     pub fn new(self_uri: String) -> Self {
+        Self::with_config(self_uri, TrackerConfig::default())
+    }
+
+    pub fn with_config(self_uri: String, config: TrackerConfig) -> Self {
         AisTracker {
             targets: HashMap::new(),
             self_uri,
+            config,
         }
     }
 
@@ -291,10 +314,11 @@ impl AisTracker {
         let mmsi = Self::parse_mmsi(context)?;
         let mmsi_string = mmsi.to_string();
 
-        let target = self
-            .targets
-            .entry(mmsi_string.clone())
-            .or_insert_with(|| TrackedTarget::new(mmsi_string, context.to_string(), now));
+        let class = classify_mmsi(mmsi);
+        let overrides = self.config.overrides_for(class);
+        let target = self.targets.entry(mmsi_string.clone()).or_insert_with(|| {
+            TrackedTarget::new(mmsi_string, context.to_string(), now, overrides)
+        });
 
         target.update_from_values(values);
         target.record_message(now)
@@ -349,31 +373,6 @@ impl AisTracker {
 mod tests {
     use super::*;
 
-    // ── MMSI Classification ─────────────────────────────────────────────
-
-    #[test]
-    fn classify_normal_vessel() {
-        assert_eq!(classify_mmsi("211457160"), TargetClass::Vessel);
-        assert_eq!(classify_mmsi("366999000"), TargetClass::Vessel);
-    }
-
-    #[test]
-    fn classify_aton() {
-        assert_eq!(classify_mmsi("970012345"), TargetClass::Aton);
-        assert_eq!(classify_mmsi("979999999"), TargetClass::Aton);
-    }
-
-    #[test]
-    fn classify_base_station() {
-        assert_eq!(classify_mmsi("002111111"), TargetClass::Base);
-        assert_eq!(classify_mmsi("003669999"), TargetClass::Base);
-    }
-
-    #[test]
-    fn classify_sar() {
-        assert_eq!(classify_mmsi("111123456"), TargetClass::Sar);
-    }
-
     // ── State Machine ───────────────────────────────────────────────────
 
     #[test]
@@ -382,6 +381,7 @@ mod tests {
             "211457160".into(),
             "vessels.urn:mrn:imo:mmsi:211457160".into(),
             Instant::now(),
+            None,
         );
         assert_eq!(t.status, TargetStatus::Unconfirmed);
         assert_eq!(t.class, TargetClass::Vessel);
@@ -395,6 +395,7 @@ mod tests {
             "211457160".into(),
             "vessels.urn:mrn:imo:mmsi:211457160".into(),
             now,
+            None,
         );
         assert_eq!(t.status, TargetStatus::Unconfirmed);
 
@@ -419,6 +420,7 @@ mod tests {
             "970012345".into(),
             "vessels.urn:mrn:imo:mmsi:970012345".into(),
             now,
+            None,
         );
         // First record_message should confirm (confirm_count=1 for ATONs)
         let transition = t.record_message(now);
@@ -433,6 +435,7 @@ mod tests {
             "211457160".into(),
             "vessels.urn:mrn:imo:mmsi:211457160".into(),
             now,
+            None,
         );
         t.record_message(now); // first message
         t.record_message(now + Duration::from_secs(5)); // second → confirms
@@ -458,6 +461,7 @@ mod tests {
             "211457160".into(),
             "vessels.urn:mrn:imo:mmsi:211457160".into(),
             now,
+            None,
         );
         t.record_message(now); // first
         t.record_message(now + Duration::from_secs(5)); // second → confirms
@@ -648,6 +652,7 @@ mod tests {
             "211457160".into(),
             "vessels.urn:mrn:imo:mmsi:211457160".into(),
             now,
+            None,
         );
 
         t.update_from_values(&[
@@ -660,5 +665,44 @@ mod tests {
 
         assert_eq!(t.name.as_deref(), Some("PACIFIC EXPLORER"));
         assert_eq!(t.callsign.as_deref(), Some("DJKL"));
+    }
+
+    // ── Custom Thresholds ────────────────────────────────────────────────
+
+    #[test]
+    fn custom_thresholds_override_defaults() {
+        let overrides = ThresholdOverrides {
+            confirm_count: Some(5),
+            lost_after_secs: Some(60),
+            ..Default::default()
+        };
+        let t = ClassThresholds::for_class_with_overrides(TargetClass::Vessel, Some(&overrides));
+
+        assert_eq!(t.confirm_count, 5); // overridden
+        assert_eq!(t.confirm_window, Duration::from_secs(180)); // default
+        assert_eq!(t.lost_after, Duration::from_secs(60)); // overridden
+        assert_eq!(t.remove_after, Duration::from_secs(540)); // default
+    }
+
+    #[test]
+    fn tracker_with_custom_vessel_config() {
+        let now = Instant::now();
+        let config = TrackerConfig {
+            vessel: Some(ThresholdOverrides {
+                confirm_count: Some(1),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut tracker = AisTracker::with_config("urn:mrn:signalk:uuid:test".into(), config);
+
+        // With confirm_count=1, a vessel should confirm on the first message
+        let result = tracker.update_target(
+            "vessels.urn:mrn:imo:mmsi:211457160",
+            &[("navigation.speedOverGround".into(), serde_json::json!(5.0))],
+            now,
+        );
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().new_status, TargetStatus::Confirmed);
     }
 }
