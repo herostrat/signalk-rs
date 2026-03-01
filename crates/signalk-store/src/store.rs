@@ -1,3 +1,4 @@
+use chrono::Utc;
 use signalk_types::{
     Delta, FullModel, Metadata, SignalKValue, Source, SourceRef, SourceValue, VesselData,
 };
@@ -49,6 +50,12 @@ pub struct SignalKStore {
     /// Sources not in this map default to DEFAULT_SOURCE_PRIORITY (100).
     source_priorities: HashMap<String, u16>,
 
+    /// Source TTL configuration: source_ref → max age in seconds (lazy eviction).
+    /// A source whose active value is older than its TTL is treated as "not present":
+    /// any incoming source can overwrite it regardless of priority.
+    /// Sources not in this map have no TTL (their values persist indefinitely).
+    source_ttls: HashMap<String, u64>,
+
     /// Broadcast sender — all delta updates are sent here
     tx: broadcast::Sender<Delta>,
 }
@@ -74,6 +81,7 @@ impl SignalKStore {
             metadata: HashMap::new(),
             multi_source: HashMap::new(),
             source_priorities: HashMap::new(),
+            source_ttls: HashMap::new(),
             tx,
         };
         (Arc::new(RwLock::new(store)), rx)
@@ -83,6 +91,13 @@ impl SignalKStore {
     /// Sources not in the map default to 100 (DEFAULT_SOURCE_PRIORITY).
     pub fn set_source_priorities(&mut self, priorities: HashMap<String, u16>) {
         self.source_priorities = priorities;
+    }
+
+    /// Set source TTL configuration. A source whose active value age exceeds its TTL
+    /// is treated as "not present" during priority checks (lazy eviction).
+    /// Sources not in the map have no TTL (values persist indefinitely).
+    pub fn set_source_ttls(&mut self, ttls: HashMap<String, u64>) {
+        self.source_ttls = ttls;
     }
 
     /// Subscribe to the delta broadcast channel.
@@ -141,27 +156,49 @@ impl SignalKStore {
                         .insert(source_ref.0.clone(), value.clone());
                 }
 
-                // Priority check: only update active value if new source has
-                // equal or higher priority (lower number = higher priority).
-                // Inlined to avoid borrowing all of `self` via method call.
+                // Priority check with lazy TTL eviction:
+                // A source whose active value has exceeded its configured TTL is treated
+                // as "not present" — any incoming source can overwrite it.
+                // Equal priority: last-write-wins. Lower number = higher priority.
                 let new_pri = self
                     .source_priorities
                     .get(&source_ref.0)
                     .copied()
                     .unwrap_or(DEFAULT_SOURCE_PRIORITY);
-                let should_update = match vessel.values.get(&pv.path) {
-                    Some(current) => {
-                        let cur_pri = self
-                            .source_priorities
-                            .get(&current.source.0)
-                            .copied()
-                            .unwrap_or(DEFAULT_SOURCE_PRIORITY);
-                        new_pri <= cur_pri
+
+                // Stale check: if the active value's source has a TTL and it expired, evict it.
+                let evict_stale: Option<String> = vessel.values.get(&pv.path).and_then(|current| {
+                    let ttl = self.source_ttls.get(&current.source.0).copied()?;
+                    let age = Utc::now()
+                        .signed_duration_since(current.timestamp)
+                        .num_seconds();
+                    if age > ttl as i64 {
+                        Some(current.source.0.clone())
+                    } else {
+                        None
                     }
-                    None => true,
-                };
+                });
+
+                let should_update = evict_stale.is_some()
+                    || match vessel.values.get(&pv.path) {
+                        Some(current) => {
+                            let cur_pri = self
+                                .source_priorities
+                                .get(&current.source.0)
+                                .copied()
+                                .unwrap_or(DEFAULT_SOURCE_PRIORITY);
+                            new_pri <= cur_pri
+                        }
+                        None => true,
+                    };
 
                 if should_update {
+                    // Evict stale source from multi_source so it no longer appears in `values`
+                    if let Some(evicted) = evict_stale
+                        && let Some(source_map) = self.multi_source.get_mut(&pv.path)
+                    {
+                        source_map.remove(&evicted);
+                    }
                     vessel.values.insert(pv.path.clone(), value);
                 }
             }
@@ -1197,10 +1234,9 @@ mod tests {
     // ── Source eviction / stale source behavior ──────────────────────
 
     #[test]
-    fn stale_high_priority_source_blocks_lower_sources() {
-        // Documents current behavior: if a high-priority source goes offline,
-        // its last value stays "active" and lower-priority updates cannot overwrite.
-        // This is a known limitation — no timeout-based eviction exists yet.
+    fn stale_high_priority_source_blocks_lower_sources_without_ttl() {
+        // Without TTL configured: a high-priority source that stops sending keeps its value
+        // active and lower-priority updates cannot overwrite it.
         let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
         let mut store = store_arc.blocking_write();
 
@@ -1212,7 +1248,7 @@ mod tests {
         // GPS writes once, then "goes offline" (stops sending)
         store.apply_delta(make_gps_delta(3.5));
 
-        // AIS keeps sending — but can never overwrite GPS
+        // AIS keeps sending — but cannot overwrite GPS (no TTL configured)
         store.apply_delta(make_ais_delta(3.8));
         store.apply_delta(make_ais_delta(4.0));
         store.apply_delta(make_ais_delta(4.2));
@@ -1221,7 +1257,7 @@ mod tests {
         assert_eq!(
             active.value,
             serde_json::json!(3.5),
-            "Stale GPS value should persist (no eviction)"
+            "Without TTL, stale GPS value persists"
         );
         assert_eq!(active.source.0, "ttyUSB0.GP");
 
@@ -1234,6 +1270,107 @@ mod tests {
             serde_json::json!(4.2),
             "AIS latest value should be in multi_source"
         );
+    }
+
+    #[test]
+    fn stale_source_allows_lower_priority_update() {
+        use chrono::Duration;
+        // With TTL configured: when GPS value is older than TTL, it is evicted and
+        // lower-priority sources (like NTP/system-info) can take over.
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        let mut priorities = HashMap::new();
+        priorities.insert("ttyUSB0.GP".to_string(), 10);
+        priorities.insert("ais".to_string(), 50);
+        store.set_source_priorities(priorities);
+
+        // GPS TTL: 5 seconds
+        let mut ttls = HashMap::new();
+        ttls.insert("ttyUSB0.GP".to_string(), 5u64);
+        store.set_source_ttls(ttls);
+
+        // GPS writes with a timestamp far in the past (simulates old/stale value)
+        let old_ts = Utc::now() - Duration::seconds(30);
+        let stale_gps_delta = Delta::self_vessel(vec![Update {
+            source: Source::nmea0183("ttyUSB0", "GP"),
+            timestamp: old_ts,
+            values: vec![PathValue::new(
+                "navigation.speedOverGround",
+                serde_json::json!(3.5),
+            )],
+        }]);
+        store.apply_delta(stale_gps_delta);
+
+        // Active value is GPS initially
+        assert_eq!(
+            store
+                .get_self_path("navigation.speedOverGround")
+                .unwrap()
+                .source
+                .0,
+            "ttyUSB0.GP"
+        );
+
+        // AIS writes — GPS value is 30s old with 5s TTL → GPS is evicted → AIS wins
+        store.apply_delta(make_ais_delta(4.2));
+
+        let active = store.get_self_path("navigation.speedOverGround").unwrap();
+        assert_eq!(
+            active.value,
+            serde_json::json!(4.2),
+            "AIS should take over after GPS TTL expired"
+        );
+        assert_eq!(active.source.0, "ais");
+
+        // Evicted GPS source is removed from multi_source
+        assert!(
+            store
+                .get_self_path_by_source("navigation.speedOverGround", "ttyUSB0.GP")
+                .is_none(),
+            "Evicted GPS source should be removed from multi_source"
+        );
+    }
+
+    #[test]
+    fn fresh_high_priority_source_still_wins_over_ttl() {
+        use chrono::Duration;
+        // TTL only evicts when the value is actually old. A freshly-updated high-priority
+        // source should still block lower-priority sources.
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        let mut priorities = HashMap::new();
+        priorities.insert("ttyUSB0.GP".to_string(), 10);
+        priorities.insert("ais".to_string(), 50);
+        store.set_source_priorities(priorities);
+
+        let mut ttls = HashMap::new();
+        ttls.insert("ttyUSB0.GP".to_string(), 5u64);
+        store.set_source_ttls(ttls);
+
+        // GPS writes with a fresh timestamp (within TTL)
+        let fresh_ts = Utc::now() - Duration::seconds(2); // 2s old < 5s TTL
+        let fresh_gps = Delta::self_vessel(vec![Update {
+            source: Source::nmea0183("ttyUSB0", "GP"),
+            timestamp: fresh_ts,
+            values: vec![PathValue::new(
+                "navigation.speedOverGround",
+                serde_json::json!(3.5),
+            )],
+        }]);
+        store.apply_delta(fresh_gps);
+
+        // AIS writes — GPS is fresh → AIS cannot overwrite
+        store.apply_delta(make_ais_delta(4.2));
+
+        let active = store.get_self_path("navigation.speedOverGround").unwrap();
+        assert_eq!(
+            active.value,
+            serde_json::json!(3.5),
+            "Fresh GPS should still win over lower-priority AIS"
+        );
+        assert_eq!(active.source.0, "ttyUSB0.GP");
     }
 
     // ── Values field timestamps + content ────────────────────────────

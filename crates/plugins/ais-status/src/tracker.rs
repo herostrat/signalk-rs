@@ -81,8 +81,8 @@ impl TargetStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
             TargetStatus::Acquiring => "acquiring",
-            TargetStatus::Tracking  => "tracking",
-            TargetStatus::Lost      => "lost",
+            TargetStatus::Tracking => "tracking",
+            TargetStatus::Lost => "lost",
         }
     }
 }
@@ -287,8 +287,8 @@ impl AisTracker {
         let mut unconfirmed = 0;
         for t in self.targets.values() {
             match t.status {
-                TargetStatus::Tracking  => confirmed += 1,
-                TargetStatus::Lost      => lost += 1,
+                TargetStatus::Tracking => confirmed += 1,
+                TargetStatus::Lost => lost += 1,
                 TargetStatus::Acquiring => unconfirmed += 1,
             }
         }
@@ -413,13 +413,13 @@ impl AisTracker {
             .map(|t| {
                 let class = match t.class {
                     TargetClass::Vessel => "vessel",
-                    TargetClass::Aton   => "aton",
-                    TargetClass::Base   => "base",
-                    TargetClass::Sar    => "sar",
+                    TargetClass::Aton => "aton",
+                    TargetClass::Base => "base",
+                    TargetClass::Sar => "sar",
                 };
-                let position = t.position.map(|(lat, lon)| {
-                    serde_json::json!({"latitude": lat, "longitude": lon})
-                });
+                let position = t
+                    .position
+                    .map(|(lat, lon)| serde_json::json!({"latitude": lat, "longitude": lon}));
                 TargetSnapshot {
                     mmsi: t.mmsi.clone(),
                     context: t.context.clone(),
@@ -672,7 +672,6 @@ mod tests {
         assert_eq!(transitions.len(), 1);
         assert_eq!(transitions[0].new_status, TargetStatus::Lost);
         assert_eq!(tracker.get("211457160").unwrap().status, TargetStatus::Lost);
-
     }
 
     #[test]
@@ -1012,8 +1011,14 @@ mod tests {
             )],
             now,
         );
-        assert_eq!(tracker.get("211457160").unwrap().status, TargetStatus::Acquiring);
-        assert!(tracker.targets_for_cpa().is_empty(), "Acquiring targets excluded from CPA");
+        assert_eq!(
+            tracker.get("211457160").unwrap().status,
+            TargetStatus::Acquiring
+        );
+        assert!(
+            tracker.targets_for_cpa().is_empty(),
+            "Acquiring targets excluded from CPA"
+        );
     }
 
     #[test]
@@ -1022,8 +1027,14 @@ mod tests {
         let mut tracker = AisTracker::new("self".into());
         // AtoN: tracking on 1st message, but no position
         tracker.update_target("vessels.urn:mrn:imo:mmsi:970012345", &[], now);
-        assert_eq!(tracker.get("970012345").unwrap().status, TargetStatus::Tracking);
-        assert!(tracker.targets_for_cpa().is_empty(), "Targets without position excluded");
+        assert_eq!(
+            tracker.get("970012345").unwrap().status,
+            TargetStatus::Tracking
+        );
+        assert!(
+            tracker.targets_for_cpa().is_empty(),
+            "Targets without position excluded"
+        );
     }
 
     #[test]
@@ -1039,7 +1050,10 @@ mod tests {
             now,
         );
         tracker.tick(now + Duration::from_secs(1000)); // → lost
-        assert!(tracker.targets_for_cpa().is_empty(), "Lost targets excluded");
+        assert!(
+            tracker.targets_for_cpa().is_empty(),
+            "Lost targets excluded"
+        );
     }
 
     #[test]

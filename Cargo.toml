@@ -11,6 +11,7 @@ members = [
     "crates/plugins/derived-data",
     "crates/plugins/ais-status",
     "crates/plugins/tracks",
+    "crates/plugins/system-info",
     "crates/plugins/nmea2000-receive",
     "crates/plugins/nmea0183-send",
     "crates/plugins/nmea2000-send",
@@ -91,6 +92,7 @@ sensor-data-simulator = { path = "crates/plugins/sensor-data-simulator" }
 derived-data = { path = "crates/plugins/derived-data" }
 ais-status = { path = "crates/plugins/ais-status" }
 tracks = { path = "crates/plugins/tracks" }
+system-info = { path = "crates/plugins/system-info" }
 nmea2000-receive = { path = "crates/plugins/nmea2000-receive" }
 nmea0183-send = { path = "crates/plugins/nmea0183-send" }
 nmea2000-send = { path = "crates/plugins/nmea2000-send" }

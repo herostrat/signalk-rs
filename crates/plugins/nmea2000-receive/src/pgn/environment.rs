@@ -1,7 +1,7 @@
 //! Environment PGNs: WindData (130306), Temperature (130312)
+use super::{N2kSource, self_delta};
 use nmea2000::pgns::*;
 use signalk_types::{Delta, PathValue};
-use super::{N2kSource, self_delta};
 
 // ─── PGN 130306: Wind Data ────────────────────────────────────────────────────
 
@@ -61,7 +61,11 @@ mod tests {
     use nmea2000::DecodedMessage;
 
     fn test_source(pgn: u32) -> N2kSource<'static> {
-        N2kSource { label: "n2k", src: 0, pgn }
+        N2kSource {
+            label: "n2k",
+            src: 0,
+            pgn,
+        }
     }
 
     #[test]
@@ -74,8 +78,16 @@ mod tests {
         let decoded = DecodedMessage::WindData(msg);
         let delta = super::super::decoded_to_delta(&decoded, &test_source(130306)).unwrap();
         let values = &delta.updates[0].values;
-        assert!(values.iter().any(|v| v.path == "environment.wind.speedApparent"));
-        assert!(values.iter().any(|v| v.path == "environment.wind.angleApparent"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "environment.wind.speedApparent")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "environment.wind.angleApparent")
+        );
     }
 
     #[test]

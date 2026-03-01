@@ -87,6 +87,15 @@ async fn main() -> Result<()> {
         );
     }
 
+    // ── Source TTLs ───────────────────────────────────────────────────────────
+    if !config.source_ttls.is_empty() {
+        store
+            .write()
+            .await
+            .set_source_ttls(config.source_ttls.clone());
+        info!(count = config.source_ttls.len(), "Source TTLs configured");
+    }
+
     // ── Internal API (UDS) ────────────────────────────────────────────────────
     let bridge_token = if config.internal.bridge_token.is_empty() {
         let token = uuid::Uuid::new_v4().to_string();
@@ -216,6 +225,7 @@ async fn main() -> Result<()> {
     plugin_manager.register(Box::new(derived_data::DerivedDataPlugin::new()));
     plugin_manager.register(Box::new(ais_status::AisStatusPlugin::new()));
     plugin_manager.register(Box::new(tracks::TracksPlugin::new()));
+    plugin_manager.register(Box::new(system_info::SystemInfoPlugin::new()));
     #[cfg(feature = "simulator")]
     plugin_manager.register(Box::new(sensor_data_simulator::SimulatorPlugin::new()));
     #[cfg(feature = "nmea0183-output")]

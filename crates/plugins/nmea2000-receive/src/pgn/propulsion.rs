@@ -1,8 +1,8 @@
 //! Propulsion PGNs: Rudder (127245), EngineParametersRapidUpdate (127488),
 //! EngineParametersDynamic (127489), BatteryStatus (127508)
+use super::{N2kSource, self_delta};
 use nmea2000::pgns::*;
 use signalk_types::{Delta, PathValue};
-use super::{N2kSource, self_delta};
 
 /// Map engine instance raw value to a path prefix.
 /// SingleEngineOrDualEnginePort (0) → "propulsion.0"
@@ -19,7 +19,10 @@ fn engine_prefix(instance_raw: Option<u64>) -> String {
 pub(super) fn from_rudder(m: &rudder::Rudder, source: &N2kSource<'_>) -> Option<Delta> {
     let pos = m.position()?;
     self_delta(
-        vec![PathValue::new("steering.rudderAngle", serde_json::json!(pos))],
+        vec![PathValue::new(
+            "steering.rudderAngle",
+            serde_json::json!(pos),
+        )],
         source,
     )
 }
@@ -120,7 +123,11 @@ mod tests {
     use nmea2000::DecodedMessage;
 
     fn test_source(pgn: u32) -> N2kSource<'static> {
-        N2kSource { label: "n2k", src: 0, pgn }
+        N2kSource {
+            label: "n2k",
+            src: 0,
+            pgn,
+        }
     }
 
     #[test]
@@ -139,12 +146,15 @@ mod tests {
     fn engine_rapid_rpm_to_rad_per_s() {
         let msg = engine_parameters_rapid_update::EngineParametersRapidUpdate::builder()
             .instance_raw(0) // port / single
-            .speed(3000.0)   // 3000 RPM
+            .speed(3000.0) // 3000 RPM
             .build();
         let decoded = DecodedMessage::EngineParametersRapidUpdate(msg);
         let delta = super::super::decoded_to_delta(&decoded, &test_source(127488)).unwrap();
         let values = &delta.updates[0].values;
-        let rev = values.iter().find(|v| v.path == "propulsion.0.revolutions").unwrap();
+        let rev = values
+            .iter()
+            .find(|v| v.path == "propulsion.0.revolutions")
+            .unwrap();
         let expected = 3000.0 * std::f64::consts::TAU / 60.0;
         assert!((rev.value.as_f64().unwrap() - expected).abs() < 0.01);
     }
@@ -161,8 +171,16 @@ mod tests {
         let delta = super::super::decoded_to_delta(&decoded, &test_source(127489)).unwrap();
         let values = &delta.updates[0].values;
         assert!(values.iter().any(|v| v.path == "propulsion.1.oilPressure"));
-        assert!(values.iter().any(|v| v.path == "propulsion.1.coolantTemperature"));
-        assert!(values.iter().any(|v| v.path == "propulsion.1.alternatorVoltage"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "propulsion.1.coolantTemperature")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "propulsion.1.alternatorVoltage")
+        );
     }
 
     #[test]
@@ -176,10 +194,25 @@ mod tests {
         let decoded = DecodedMessage::BatteryStatus(msg);
         let delta = super::super::decoded_to_delta(&decoded, &test_source(127508)).unwrap();
         let values = &delta.updates[0].values;
-        assert!(values.iter().any(|v| v.path == "electrical.batteries.0.voltage"));
-        assert!(values.iter().any(|v| v.path == "electrical.batteries.0.current"));
-        assert!(values.iter().any(|v| v.path == "electrical.batteries.0.temperature"));
-        let volt = values.iter().find(|v| v.path == "electrical.batteries.0.voltage").unwrap();
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "electrical.batteries.0.voltage")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "electrical.batteries.0.current")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "electrical.batteries.0.temperature")
+        );
+        let volt = values
+            .iter()
+            .find(|v| v.path == "electrical.batteries.0.voltage")
+            .unwrap();
         assert!((volt.value.as_f64().unwrap() - 12.6).abs() < 0.01);
     }
 }

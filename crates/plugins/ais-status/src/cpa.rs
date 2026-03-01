@@ -257,23 +257,32 @@ mod tests {
         // Own: 54°N 10°E, anchored (SOG=0)
         // Target: 54.009°N 10°E (~1km north), heading south at 5 m/s
         let result = compute_cpa(54.0, 10.0, 0.0, 0.0, 54.009, 10.0, 5.0, PI).unwrap();
-        assert!(result.tcpa_s > 0.0, "TCPA should be positive: target approaching");
-        assert!(result.cpa_m < 50.0, "CPA near-zero: target heading directly for us");
+        assert!(
+            result.tcpa_s > 0.0,
+            "TCPA should be positive: target approaching"
+        );
+        assert!(
+            result.cpa_m < 50.0,
+            "CPA near-zero: target heading directly for us"
+        );
     }
 
     /// CPA distance must always be >= 0 for any valid inputs.
     #[test]
     fn cpa_result_is_always_non_negative() {
         let cases = [
-            (54.0_f64, 10.0_f64, 5.0_f64, 0.0_f64, 54.009_f64, 10.0_f64, 5.0_f64, PI),
+            (
+                54.0_f64, 10.0_f64, 5.0_f64, 0.0_f64, 54.009_f64, 10.0_f64, 5.0_f64, PI,
+            ),
             (54.0, 10.0, 5.0, 0.0, 54.0, 10.01, 5.0, 0.0),
             (54.0, 10.0, 5.0, PI / 2.0, 54.0, 10.004, 8.0, PI / 2.0),
             (54.0, 10.0, 0.0, 0.0, 54.009, 10.0, 5.0, PI), // own anchored
         ];
         for (own_lat, own_lon, own_sog, own_cog, tgt_lat, tgt_lon, tgt_sog, tgt_cog) in cases {
-            let result =
-                compute_cpa(own_lat, own_lon, own_sog, own_cog, tgt_lat, tgt_lon, tgt_sog, tgt_cog)
-                    .unwrap();
+            let result = compute_cpa(
+                own_lat, own_lon, own_sog, own_cog, tgt_lat, tgt_lon, tgt_sog, tgt_cog,
+            )
+            .unwrap();
             assert!(
                 result.cpa_m >= 0.0,
                 "CPA must be >= 0, got {} (tcpa={})",

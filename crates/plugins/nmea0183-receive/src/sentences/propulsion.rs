@@ -1,6 +1,6 @@
 //! Propulsion sentences: RSA, RPM
-use serde_json::json;
 use super::PathValue;
+use serde_json::json;
 
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 

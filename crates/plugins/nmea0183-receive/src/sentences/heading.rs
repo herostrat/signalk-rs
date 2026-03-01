@@ -1,6 +1,6 @@
 //! Heading sentences: HDT, HDM, HDG, VHW, ROT
-use serde_json::json;
 use super::PathValue;
+use serde_json::json;
 
 const KNOTS_TO_MS: f64 = 0.514_444;
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;

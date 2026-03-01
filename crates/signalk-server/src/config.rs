@@ -26,6 +26,23 @@ pub struct ServerConfig {
     /// ```
     #[serde(default)]
     pub source_priorities: std::collections::HashMap<String, u16>,
+
+    /// Source TTL configuration: source_ref → max value age in seconds.
+    ///
+    /// When a source's active value is older than its TTL, it is lazily evicted
+    /// on the next write to the same path, allowing lower-priority sources to take over.
+    /// Sources without an entry have no TTL (values persist indefinitely).
+    ///
+    /// Typical use: set a short TTL for GPS/NMEA sources so that NTP or other
+    /// fallbacks can fill in when the GPS goes offline.
+    ///
+    /// ```toml
+    /// [source_ttls]
+    /// "nmea0183-tcp.GP" = 5   # evict after 5s of silence
+    /// "nmea2000.129033" = 5
+    /// ```
+    #[serde(default)]
+    pub source_ttls: std::collections::HashMap<String, u64>,
     /// Plugin configurations — everything is a plugin.
     ///
     /// ```toml
@@ -161,6 +178,7 @@ impl Default for ServerConfig {
                 bridge_token: String::new(),
             },
             source_priorities: std::collections::HashMap::new(),
+            source_ttls: std::collections::HashMap::new(),
             plugins: Vec::new(),
         }
     }

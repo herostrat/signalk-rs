@@ -1,6 +1,6 @@
 //! Depth sentences: DPT, DBT, DBS, DBK
-use serde_json::json;
 use super::PathValue;
+use serde_json::json;
 
 const FEET_TO_M: f64 = 0.304_8;
 const FATHOMS_TO_M: f64 = 1.828_8;

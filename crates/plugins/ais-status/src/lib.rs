@@ -209,19 +209,25 @@ impl Plugin for AisStatusPlugin {
 
         // ── Register plugin routes (/plugins/ais-status/) ─────────────────────
         let tracker_api = tracker.clone();
-        ctx.register_routes(Box::new(move |router: &mut dyn signalk_plugin_api::PluginRouter| {
-            let t = tracker_api.clone();
-            router.get(
-                "/targets",
-                route_handler(move |_req| {
-                    let t = t.clone();
-                    async move {
-                        let snapshot = t.lock().unwrap().targets_snapshot();
-                        signalk_plugin_api::PluginResponse::json(200, &serde_json::json!(snapshot))
-                    }
-                }),
-            );
-        }) as RouterSetup).await?;
+        ctx.register_routes(
+            Box::new(move |router: &mut dyn signalk_plugin_api::PluginRouter| {
+                let t = tracker_api.clone();
+                router.get(
+                    "/targets",
+                    route_handler(move |_req| {
+                        let t = t.clone();
+                        async move {
+                            let snapshot = t.lock().unwrap().targets_snapshot();
+                            signalk_plugin_api::PluginResponse::json(
+                                200,
+                                &serde_json::json!(snapshot),
+                            )
+                        }
+                    }),
+                );
+            }) as RouterSetup,
+        )
+        .await?;
 
         // Subscribe to ALL vessel deltas
         let tracker_sub = tracker.clone();
@@ -588,9 +594,9 @@ mod tests {
 
     // ── classify_cpa_alarm ───────────────────────────────────────────
 
-    const WARN_M: f64 = 1000.0;   // 1 km warn distance
-    const ALARM_M: f64 = 500.0;   // 500 m alarm distance
-    const MAX_S: f64 = 3600.0;    // ignore threats > 1 hour away
+    const WARN_M: f64 = 1000.0; // 1 km warn distance
+    const ALARM_M: f64 = 500.0; // 500 m alarm distance
+    const MAX_S: f64 = 3600.0; // ignore threats > 1 hour away
 
     #[test]
     fn alarm_when_cpa_below_alarm_distance() {

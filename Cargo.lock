@@ -2754,6 +2754,7 @@ dependencies = [
  "signalk-plugin-api",
  "signalk-store",
  "signalk-types",
+ "system-info",
  "tempfile",
  "thiserror",
  "tokio",
@@ -2942,6 +2943,21 @@ checksum = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4"
 dependencies = [
  "core-foundation-sys",
  "libc",
+]
+
+[[package]]
+name = "system-info"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "libc",
+ "serde",
+ "serde_json",
+ "signalk-plugin-api",
+ "signalk-types",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

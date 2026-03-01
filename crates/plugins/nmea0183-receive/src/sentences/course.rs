@@ -1,6 +1,6 @@
 //! Course sentences: RMB, BWC, BOD, XTE
-use serde_json::json;
 use super::PathValue;
+use serde_json::json;
 
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 const NM_TO_M: f64 = 1852.0;
@@ -282,7 +282,10 @@ mod tests {
         };
         let values = from_xte(&xte);
         assert_eq!(values.len(), 1);
-        assert_eq!(values[0].path, "navigation.courseGreatCircle.crossTrackError");
+        assert_eq!(
+            values[0].path,
+            "navigation.courseGreatCircle.crossTrackError"
+        );
         assert!((values[0].value.as_f64().unwrap() - 0.5 * NM_TO_M).abs() < 1.0);
     }
 }

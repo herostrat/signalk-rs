@@ -1,9 +1,9 @@
 //! Navigation PGNs: VesselHeading, Speed, WaterDepth, PositionRapidUpdate,
 //! CogSogRapidUpdate, GnssPositionData, RateOfTurn, Attitude,
 //! DistanceLog, TimeDate, CrossTrackError
+use super::{N2kSource, self_delta};
 use nmea2000::pgns::*;
 use signalk_types::{Delta, PathValue};
-use super::{N2kSource, self_delta};
 
 // ─── PGN 127250: Vessel Heading ──────────────────────────────────────────────
 
@@ -96,7 +96,10 @@ pub(super) fn from_distance_log(
     let mut values = Vec::new();
 
     if let Some(log) = m.log() {
-        values.push(PathValue::new("navigation.log", serde_json::json!(log as f64)));
+        values.push(PathValue::new(
+            "navigation.log",
+            serde_json::json!(log as f64),
+        ));
     }
 
     if let Some(trip) = m.trip_log() {
@@ -173,18 +176,22 @@ pub(super) fn from_gnss_position(
 
 // ─── PGN 129033: Time & Date ──────────────────────────────────────────────────
 
-pub(super) fn from_time_date(
-    m: &time_date::TimeDate,
-    source: &N2kSource<'_>,
-) -> Option<Delta> {
+pub(super) fn from_time_date(m: &time_date::TimeDate, source: &N2kSource<'_>) -> Option<Delta> {
     let days = m.date()?;
     let secs = m.time()?;
     // NMEA 2000 epoch: days since 1970-01-01, seconds since midnight
     let total_secs = days as i64 * 86400 + secs as i64;
     let dt = chrono::DateTime::from_timestamp(total_secs, 0)?;
     let iso = dt.format("%Y-%m-%dT%H:%M:%S.000Z").to_string();
+    let total_ms = total_secs * 1000;
     self_delta(
-        vec![PathValue::new("navigation.datetime", serde_json::json!(iso))],
+        vec![
+            PathValue::new("navigation.datetime", serde_json::json!(iso)),
+            // N2K TimeDate is always UTC — timezoneOffset = 0, timezoneRegion = "UTC"
+            PathValue::new("environment.time.millis", serde_json::json!(total_ms)),
+            PathValue::new("environment.time.timezoneOffset", serde_json::json!(0)),
+            PathValue::new("environment.time.timezoneRegion", serde_json::json!("UTC")),
+        ],
         source,
     )
 }
@@ -223,20 +230,26 @@ pub(super) fn from_rate_of_turn(
 
 // ─── PGN 127257: Attitude ─────────────────────────────────────────────────────
 
-pub(super) fn from_attitude(
-    m: &attitude::Attitude,
-    source: &N2kSource<'_>,
-) -> Option<Delta> {
+pub(super) fn from_attitude(m: &attitude::Attitude, source: &N2kSource<'_>) -> Option<Delta> {
     let mut values = Vec::new();
 
     if let Some(yaw) = m.yaw() {
-        values.push(PathValue::new("navigation.attitude.yaw", serde_json::json!(yaw)));
+        values.push(PathValue::new(
+            "navigation.attitude.yaw",
+            serde_json::json!(yaw),
+        ));
     }
     if let Some(pitch) = m.pitch() {
-        values.push(PathValue::new("navigation.attitude.pitch", serde_json::json!(pitch)));
+        values.push(PathValue::new(
+            "navigation.attitude.pitch",
+            serde_json::json!(pitch),
+        ));
     }
     if let Some(roll) = m.roll() {
-        values.push(PathValue::new("navigation.attitude.roll", serde_json::json!(roll)));
+        values.push(PathValue::new(
+            "navigation.attitude.roll",
+            serde_json::json!(roll),
+        ));
     }
 
     self_delta(values, source)
@@ -248,7 +261,11 @@ mod tests {
     use nmea2000::DecodedMessage;
 
     fn test_source(pgn: u32) -> N2kSource<'static> {
-        N2kSource { label: "n2k", src: 0, pgn }
+        N2kSource {
+            label: "n2k",
+            src: 0,
+            pgn,
+        }
     }
 
     #[test]
@@ -277,7 +294,11 @@ mod tests {
         let delta = super::super::decoded_to_delta(&decoded, &test_source(127250)).unwrap();
         let values = &delta.updates[0].values;
         assert_eq!(values[0].path, "navigation.headingMagnetic");
-        assert!(values.iter().any(|v| v.path == "navigation.magneticVariation"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "navigation.magneticVariation")
+        );
     }
 
     #[test]
@@ -306,8 +327,16 @@ mod tests {
         let decoded = DecodedMessage::CogSogRapidUpdate(msg);
         let delta = super::super::decoded_to_delta(&decoded, &test_source(129026)).unwrap();
         let values = &delta.updates[0].values;
-        assert!(values.iter().any(|v| v.path == "navigation.courseOverGroundTrue"));
-        assert!(values.iter().any(|v| v.path == "navigation.speedOverGround"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "navigation.courseOverGroundTrue")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "navigation.speedOverGround")
+        );
     }
 
     #[test]
@@ -319,8 +348,16 @@ mod tests {
         let decoded = DecodedMessage::WaterDepth(msg);
         let delta = super::super::decoded_to_delta(&decoded, &test_source(128267)).unwrap();
         let values = &delta.updates[0].values;
-        assert!(values.iter().any(|v| v.path == "environment.depth.belowTransducer"));
-        assert!(values.iter().any(|v| v.path == "environment.depth.belowKeel"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "environment.depth.belowTransducer")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "environment.depth.belowKeel")
+        );
     }
 
     #[test]
@@ -361,7 +398,10 @@ mod tests {
         let values = &delta.updates[0].values;
         let log = values.iter().find(|v| v.path == "navigation.log").unwrap();
         assert!((log.value.as_f64().unwrap() - 1_000_000.0).abs() < 1.0);
-        let trip = values.iter().find(|v| v.path == "navigation.trip.log").unwrap();
+        let trip = values
+            .iter()
+            .find(|v| v.path == "navigation.trip.log")
+            .unwrap();
         assert!((trip.value.as_f64().unwrap() - 50_000.0).abs() < 1.0);
     }
 
@@ -371,13 +411,44 @@ mod tests {
         // Use a known epoch: 2024-01-15 = 19737 days from 1970-01-01
         let msg = time_date::TimeDate::builder()
             .date(19737u16) // 2024-01-15
-            .time(43200.0)  // 12:00:00
+            .time(43200.0) // 12:00:00
             .build();
         let decoded = DecodedMessage::TimeDate(msg);
         let delta = super::super::decoded_to_delta(&decoded, &test_source(129033)).unwrap();
         let values = &delta.updates[0].values;
+        assert_eq!(values.len(), 4);
         assert_eq!(values[0].path, "navigation.datetime");
         assert!(values[0].value.as_str().unwrap().contains("2024-01-15"));
+    }
+
+    #[test]
+    fn time_date_writes_environment_time_paths() {
+        // 2024-01-15 12:00:00 UTC = 19737 days + 43200 secs = total_secs 1705320000
+        let msg = time_date::TimeDate::builder()
+            .date(19737u16)
+            .time(43200.0)
+            .build();
+        let decoded = DecodedMessage::TimeDate(msg);
+        let delta = super::super::decoded_to_delta(&decoded, &test_source(129033)).unwrap();
+        let values = &delta.updates[0].values;
+
+        let millis = values
+            .iter()
+            .find(|p| p.path == "environment.time.millis")
+            .unwrap();
+        assert_eq!(millis.value.as_i64().unwrap(), 1705320000i64 * 1000);
+
+        let offset = values
+            .iter()
+            .find(|p| p.path == "environment.time.timezoneOffset")
+            .unwrap();
+        assert_eq!(offset.value.as_i64().unwrap(), 0);
+
+        let region = values
+            .iter()
+            .find(|p| p.path == "environment.time.timezoneRegion")
+            .unwrap();
+        assert_eq!(region.value.as_str().unwrap(), "UTC");
     }
 
     #[test]
@@ -388,7 +459,10 @@ mod tests {
         let decoded = DecodedMessage::CrossTrackError(msg);
         let delta = super::super::decoded_to_delta(&decoded, &test_source(129283)).unwrap();
         let values = &delta.updates[0].values;
-        assert_eq!(values[0].path, "navigation.courseGreatCircle.crossTrackError");
+        assert_eq!(
+            values[0].path,
+            "navigation.courseGreatCircle.crossTrackError"
+        );
         assert!((values[0].value.as_f64().unwrap() - 50.0).abs() < 0.1);
     }
 }

@@ -1,8 +1,8 @@
 //! AIS PGNs: Class A/B position reports, static data (PGNs 129038–129810)
-use nmea2000::pgns::*;
-use signalk_types::ais::AisContact;
-use signalk_types::Delta;
 use super::{N2kSource, make_source};
+use nmea2000::pgns::*;
+use signalk_types::Delta;
+use signalk_types::ais::AisContact;
 
 // ─── PGN 129038: AIS Class A Position Report ─────────────────────────────────
 
@@ -134,7 +134,11 @@ mod tests {
     use nmea2000::DecodedMessage;
 
     fn test_source(pgn: u32) -> N2kSource<'static> {
-        N2kSource { label: "n2k", src: 0, pgn }
+        N2kSource {
+            label: "n2k",
+            src: 0,
+            pgn,
+        }
     }
 
     #[test]
@@ -159,8 +163,16 @@ mod tests {
         );
         let values = &delta.updates[0].values;
         assert!(values.iter().any(|v| v.path == "navigation.position"));
-        assert!(values.iter().any(|v| v.path == "navigation.speedOverGround"));
-        assert!(values.iter().any(|v| v.path == "navigation.courseOverGroundTrue"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "navigation.speedOverGround")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "navigation.courseOverGroundTrue")
+        );
         assert!(values.iter().any(|v| v.path == "navigation.state"));
     }
 
@@ -177,6 +189,10 @@ mod tests {
         assert!(delta.context.as_deref().unwrap().contains("366999000"));
         let values = &delta.updates[0].values;
         assert!(values.iter().any(|v| v.path == "navigation.position"));
-        assert!(values.iter().any(|v| v.path == "navigation.speedOverGround"));
+        assert!(
+            values
+                .iter()
+                .any(|v| v.path == "navigation.speedOverGround")
+        );
     }
 }
