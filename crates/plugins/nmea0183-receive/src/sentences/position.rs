@@ -49,22 +49,20 @@ pub fn from_rmc(rmc: &nmea::sentences::RmcData) -> Vec<PathValue> {
         rmc.status_of_fix,
         RmcStatusOfFix::Autonomous | RmcStatusOfFix::Differential
     );
-    if fix_valid {
-        if let (Some(date), Some(time)) = (rmc.fix_date, rmc.fix_time) {
-            let ndt = NaiveDateTime::new(date, time);
-            let utc = Utc.from_utc_datetime(&ndt);
-            let iso = utc.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-            out.push(PathValue::new("navigation.datetime", json!(iso)));
-            out.push(PathValue::new(
-                "environment.time.millis",
-                json!(utc.timestamp_millis()),
-            ));
-            out.push(PathValue::new("environment.time.timezoneOffset", json!(0)));
-            out.push(PathValue::new(
-                "environment.time.timezoneRegion",
-                json!("UTC"),
-            ));
-        }
+    if fix_valid && let (Some(date), Some(time)) = (rmc.fix_date, rmc.fix_time) {
+        let ndt = NaiveDateTime::new(date, time);
+        let utc = Utc.from_utc_datetime(&ndt);
+        let iso = utc.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+        out.push(PathValue::new("navigation.datetime", json!(iso)));
+        out.push(PathValue::new(
+            "environment.time.millis",
+            json!(utc.timestamp_millis()),
+        ));
+        out.push(PathValue::new("environment.time.timezoneOffset", json!(0)));
+        out.push(PathValue::new(
+            "environment.time.timezoneRegion",
+            json!("UTC"),
+        ));
     }
 
     out

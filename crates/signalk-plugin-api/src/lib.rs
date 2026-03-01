@@ -46,6 +46,7 @@
 /// | 2: JS (bridge) | HTTP over UDS | `bridge/src/app.js` |
 /// | 3: Standalone binary | HTTP over UDS | `signalk-plugin-client` (`RemotePluginContext`) |
 /// | 4: WASM (future) | Host calls | TBD |
+pub mod autopilot;
 pub mod context;
 pub mod error;
 pub mod plugin;
@@ -55,6 +56,7 @@ pub mod resources;
 pub mod testing;
 
 // Re-export core traits and commonly used types.
+pub use autopilot::{AutopilotData, AutopilotOptions, AutopilotProvider, TackDirection};
 pub use context::{
     DeltaCallback, DeltaInputHandler, PluginContext, PluginRequest, PluginResponse, PluginRouter,
     PutCommand, PutHandler, PutHandlerResult, RegisteredRoute, RouteCollector, RouteHandler,

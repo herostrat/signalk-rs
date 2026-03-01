@@ -1,5 +1,6 @@
 pub mod api;
 pub mod auth;
+pub mod autopilot;
 pub mod config;
 pub mod course;
 pub mod plugins;
@@ -14,6 +15,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::sync::RwLock;
 
+use crate::autopilot::AutopilotManager;
 use crate::config::ServerConfig;
 use crate::course::CourseManager;
 use crate::plugins::host::PutHandlerRegistry;
@@ -47,6 +49,8 @@ pub struct ServerState {
     pub resource_providers: Arc<ResourceProviderRegistry>,
     /// Course/navigation manager
     pub course_manager: Arc<CourseManager>,
+    /// Autopilot provider registry — V2 autopilot API delegates here
+    pub autopilot_manager: Arc<AutopilotManager>,
 }
 
 impl ServerState {
@@ -76,6 +80,7 @@ impl ServerState {
             data_dir.clone(),
             resource_providers.clone(),
         ));
+        let autopilot_manager = AutopilotManager::new();
         Arc::new(ServerState {
             config,
             store,
@@ -89,6 +94,7 @@ impl ServerState {
             plugin_manager: Arc::new(tokio::sync::Mutex::new(plugin_manager)),
             resource_providers,
             course_manager,
+            autopilot_manager,
         })
     }
 
@@ -105,6 +111,7 @@ impl ServerState {
         plugin_registry: Arc<RwLock<PluginRegistry>>,
         webapp_registry: Arc<RwLock<WebappRegistry>>,
         resource_providers: Arc<ResourceProviderRegistry>,
+        autopilot_manager: Arc<AutopilotManager>,
     ) -> Arc<Self> {
         let data_dir = PathBuf::from(&config.data_dir);
         let course_manager = Arc::new(CourseManager::new(
@@ -125,6 +132,7 @@ impl ServerState {
             plugin_manager,
             resource_providers,
             course_manager,
+            autopilot_manager,
         })
     }
 }
@@ -257,6 +265,62 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
         .route(
             "/signalk/v2/api/vessels/self/navigation/course/calcValues",
             get(api::v2::course::get_calc_values),
+        )
+        // -- Autopilot API ----------------------------------------------------
+        // Full V2 autopilot API. Routes to registered AutopilotProvider plugins.
+        .route(
+            "/signalk/v2/api/vessels/self/autopilots",
+            get(api::v2::autopilot::list_autopilots),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/autopilots/_providers/_default",
+            get(api::v2::autopilot::get_default_provider),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/autopilots/_providers/_default/{id}",
+            post(api::v2::autopilot::set_default_provider),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/autopilots/{device_id}",
+            get(api::v2::autopilot::get_autopilot),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/autopilots/{device_id}/state",
+            get(api::v2::autopilot::get_state).put(api::v2::autopilot::set_state),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/autopilots/{device_id}/mode",
+            get(api::v2::autopilot::get_mode).put(api::v2::autopilot::set_mode),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/autopilots/{device_id}/target",
+            get(api::v2::autopilot::get_target).put(api::v2::autopilot::set_target),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/autopilots/{device_id}/target/adjust",
+            put(api::v2::autopilot::adjust_target),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/autopilots/{device_id}/engage",
+            post(api::v2::autopilot::engage),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/autopilots/{device_id}/disengage",
+            post(api::v2::autopilot::disengage),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/autopilots/{device_id}/tack/{direction}",
+            post(api::v2::autopilot::tack),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/autopilots/{device_id}/gybe/{direction}",
+            post(api::v2::autopilot::gybe),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/autopilots/{device_id}/dodge",
+            post(api::v2::autopilot::dodge_enter)
+                .put(api::v2::autopilot::dodge_adjust)
+                .delete(api::v2::autopilot::dodge_exit),
         )
         // -- Notifications API ------------------------------------------------
         // Alarm interaction: silence and acknowledge active notifications.

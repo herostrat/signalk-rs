@@ -10,6 +10,7 @@
 /// - PUT .../course/activeRoute                         → follow route
 /// - POST /signalk/v2/api/notifications/{id}/silence    → silence alarm
 /// - POST /signalk/v2/api/notifications/{id}/acknowledge → acknowledge alarm
+pub mod autopilot;
 pub mod course;
 pub mod features;
 pub mod notifications;

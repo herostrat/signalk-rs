@@ -1,0 +1,25 @@
+[package]
+name = "autopilot"
+description = "Software autopilot for signalk-rs — PD controller, compass/wind/route modes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+## Enable experimental autopilot modes (route/LOS, future TWA wind mode).
+## Not enabled in release builds — use only for development and testing.
+## Activate with: `cargo build --features autopilot/experimental`
+##                or via signalk-server: `cargo build --features autopilot-experimental`
+experimental = []
+
+[dependencies]
+signalk-plugin-api = { workspace = true, features = ["testing"] }
+signalk-types.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+proptest = "1"

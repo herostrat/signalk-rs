@@ -18,6 +18,7 @@ use super::delta_filter::DeltaFilterChain;
 use super::host::{PutHandlerRegistry, RustPluginContext, cleanup_plugin};
 use super::isolation::guarded;
 use super::routes::PluginRouteTable;
+use crate::autopilot::AutopilotManager;
 use crate::webapps::WebappRegistry;
 
 /// A registered plugin with its runtime state.
@@ -44,6 +45,8 @@ pub struct PluginManager {
     webapp_registry: Arc<RwLock<WebappRegistry>>,
     config_dir: PathBuf,
     data_dir: PathBuf,
+    /// Autopilot provider registry (optional — set after construction)
+    autopilot_manager: Option<Arc<AutopilotManager>>,
 }
 
 impl PluginManager {
@@ -70,7 +73,13 @@ impl PluginManager {
             webapp_registry,
             config_dir,
             data_dir,
+            autopilot_manager: None,
         }
+    }
+
+    /// Set the autopilot provider registry so plugins can register via `register_autopilot_provider()`.
+    pub fn set_autopilot_manager(&mut self, manager: Arc<AutopilotManager>) {
+        self.autopilot_manager = Some(manager);
     }
 
     /// Register a plugin instance. Must be called before `start_all`.
@@ -131,6 +140,7 @@ impl PluginManager {
             plugin_data_dir,
             self.delta_filter.clone(),
             self.webapp_registry.clone(),
+            self.autopilot_manager.clone(),
         ));
 
         entry.context = Some(ctx.clone());

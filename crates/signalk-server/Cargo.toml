@@ -24,6 +24,7 @@ derived-data.workspace = true
 ais-status.workspace = true
 tracks.workspace = true
 system-info.workspace = true
+autopilot.workspace = true
 sensor-data-simulator = { workspace = true, optional = true }
 nmea2000-receive = { workspace = true, optional = true }
 nmea0183-send = { workspace = true, optional = true }
@@ -50,6 +51,7 @@ default = []
 simulator = ["sensor-data-simulator"]
 nmea2000 = ["nmea2000-receive", "nmea2000-send"]
 nmea0183-output = ["nmea0183-send"]
+autopilot-experimental = ["autopilot/experimental"]
 
 [dev-dependencies]
 reqwest.workspace = true

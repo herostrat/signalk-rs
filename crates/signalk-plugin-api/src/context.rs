@@ -500,6 +500,24 @@ pub trait PluginContext: Send + Sync {
         .await
     }
 
+    // ── Autopilot providers ─────────────────────────────────────────────
+
+    /// Register an autopilot provider with the server's autopilot registry.
+    ///
+    /// The provider becomes available via the V2 autopilot API at
+    /// `/signalk/v2/api/vessels/self/autopilots/{device_id}/`. The first
+    /// registered provider is automatically set as the default.
+    ///
+    /// Not all tiers support this — the default returns an error.
+    async fn register_autopilot_provider(
+        &self,
+        _provider: std::sync::Arc<dyn crate::autopilot::AutopilotProvider>,
+    ) -> Result<(), PluginError> {
+        Err(PluginError::runtime(
+            "register_autopilot_provider not supported by this context",
+        ))
+    }
+
     // ── Resource providers ─────────────────────────────────────────────
 
     /// Register a custom resource provider for a specific resource type.

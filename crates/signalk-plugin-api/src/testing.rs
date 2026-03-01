@@ -215,6 +215,13 @@ impl PluginContext for MockPluginContext {
         self.delta_input_handlers.lock().unwrap().push(handler);
         Ok(())
     }
+
+    async fn register_autopilot_provider(
+        &self,
+        _provider: std::sync::Arc<dyn crate::autopilot::AutopilotProvider>,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

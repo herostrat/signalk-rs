@@ -4,8 +4,9 @@
 /// Each Rust plugin receives its own `Arc<RustPluginContext>` on start.
 use async_trait::async_trait;
 use signalk_plugin_api::{
-    DeltaCallback, DeltaInputHandler, PluginContext, PluginError, PutCommand, PutHandler,
-    PutHandlerResult, RouteCollector, RouterSetup, SubscriptionHandle, SubscriptionSpec,
+    AutopilotProvider, DeltaCallback, DeltaInputHandler, PluginContext, PluginError, PutCommand,
+    PutHandler, PutHandlerResult, RouteCollector, RouterSetup, SubscriptionHandle,
+    SubscriptionSpec,
 };
 use signalk_store::store::SignalKStore;
 use signalk_types::Delta;
@@ -19,6 +20,7 @@ use tracing::warn;
 
 use super::delta_filter::DeltaFilterChain;
 use super::routes::PluginRouteTable;
+use crate::autopilot::AutopilotManager;
 use crate::webapps::{WebAppInfo, WebappRegistry, WebappSource};
 
 /// Shared PUT handler function — Arc-wrapped for cloning across threads.
@@ -97,6 +99,8 @@ pub struct RustPluginContext {
     delta_filter: Arc<DeltaFilterChain>,
     /// Shared webapp registry for register_webapp()
     webapp_registry: Arc<RwLock<WebappRegistry>>,
+    /// Autopilot provider registry (optional — only present in full server context)
+    autopilot_manager: Option<Arc<AutopilotManager>>,
 }
 
 impl RustPluginContext {
@@ -112,6 +116,7 @@ impl RustPluginContext {
         data_dir: PathBuf,
         delta_filter: Arc<DeltaFilterChain>,
         webapp_registry: Arc<RwLock<WebappRegistry>>,
+        autopilot_manager: Option<Arc<AutopilotManager>>,
     ) -> Self {
         RustPluginContext {
             plugin_id,
@@ -128,6 +133,7 @@ impl RustPluginContext {
             next_sub_id: Arc::new(Mutex::new(1)),
             delta_filter,
             webapp_registry,
+            autopilot_manager,
         }
     }
 
@@ -385,6 +391,23 @@ impl PluginContext for RustPluginContext {
         tracing::info!(plugin = %self.plugin_id, "Delta input handler registered");
         Ok(())
     }
+
+    async fn register_autopilot_provider(
+        &self,
+        provider: Arc<dyn AutopilotProvider>,
+    ) -> Result<(), PluginError> {
+        let manager = self.autopilot_manager.as_ref().ok_or_else(|| {
+            PluginError::runtime("register_autopilot_provider: no AutopilotManager available")
+        })?;
+        let device_id = provider.device_id().to_string();
+        manager.register(provider).await;
+        tracing::info!(
+            plugin = %self.plugin_id,
+            device_id = %device_id,
+            "Autopilot provider registered"
+        );
+        Ok(())
+    }
 }
 
 /// Clean up all resources for a plugin (called by PluginManager on stop).
@@ -429,6 +452,7 @@ mod tests {
             PathBuf::from("/tmp/signalk-test/data"),
             delta_filter,
             webapp_registry,
+            None, // no autopilot manager in tests
         ));
 
         (ctx, store)

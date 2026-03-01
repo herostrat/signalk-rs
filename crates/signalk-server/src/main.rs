@@ -4,7 +4,9 @@ use signalk_internal::{
     server::{Callbacks, InternalState, serve_internal_api},
 };
 use signalk_server::{
-    ServerState, build_router,
+    ServerState,
+    autopilot::AutopilotManager,
+    build_router,
     config::ServerConfig,
     plugins::{
         delta_filter::DeltaFilterChain, host::PutHandlerRegistry, manager::PluginManager,
@@ -206,6 +208,9 @@ async fn main() -> Result<()> {
     let config_dir = PathBuf::from(&config.data_dir).join("plugin-config");
     let data_dir = PathBuf::from(&config.data_dir).join("plugin-data");
 
+    // ── Autopilot manager ─────────────────────────────────────────────────────
+    let autopilot_manager = AutopilotManager::new();
+
     let mut plugin_manager = PluginManager::new(
         store.clone(),
         route_table.clone(),
@@ -217,8 +222,10 @@ async fn main() -> Result<()> {
         config_dir,
         data_dir,
     );
+    plugin_manager.set_autopilot_manager(autopilot_manager.clone());
 
     // Register all compiled-in Tier 1 plugins
+    plugin_manager.register(Box::new(autopilot::AutopilotPlugin::new()));
     plugin_manager.register(Box::new(nmea0183_receive::Nmea0183TcpPlugin::new()));
     plugin_manager.register(Box::new(nmea0183_receive::Nmea0183SerialPlugin::new()));
     plugin_manager.register(Box::new(anchor_alarm::AnchorAlarmPlugin::new()));
@@ -267,6 +274,7 @@ async fn main() -> Result<()> {
         plugin_registry,
         webapp_registry.clone(),
         resource_providers,
+        autopilot_manager,
     );
 
     // Populate plugin registry with initial Tier 1 statuses

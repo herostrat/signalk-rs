@@ -561,14 +561,12 @@ impl CourseManager {
                                 continue;
                             }
                             for pv in &update.values {
-                                if pv.path == "navigation.courseGreatCircle.nextPoint.position" {
-                                    if let Ok(pos) =
+                                if pv.path == "navigation.courseGreatCircle.nextPoint.position"
+                                    && let Ok(pos) =
                                         serde_json::from_value::<Position>(pv.value.clone())
-                                    {
-                                        if let Err(e) = self.apply_nmea_position(pos).await {
-                                            warn!("NMEA course apply failed: {e}");
-                                        }
-                                    }
+                                    && let Err(e) = self.apply_nmea_position(pos).await
+                                {
+                                    warn!("NMEA course apply failed: {e}");
                                 }
                             }
                         }
