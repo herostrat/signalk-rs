@@ -54,6 +54,12 @@ pub fn sentence_to_delta(raw: &str, source_label: &str) -> Option<Delta> {
         nmea::ParseResult::VWR(vwr) => sentences::from_vwr(&vwr),
         nmea::ParseResult::VWT(vwt) => sentences::from_vwt(&vwt),
         nmea::ParseResult::RMB(rmb) => sentences::from_rmb(&rmb),
+        nmea::ParseResult::BWC(bwc) => sentences::from_bwc(&bwc),
+        nmea::ParseResult::BOD(bod) => sentences::from_bod(&bod),
+        nmea::ParseResult::XTE(xte) => sentences::from_xte(&xte),
+        nmea::ParseResult::GSA(gsa) => sentences::from_gsa(&gsa),
+        nmea::ParseResult::GNS(gns) => sentences::from_gns(&gns),
+        nmea::ParseResult::ZDA(zda) => sentences::from_zda(&zda),
         nmea::ParseResult::XDR(ref xdr) => xdr::from_xdr(xdr),
         _ => return None,
     };
@@ -444,7 +450,8 @@ mod tests {
 
     #[test]
     fn sentence_to_delta_unsupported() {
-        let raw = "$GPGSA,A,3,04,05,,09,12,,,24,,,,,2.5,1.3,2.1*39";
+        // GSV (Satellites in View) is not in our dispatch table
+        let raw = "$GPGSV,3,1,11,03,03,111,00,04,15,270,00,06,01,010,00,13,06,292,00*74";
         assert!(sentence_to_delta(raw, "gps").is_none());
     }
 

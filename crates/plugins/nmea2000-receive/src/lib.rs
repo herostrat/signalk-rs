@@ -12,7 +12,7 @@
 /// enabled = true
 /// config = { interface = "can0", transport = "socketcan" }
 /// ```
-pub mod pgn_convert;
+pub mod pgn;
 
 use async_trait::async_trait;
 use nmea2000::N2kTransport;
@@ -197,12 +197,12 @@ async fn run_n2k_reader(
         while let Some(raw) = rx.recv().await {
             match nmea2000::DecodedMessage::decode(raw.pgn.as_u32(), &raw.data) {
                 Ok(decoded) => {
-                    let source = pgn_convert::N2kSource {
+                    let source = pgn::N2kSource {
                         label: &label,
                         src: raw.source,
                         pgn: raw.pgn.as_u32(),
                     };
-                    if let Some(delta) = pgn_convert::decoded_to_delta(&decoded, &source) {
+                    if let Some(delta) = pgn::decoded_to_delta(&decoded, &source) {
                         ctx.handle_message(delta).await.ok();
                     }
                 }
