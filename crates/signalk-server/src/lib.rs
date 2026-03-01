@@ -139,23 +139,34 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
     use tower_http::cors::CorsLayer;
 
     let mut router = axum::Router::new()
-        // Discovery (with trailing-slash variant — KIP requests /signalk/)
+        // ════════════════════════════════════════════════════════════════════
+        // SignalK v1 Spec  —  https://signalk.org/specification/1.7.0/
+        // These routes are defined by the spec. Paths and semantics are mandated.
+        // ════════════════════════════════════════════════════════════════════
+        // -- Discovery --------------------------------------------------------
+        // KIP requests /signalk/ (with trailing slash), so both variants are needed.
         .route("/signalk", get(api::discovery))
         .route("/signalk/", get(api::discovery))
-        // REST data API
+        // -- REST Data API ----------------------------------------------------
         .route("/signalk/v1/api", get(api::full_model))
         .route("/signalk/v1/api/", get(api::full_model))
-        .route("/signalk/v1/api/{*path}", get(api::get_path))
-        .route("/signalk/v1/api/{*path}", put(api::put_path))
-        // History (not implemented)
+        .route(
+            "/signalk/v1/api/{*path}",
+            get(api::get_path).put(api::put_path),
+        )
+        // -- History ----------------------------------------------------------
+        // Spec-defined. Real implementation requires persistent storage (SQLite).
+        // See also the v2 History API stubs below.
         .route("/signalk/v1/snapshot", get(api::snapshot))
-        // Auth
+        // -- Authentication ---------------------------------------------------
         .route("/signalk/v1/auth/login", post(auth::login))
         .route("/signalk/v1/auth/validate", post(auth::validate))
         .route("/signalk/v1/auth/logout", put(auth::logout))
-        // WebSocket streaming
+        // -- WebSocket Streaming ----------------------------------------------
+        // TODO (spec): /signalk/v1/playback — WS history playback (needs persistent store)
         .route("/signalk/v1/stream", get(ws::handler))
-        // Application data persistence (scope = "global" or "user")
+        // -- Application Data -------------------------------------------------
+        // scope = "global" or "user"
         .route(
             "/signalk/v1/applicationData/{scope}/{appId}/{version}",
             get(api::get_app_data).post(api::set_app_data),
@@ -164,33 +175,24 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
             "/signalk/v1/applicationData/{scope}/{appId}/{version}/{*key}",
             get(api::get_app_data_key).post(api::set_app_data_key),
         )
-        // Webapp listing
-        .route("/signalk/v1/webapps", get(api::webapps::list_webapps))
-        // Admin API
-        .route("/admin/api/plugins", get(api::admin::list_plugins))
+        // -- Track History ----------------------------------------------------
+        // Spec-defined. Delegates to the tracks plugin via PluginRouteTable.
+        // The plugin stores position history as a time series (not in the SK store tree).
         .route(
-            "/admin/api/plugins/{plugin_id}",
-            get(api::admin::get_plugin),
+            "/signalk/v1/api/tracks",
+            get(api::tracks::get_all_tracks).delete(api::tracks::delete_all_tracks),
         )
         .route(
-            "/admin/api/plugins/{plugin_id}/config",
-            get(api::admin::get_plugin_config).put(api::admin::update_plugin_config),
+            "/signalk/v1/api/vessels/{vessel_id}/track",
+            get(api::tracks::get_vessel_track).delete(api::tracks::delete_vessel_track),
         )
-        .route(
-            "/admin/api/plugins/{plugin_id}/restart",
-            post(api::admin::restart_plugin),
-        )
-        .route(
-            "/admin/api/plugins/{plugin_id}/enable",
-            post(api::admin::enable_plugin),
-        )
-        .route(
-            "/admin/api/plugins/{plugin_id}/disable",
-            post(api::admin::disable_plugin),
-        )
-        // v2 API
+        // ════════════════════════════════════════════════════════════════════
+        // SignalK v2 Spec  —  https://demo.signalk.org/documentation/Developing/REST_APIs/
+        // v2 is an evolving extension to v1. Spec and implementations grow in parallel.
+        // ════════════════════════════════════════════════════════════════════
+        // -- Features Discovery -----------------------------------------------
         .route("/signalk/v2/features", get(api::v2::features::get_features))
-        // v2 Resources API
+        // -- Resources API ----------------------------------------------------
         .route(
             "/signalk/v2/api/resources/{resource_type}",
             get(api::v2::resources::list_resources).post(api::v2::resources::create_resource),
@@ -201,10 +203,31 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
                 .put(api::v2::resources::update_resource)
                 .delete(api::v2::resources::delete_resource),
         )
-        // v2 Course API
+        // Provider discovery for resource types
+        .route(
+            "/signalk/v2/api/resources/{resource_type}/_providers",
+            get(api::v2::resources::list_providers),
+        )
+        .route(
+            "/signalk/v2/api/resources/{resource_type}/_providers/_default",
+            get(api::v2::resources::get_default_provider),
+        )
+        .route(
+            "/signalk/v2/api/resources/{resource_type}/_providers/_default/{plugin_id}",
+            post(api::v2::resources::set_default_provider),
+        )
+        // -- Course API -------------------------------------------------------
         .route(
             "/signalk/v2/api/vessels/self/navigation/course",
             get(api::v2::course::get_course).delete(api::v2::course::clear_course),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/navigation/course/_config",
+            get(api::v2::course::get_config),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/navigation/course/_config/apiOnly",
+            post(api::v2::course::enable_api_only).delete(api::v2::course::disable_api_only),
         )
         .route(
             "/signalk/v2/api/vessels/self/navigation/course/destination",
@@ -230,20 +253,73 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
             "/signalk/v2/api/vessels/self/navigation/course/arrivalCircle",
             put(api::v2::course::set_arrival_circle),
         )
+        // calcValues is our extension (not in spec, but spec-compatible computed values)
         .route(
             "/signalk/v2/api/vessels/self/navigation/course/calcValues",
             get(api::v2::course::get_calc_values),
         )
-        // Track API — delegates to tracks plugin for spec-compliant track data
+        // -- Notifications API ------------------------------------------------
+        // Alarm interaction: silence and acknowledge active notifications.
         .route(
-            "/signalk/v1/api/tracks",
-            get(api::tracks::get_all_tracks).delete(api::tracks::delete_all_tracks),
+            "/signalk/v2/api/notifications/{notification_id}/silence",
+            post(api::v2::notifications::silence),
         )
         .route(
-            "/signalk/v1/api/vessels/{vessel_id}/track",
-            get(api::tracks::get_vessel_track).delete(api::tracks::delete_vessel_track),
+            "/signalk/v2/api/notifications/{notification_id}/acknowledge",
+            post(api::v2::notifications::acknowledge),
         )
-        // /skServer compatibility routes for admin UI
+        // -- History API (spec-defined, requires persistent store → 501) ------
+        // TODO: Implement when we have SQLite or another persistent time-series store.
+        .route("/signalk/v2/api/history/values", get(api::not_implemented))
+        .route(
+            "/signalk/v2/api/history/contexts",
+            get(api::not_implemented),
+        )
+        .route("/signalk/v2/api/history/paths", get(api::not_implemented))
+        // ════════════════════════════════════════════════════════════════════
+        // De-facto Standard  —  not in the spec, but expected by all clients
+        // ════════════════════════════════════════════════════════════════════
+        // -- Webapp Listing ---------------------------------------------------
+        // Not in the v1 spec, but expected by InstrumentPanel, KIP, and others
+        // for webapp discovery. All known SignalK servers expose this.
+        .route("/signalk/v1/webapps", get(api::webapps::list_webapps))
+        // -- Plugin Routing ---------------------------------------------------
+        // Not defined by the spec, but established convention across all SignalK servers.
+        // Plugins register their own routes under /plugins/{plugin_id}/.
+        // Tier 1 (Rust): PluginRouteTable. Tier 2 (JS): bridge proxy.
+        .route("/plugins/{plugin_id}", any(api::proxy_plugin_route))
+        .route("/plugins/{plugin_id}/{*rest}", any(api::proxy_plugin_route))
+        // ════════════════════════════════════════════════════════════════════
+        // Admin API  —  our own, not part of the SignalK spec
+        // Plugin lifecycle management, used by the Admin UI at /admin/.
+        // ════════════════════════════════════════════════════════════════════
+        .route("/admin/api/plugins", get(api::admin::list_plugins))
+        .route(
+            "/admin/api/plugins/{plugin_id}",
+            get(api::admin::get_plugin),
+        )
+        .route(
+            "/admin/api/plugins/{plugin_id}/config",
+            get(api::admin::get_plugin_config).put(api::admin::update_plugin_config),
+        )
+        .route(
+            "/admin/api/plugins/{plugin_id}/restart",
+            post(api::admin::restart_plugin),
+        )
+        .route(
+            "/admin/api/plugins/{plugin_id}/enable",
+            post(api::admin::enable_plugin),
+        )
+        .route(
+            "/admin/api/plugins/{plugin_id}/disable",
+            post(api::admin::disable_plugin),
+        )
+        // ════════════════════════════════════════════════════════════════════
+        // /skServer Compatibility  —  not in spec, for the Node.js Admin UI
+        // The Node.js reference server exposes /skServer/* routes that its
+        // Admin UI calls directly. We mirror them to run the Admin UI unmodified.
+        // Can be removed once we ship our own Admin UI or upstream adopts standard endpoints.
+        // ════════════════════════════════════════════════════════════════════
         .route(
             "/skServer/loginStatus",
             get(api::server_routes::login_status),
@@ -294,10 +370,7 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
         .route(
             "/skServer/runDiscovery",
             put(api::server_routes::run_discovery),
-        )
-        // Plugin routes — proxied to the bridge
-        .route("/plugins/{plugin_id}", any(api::proxy_plugin_route))
-        .route("/plugins/{plugin_id}/{*rest}", any(api::proxy_plugin_route));
+        );
 
     // Mount static file serving for each discovered webapp
     for webapp in webapps {

@@ -180,6 +180,15 @@ pub async fn snapshot() -> Response {
         .into_response()
 }
 
+/// Generic 501 Not Implemented handler for spec-defined routes not yet supported.
+pub async fn not_implemented() -> Response {
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(serde_json::json!({"message": "Not implemented"})),
+    )
+        .into_response()
+}
+
 /// PUT /signalk/v1/api/{*path} — send a command/write request.
 ///
 /// Checks Tier 1 (local Rust) handlers first, then falls back to Tier 2 (bridge).

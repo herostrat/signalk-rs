@@ -207,6 +207,7 @@ fn emit_notification(ctx: &Arc<dyn PluginContext>, distance: f64, radius: f64, a
         state,
         method,
         message,
+        status: None,
     };
 
     let ctx = ctx.clone();

@@ -5,8 +5,11 @@
 /// | Method | Route | Handler |
 /// |--------|-------|---------|
 /// | GET    | `.../course` | `get_course` |
+/// | GET    | `.../course/_config` | `get_config` |
 /// | GET    | `.../course/calcValues` | `get_calc_values` |
 /// | DELETE | `.../course` | `clear_course` |
+/// | POST   | `.../course/_config/apiOnly` | `enable_api_only` |
+/// | DELETE | `.../course/_config/apiOnly` | `disable_api_only` |
 /// | PUT    | `.../course/destination` | `set_destination` |
 /// | PUT    | `.../course/activeRoute` | `set_active_route` |
 /// | PUT    | `.../course/activeRoute/nextPoint` | `advance_next_point` |
@@ -113,4 +116,21 @@ pub async fn set_arrival_circle(
 /// `GET /signalk/v2/api/vessels/self/navigation/course/calcValues`
 pub async fn get_calc_values(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
     Json(state.course_manager.get_calc_values().await)
+}
+
+/// `GET /signalk/v2/api/vessels/self/navigation/course/_config`
+pub async fn get_config(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
+    Json(state.course_manager.get_config().await)
+}
+
+/// `POST /signalk/v2/api/vessels/self/navigation/course/_config/apiOnly`
+pub async fn enable_api_only(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
+    state.course_manager.enable_api_only().await;
+    StatusCode::OK
+}
+
+/// `DELETE /signalk/v2/api/vessels/self/navigation/course/_config/apiOnly`
+pub async fn disable_api_only(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
+    state.course_manager.disable_api_only().await;
+    StatusCode::OK
 }

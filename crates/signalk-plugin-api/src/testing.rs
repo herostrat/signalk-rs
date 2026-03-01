@@ -329,6 +329,7 @@ mod tests {
                 state: NotificationState::Alarm,
                 method: vec![NotificationMethod::Visual, NotificationMethod::Sound],
                 message: "Anchor dragging!".to_string(),
+                status: None,
             },
             "anchor-alarm",
         )

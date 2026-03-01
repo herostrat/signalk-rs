@@ -17,8 +17,30 @@ use tracing::{debug, info, warn};
 
 use crate::resources::ResourceProviderRegistry;
 
+/// Persistent course configuration (independent of active navigation state).
+///
+/// Exposed via `GET /signalk/v2/api/vessels/self/navigation/course/_config`.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CourseConfig {
+    /// Default arrival circle radius in meters (0.0 = no arrival detection).
+    pub arrival_circle: f64,
+    /// When true, only API clients may modify the course (NMEA sources ignored).
+    pub api_only: bool,
+}
+
+impl Default for CourseConfig {
+    fn default() -> Self {
+        CourseConfig {
+            arrival_circle: 0.0,
+            api_only: false,
+        }
+    }
+}
+
 pub struct CourseManager {
     state: RwLock<Option<CourseState>>,
+    config: RwLock<CourseConfig>,
     store: Arc<RwLock<SignalKStore>>,
     state_file: PathBuf,
     resource_providers: Arc<ResourceProviderRegistry>,
@@ -32,6 +54,7 @@ impl CourseManager {
     ) -> Self {
         CourseManager {
             state: RwLock::new(None),
+            config: RwLock::new(CourseConfig::default()),
             store,
             state_file: data_dir.join("course").join("state.json"),
             resource_providers,
@@ -301,6 +324,9 @@ impl CourseManager {
 
     /// Set the arrival circle radius (meters).
     pub async fn set_arrival_circle(&self, radius: f64) -> Result<(), PluginError> {
+        // Persist in config so the value survives course clear/reset.
+        self.config.write().await.arrival_circle = radius;
+
         let mut state = self.state.write().await;
         match state.as_mut() {
             Some(course) => {
@@ -312,12 +338,26 @@ impl CourseManager {
                 Ok(())
             }
             None => {
-                // Allow setting arrival circle even without active navigation
-                // so it is remembered for the next course.
+                // No active navigation — value stored in config for next course.
                 drop(state);
                 Ok(())
             }
         }
+    }
+
+    /// Get the current course configuration (arrivalCircle + apiOnly).
+    pub async fn get_config(&self) -> CourseConfig {
+        self.config.read().await.clone()
+    }
+
+    /// Enable API-only mode: NMEA sources will not override the course.
+    pub async fn enable_api_only(&self) {
+        self.config.write().await.api_only = true;
+    }
+
+    /// Disable API-only mode.
+    pub async fn disable_api_only(&self) {
+        self.config.write().await.api_only = false;
     }
 
     /// Check if the vessel has arrived at the current waypoint.

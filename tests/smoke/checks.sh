@@ -9,7 +9,8 @@ PASS=0
 FAIL=0
 
 # wget wrapper: fetch body or status code
-fetch() { wget -qO- "$1" 2>/dev/null; }
+# Always exits 0 so set -eu does not kill the script on 404/5xx.
+fetch() { wget -qO- "$1" 2>/dev/null || true; }
 status() { wget -qO/dev/null --server-response "$1" 2>&1 | awk '/HTTP/{print $2}' | tail -1; }
 
 # Node.js helpers for PUT/DELETE (busybox wget lacks --method)
@@ -154,6 +155,55 @@ check "Course has nextPoint after set" \
 check "DELETE course returns 200" \
   "$(http_status DELETE "$BASE/signalk/v2/api/vessels/self/navigation/course")" "200"
 
+# --- v2 Course Config API ---
+echo "  v2 Course Config API"
+check "GET course/_config returns 200" \
+  "$(status "$BASE/signalk/v2/api/vessels/self/navigation/course/_config")" "200"
+check "course/_config has arrivalCircle" \
+  "$(fetch "$BASE/signalk/v2/api/vessels/self/navigation/course/_config")" '"arrivalCircle"'
+check "course/_config has apiOnly" \
+  "$(fetch "$BASE/signalk/v2/api/vessels/self/navigation/course/_config")" '"apiOnly"'
+check "POST course/_config/apiOnly returns 200" \
+  "$(http_status POST "$BASE/signalk/v2/api/vessels/self/navigation/course/_config/apiOnly")" "200"
+check "course/_config apiOnly is true after POST" \
+  "$(fetch "$BASE/signalk/v2/api/vessels/self/navigation/course/_config")" '"apiOnly":true'
+check "DELETE course/_config/apiOnly returns 200" \
+  "$(http_status DELETE "$BASE/signalk/v2/api/vessels/self/navigation/course/_config/apiOnly")" "200"
+check "course/_config apiOnly is false after DELETE" \
+  "$(fetch "$BASE/signalk/v2/api/vessels/self/navigation/course/_config")" '"apiOnly":false'
+
+# --- v2 Resources Providers API ---
+echo "  v2 Resources Providers API"
+check "GET waypoints/_providers returns 200" \
+  "$(status "$BASE/signalk/v2/api/resources/waypoints/_providers")" "200"
+check "waypoints/_providers includes file-provider" \
+  "$(fetch "$BASE/signalk/v2/api/resources/waypoints/_providers")" '"file-provider"'
+check "GET waypoints/_providers/_default returns 200" \
+  "$(status "$BASE/signalk/v2/api/resources/waypoints/_providers/_default")" "200"
+check "waypoints/_providers/_default has id field" \
+  "$(fetch "$BASE/signalk/v2/api/resources/waypoints/_providers/_default")" '"id"'
+check "waypoints/_providers/_default is file-provider" \
+  "$(fetch "$BASE/signalk/v2/api/resources/waypoints/_providers/_default")" '"file-provider"'
+check "POST waypoints/_providers/_default returns 501" \
+  "$(http_status POST "$BASE/signalk/v2/api/resources/waypoints/_providers/_default/test-plugin")" "501"
+
+# --- v2 History API Stubs ---
+echo "  History API Stubs (501)"
+check "GET /history/values returns 501" \
+  "$(status "$BASE/signalk/v2/api/history/values")" "501"
+check "GET /history/contexts returns 501" \
+  "$(status "$BASE/signalk/v2/api/history/contexts")" "501"
+check "GET /history/paths returns 501" \
+  "$(status "$BASE/signalk/v2/api/history/paths")" "501"
+
+# --- v2 Notifications API ---
+echo "  Notifications API"
+# Silencing a non-existent notification must return 404.
+check "POST silence non-existent notification returns 404" \
+  "$(http_status POST "$BASE/signalk/v2/api/notifications/nonexistent.alarm/silence")" "404"
+check "POST acknowledge non-existent notification returns 404" \
+  "$(http_status POST "$BASE/signalk/v2/api/notifications/nonexistent.alarm/acknowledge")" "404"
+
 # --- Admin UI ---
 echo "  Admin UI"
 check "Admin UI serves static files (200)" \
@@ -226,7 +276,8 @@ check "SOG source is nmea0183 (highest priority)" \
   "$SOG_DATA" '"nmea0183-sim.GP"'
 
 # Propulsion RPM: only direct provides it, so source should be simulator.
-RPM_DATA=$(fetch "$BASE/signalk/v1/api/vessels/self/propulsion/port/revolutions")
+# Simulator generates propulsion.main.revolutions (not port).
+RPM_DATA=$(fetch "$BASE/signalk/v1/api/vessels/self/propulsion/main/revolutions")
 check "propulsion source is direct (only source)" \
   "$RPM_DATA" '"sensor-data-simulator"'
 

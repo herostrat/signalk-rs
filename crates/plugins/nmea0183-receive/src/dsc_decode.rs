@@ -101,6 +101,7 @@ pub fn try_decode_dsc(raw: &str, source_label: &str) -> Option<Vec<Delta>> {
             state: NotificationState::Emergency,
             method: vec![NotificationMethod::Visual, NotificationMethod::Sound],
             message,
+            status: None,
         };
 
         values.push(PathValue::new(
@@ -185,6 +186,7 @@ mod tests {
             state: NotificationState::Emergency,
             method: vec![NotificationMethod::Visual, NotificationMethod::Sound],
             message: "DSC Distress: Fire/Explosion from MMSI 211457160".to_string(),
+            status: None,
         };
         let json = serde_json::to_value(&notification).unwrap();
         assert_eq!(json["state"], "emergency");

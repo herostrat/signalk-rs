@@ -2,6 +2,8 @@
 ///
 /// Each resource type can have a plugin-provided override. If none is registered,
 /// the default file-based provider is used.
+///
+/// Plugin IDs are tracked for the `_providers` API endpoints.
 use signalk_plugin_api::{PluginError, ResourceProvider};
 use signalk_types::v2::ResourceQueryParams;
 use std::collections::HashMap;
@@ -10,6 +12,8 @@ use tokio::sync::RwLock;
 
 pub struct ResourceProviderRegistry {
     overrides: RwLock<HashMap<String, Arc<dyn ResourceProvider>>>,
+    /// Plugin IDs that have registered as provider for each resource type.
+    provider_ids: RwLock<HashMap<String, Vec<String>>>,
     default: Arc<dyn ResourceProvider>,
 }
 
@@ -17,16 +21,52 @@ impl ResourceProviderRegistry {
     pub fn new(default: Arc<dyn ResourceProvider>) -> Self {
         ResourceProviderRegistry {
             overrides: RwLock::new(HashMap::new()),
+            provider_ids: RwLock::new(HashMap::new()),
             default,
         }
     }
 
     /// Register a plugin-provided override for a resource type.
-    pub async fn register(&self, resource_type: &str, provider: Arc<dyn ResourceProvider>) {
+    pub async fn register(
+        &self,
+        resource_type: &str,
+        plugin_id: &str,
+        provider: Arc<dyn ResourceProvider>,
+    ) {
         self.overrides
             .write()
             .await
             .insert(resource_type.to_string(), provider);
+        self.provider_ids
+            .write()
+            .await
+            .entry(resource_type.to_string())
+            .or_default()
+            .push(plugin_id.to_string());
+    }
+
+    /// List all plugin IDs registered as providers for a resource type.
+    /// The default file provider is always appended as the fallback.
+    pub async fn list_provider_ids(&self, resource_type: &str) -> Vec<String> {
+        let mut ids: Vec<String> = self
+            .provider_ids
+            .read()
+            .await
+            .get(resource_type)
+            .cloned()
+            .unwrap_or_default();
+        ids.push("file-provider".to_string());
+        ids
+    }
+
+    /// Get the plugin ID of the active (highest-priority) provider for a resource type.
+    /// Returns the last-registered plugin override, or "file-provider" if none.
+    pub async fn get_active_provider_id(&self, resource_type: &str) -> String {
+        let ids = self.provider_ids.read().await;
+        if let Some(last) = ids.get(resource_type).and_then(|l| l.last()) {
+            return last.clone();
+        }
+        "file-provider".to_string()
     }
 
     /// Get the provider for a resource type (override or default).

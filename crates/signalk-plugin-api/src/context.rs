@@ -493,6 +493,7 @@ pub trait PluginContext: Send + Sync {
                 state: signalk_types::NotificationState::Normal,
                 method: vec![],
                 message: String::new(),
+                status: None,
             },
             plugin_id,
         )

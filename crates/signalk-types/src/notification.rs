@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 ///     state: NotificationState::Alarm,
 ///     method: vec![NotificationMethod::Visual, NotificationMethod::Sound],
 ///     message: "Anchor alarm!".to_string(),
+///     status: None,
 /// };
 /// let json = serde_json::to_value(&n).unwrap();
 /// assert_eq!(json["state"], "alarm");
@@ -27,6 +28,24 @@ pub struct Notification {
     pub state: NotificationState,
     pub method: Vec<NotificationMethod>,
     pub message: String,
+    /// Client interaction state (silenced, acknowledged). Set via the v2 Notifications API.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<NotificationStatus>,
+}
+
+/// Client interaction state for a notification.
+///
+/// Set by the v2 Notifications API endpoints:
+/// - `POST /signalk/v2/api/notifications/{id}/silence`
+/// - `POST /signalk/v2/api/notifications/{id}/acknowledge`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct NotificationStatus {
+    /// Whether the audible alarm has been silenced.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub silenced: Option<bool>,
+    /// Whether the alarm has been acknowledged (no further alerts).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acknowledged: Option<bool>,
 }
 
 /// Notification severity state.
@@ -70,6 +89,7 @@ mod tests {
             state: NotificationState::Alarm,
             method: vec![NotificationMethod::Visual, NotificationMethod::Sound],
             message: "Anchor dragging!".to_string(),
+            status: None,
         };
         let json = serde_json::to_string(&n).unwrap();
         let parsed: Notification = serde_json::from_str(&json).unwrap();
@@ -118,9 +138,38 @@ mod tests {
             state: NotificationState::Normal,
             method: vec![],
             message: String::new(),
+            status: None,
         };
         let json = serde_json::to_value(&clear).unwrap();
         assert_eq!(json["state"], "normal");
         assert!(json["method"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn status_not_serialized_when_none() {
+        let n = Notification {
+            state: NotificationState::Alarm,
+            method: vec![NotificationMethod::Sound],
+            message: "test".to_string(),
+            status: None,
+        };
+        let json = serde_json::to_value(&n).unwrap();
+        assert!(json.get("status").is_none());
+    }
+
+    #[test]
+    fn status_serialized_when_set() {
+        let n = Notification {
+            state: NotificationState::Alarm,
+            method: vec![NotificationMethod::Sound],
+            message: "test".to_string(),
+            status: Some(NotificationStatus {
+                silenced: Some(true),
+                acknowledged: None,
+            }),
+        };
+        let json = serde_json::to_value(&n).unwrap();
+        assert_eq!(json["status"]["silenced"], true);
+        assert!(json["status"].get("acknowledged").is_none());
     }
 }
