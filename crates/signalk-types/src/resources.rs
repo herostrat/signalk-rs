@@ -143,8 +143,10 @@ pub struct CoursePoint {
 }
 
 /// Type of a course point.
+///
+/// Serializes as lowercase per SignalK spec (consistent with all other enum fields).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[serde(rename_all = "lowercase")]
 pub enum PointType {
     /// A directly set destination (lat/lon).
     Destination,
@@ -211,7 +213,7 @@ mod tests {
             previous_point: None,
         };
         let json = serde_json::to_value(&state).unwrap();
-        assert_eq!(json["nextPoint"]["type"], "DESTINATION");
+        assert_eq!(json["nextPoint"]["type"], "destination");
         let back: CourseState = serde_json::from_value(json).unwrap();
         assert_eq!(back, state);
     }
@@ -227,8 +229,12 @@ mod tests {
     #[test]
     fn point_type_serde() {
         let json = serde_json::to_value(PointType::Waypoint).unwrap();
-        assert_eq!(json, "WAYPOINT");
+        assert_eq!(json, "waypoint");
         let back: PointType = serde_json::from_value(json).unwrap();
         assert_eq!(back, PointType::Waypoint);
+        assert_eq!(
+            serde_json::to_value(PointType::Destination).unwrap(),
+            "destination"
+        );
     }
 }

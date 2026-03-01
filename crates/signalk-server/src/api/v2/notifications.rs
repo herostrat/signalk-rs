@@ -22,6 +22,17 @@ use std::sync::Arc;
 
 use crate::ServerState;
 
+/// Validate that a notification ID is a safe dot-path (no traversal sequences).
+fn validate_notification_id(id: &str) -> Result<(), (StatusCode, String)> {
+    if id.contains("..") || id.contains('/') || id.starts_with('.') || id.ends_with('.') {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Invalid notification ID".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// `POST /signalk/v2/api/notifications/{notification_id}/silence`
 ///
 /// Removes `Sound` from the notification's method array and sets `status.silenced = true`.
@@ -30,6 +41,9 @@ pub async fn silence(
     State(state): State<Arc<ServerState>>,
     Path(notification_id): Path<String>,
 ) -> impl IntoResponse {
+    if let Err(e) = validate_notification_id(&notification_id) {
+        return e.into_response();
+    }
     let store_path = format!("notifications.{notification_id}");
     mutate_notification(&state, &store_path, |n| {
         if n.state == NotificationState::Emergency {
@@ -54,6 +68,9 @@ pub async fn acknowledge(
     State(state): State<Arc<ServerState>>,
     Path(notification_id): Path<String>,
 ) -> impl IntoResponse {
+    if let Err(e) = validate_notification_id(&notification_id) {
+        return e.into_response();
+    }
     let store_path = format!("notifications.{notification_id}");
     mutate_notification(&state, &store_path, |n| {
         n.method
@@ -107,13 +124,22 @@ where
         return (status, msg).into_response();
     }
 
+    // Serialize back — failure here would silently corrupt the store, so treat as 500.
+    let serialized = match serde_json::to_value(&notification) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to serialize notification: {e}"),
+            )
+                .into_response();
+        }
+    };
+
     // Write back as delta
     let delta = Delta::self_vessel(vec![Update::new(
         Source::plugin("signalk-rs"),
-        vec![PathValue::new(
-            path,
-            serde_json::to_value(&notification).unwrap_or_default(),
-        )],
+        vec![PathValue::new(path, serialized)],
     )]);
 
     state.store.write().await.apply_delta(delta);

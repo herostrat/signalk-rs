@@ -150,16 +150,17 @@ impl Plugin for AnchorAlarmPlugin {
                             let distance = haversine_meters(anchor_lat, anchor_lon, lat, lon);
                             debug!(distance, radius, "Anchor distance check");
 
-                            let was_alarming = *alarming_clone.lock().unwrap();
+                            let was_alarming =
+                                *alarming_clone.lock().unwrap_or_else(|p| p.into_inner());
                             let is_outside = distance > radius;
 
                             if is_outside && !was_alarming {
                                 warn!(distance, radius, "Anchor alarm triggered!");
-                                *alarming_clone.lock().unwrap() = true;
+                                *alarming_clone.lock().unwrap_or_else(|p| p.into_inner()) = true;
                                 emit_notification(&ctx_clone, distance, radius, true);
                             } else if !is_outside && was_alarming {
                                 info!(distance, radius, "Back inside anchor radius");
-                                *alarming_clone.lock().unwrap() = false;
+                                *alarming_clone.lock().unwrap_or_else(|p| p.into_inner()) = false;
                                 emit_notification(&ctx_clone, distance, radius, false);
                             }
                         }

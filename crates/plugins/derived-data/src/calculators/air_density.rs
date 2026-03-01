@@ -38,7 +38,12 @@ impl Calculator for AirDensity {
         let temperature_k = values.get("environment.outside.temperature")?.as_f64()?;
         let pressure_pa = values.get("environment.outside.pressure")?.as_f64()?;
 
-        if temperature_k <= 0.0 || pressure_pa <= 0.0 {
+        // Reject non-finite values (NaN passes ordinary comparisons)
+        if !temperature_k.is_finite()
+            || !pressure_pa.is_finite()
+            || temperature_k <= 0.0
+            || pressure_pa <= 0.0
+        {
             return None;
         }
 
@@ -46,7 +51,7 @@ impl Calculator for AirDensity {
             .get("environment.outside.humidity")
             .and_then(|v| v.as_f64())
         {
-            if humidity > 0.0 && humidity <= 1.0 {
+            if humidity.is_finite() && humidity > 0.0 && humidity <= 1.0 {
                 // Moist air density (Buck equation for saturation vapor pressure)
                 let temp_c = temperature_k - KELVIN_OFFSET;
                 let ps = 611.21 * ((18.678 - temp_c / 234.5) * temp_c / (257.14 + temp_c)).exp();

@@ -30,6 +30,10 @@ pub enum PluginError {
     #[error("registration rejected: {0}")]
     Registration(String),
 
+    /// A resource was not found (maps to HTTP 404 in API handlers).
+    #[error("not found: {0}")]
+    NotFound(String),
+
     /// Catch-all for other errors.
     #[error("{0}")]
     Other(#[from] Box<dyn std::error::Error + Send + Sync>),
@@ -42,5 +46,15 @@ impl PluginError {
 
     pub fn runtime(msg: impl Into<String>) -> Self {
         PluginError::Runtime(msg.into())
+    }
+
+    /// Construct a not-found error (resource missing, maps to HTTP 404).
+    pub fn not_found(msg: impl Into<String>) -> Self {
+        PluginError::NotFound(msg.into())
+    }
+
+    /// Returns true if this error represents a missing resource (HTTP 404).
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, PluginError::NotFound(_))
     }
 }

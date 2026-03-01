@@ -48,7 +48,7 @@ async fn set_destination_with_position() {
     let (status, body) = get(app, COURSE_BASE).await;
     assert_eq!(status, 200);
     assert!(body.get("startTime").is_some());
-    assert_eq!(body["nextPoint"]["type"], "DESTINATION");
+    assert_eq!(body["nextPoint"]["type"], "destination");
     assert_eq!(body["nextPoint"]["position"]["latitude"], 49.27);
 }
 
@@ -151,7 +151,7 @@ async fn active_route_with_created_route() {
     // Verify course has active route
     let (_, body) = get(app, COURSE_BASE).await;
     assert!(body.get("activeRoute").is_some());
-    assert_eq!(body["nextPoint"]["type"], "WAYPOINT");
+    assert_eq!(body["nextPoint"]["type"], "waypoint");
     // First waypoint: lon=-123.0, lat=49.0
     assert_eq!(body["nextPoint"]["position"]["latitude"], 49.0);
 }

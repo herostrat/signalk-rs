@@ -34,7 +34,12 @@ impl Calculator for HeatIndex {
         let temp_k = values.get("environment.outside.temperature")?.as_f64()?;
         let humidity = values.get("environment.outside.humidity")?.as_f64()?;
 
-        if temp_k <= 0.0 || !(0.0..=1.0).contains(&humidity) {
+        // Reject non-finite values (NaN passes ordinary range checks)
+        if !temp_k.is_finite()
+            || !humidity.is_finite()
+            || temp_k <= 0.0
+            || !(0.0..=1.0).contains(&humidity)
+        {
             return None;
         }
 

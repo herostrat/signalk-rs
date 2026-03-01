@@ -37,12 +37,11 @@ impl ResourceProviderRegistry {
             .write()
             .await
             .insert(resource_type.to_string(), provider);
-        self.provider_ids
-            .write()
-            .await
-            .entry(resource_type.to_string())
-            .or_default()
-            .push(plugin_id.to_string());
+        let mut ids = self.provider_ids.write().await;
+        let list = ids.entry(resource_type.to_string()).or_default();
+        if !list.contains(&plugin_id.to_string()) {
+            list.push(plugin_id.to_string());
+        }
     }
 
     /// List all plugin IDs registered as providers for a resource type.

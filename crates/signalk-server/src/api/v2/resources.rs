@@ -102,7 +102,7 @@ pub async fn update_resource(
         .await
     {
         Ok(()) => StatusCode::OK.into_response(),
-        Err(e) if e.to_string().contains("not found") => StatusCode::NOT_FOUND.into_response(),
+        Err(e) if e.is_not_found() => StatusCode::NOT_FOUND.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -118,7 +118,7 @@ pub async fn delete_resource(
 
     match state.resource_providers.delete(&resource_type, &id).await {
         Ok(()) => StatusCode::OK.into_response(),
-        Err(e) if e.to_string().contains("not found") => StatusCode::NOT_FOUND.into_response(),
+        Err(e) if e.is_not_found() => StatusCode::NOT_FOUND.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

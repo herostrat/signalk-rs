@@ -155,9 +155,7 @@ impl ResourceProvider for FileResourceProvider {
         let path = self.resource_path(resource_type, id)?;
 
         if !path.exists() {
-            return Err(PluginError::runtime(format!(
-                "resource not found: {resource_type}/{id}"
-            )));
+            return Err(PluginError::not_found(format!("{resource_type}/{id}")));
         }
 
         let tmp_path = path.with_extension("json.tmp");
@@ -180,9 +178,9 @@ impl ResourceProvider for FileResourceProvider {
 
         match tokio::fs::remove_file(&path).await {
             Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(PluginError::runtime(
-                format!("resource not found: {resource_type}/{id}"),
-            )),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Err(PluginError::not_found(format!("{resource_type}/{id}")))
+            }
             Err(e) => Err(PluginError::runtime(format!("delete {path:?}: {e}"))),
         }
     }

@@ -41,10 +41,10 @@ pub struct Notification {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct NotificationStatus {
     /// Whether the audible alarm has been silenced.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub silenced: Option<bool>,
     /// Whether the alarm has been acknowledged (no further alerts).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acknowledged: Option<bool>,
 }
 

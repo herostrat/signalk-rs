@@ -36,8 +36,13 @@ impl Calculator for DewPoint {
         let temp_k = values.get("environment.outside.temperature")?.as_f64()?;
         let humidity = values.get("environment.outside.humidity")?.as_f64()?;
 
-        // Sanity checks
-        if humidity <= 0.0 || humidity > 1.0 || temp_k <= 0.0 {
+        // Sanity checks: reject non-finite values (NaN passes ordinary comparisons)
+        if !humidity.is_finite()
+            || !temp_k.is_finite()
+            || humidity <= 0.0
+            || humidity > 1.0
+            || temp_k <= 0.0
+        {
             return None;
         }
 

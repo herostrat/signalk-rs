@@ -39,7 +39,7 @@ impl Source {
         let mut extra = HashMap::new();
         extra.insert(
             "src".to_string(),
-            serde_json::Value::String(src.to_string()),
+            serde_json::Value::Number(serde_json::Number::from(src)),
         );
         extra.insert("pgn".to_string(), serde_json::Value::Number(pgn.into()));
         Source {
@@ -104,5 +104,11 @@ mod tests {
         let back: Source = serde_json::from_str(&json).unwrap();
         assert_eq!(back.type_, "NMEA2000");
         assert_eq!(back.extra["pgn"], 128267);
+        // src must be a JSON number, not a string
+        assert_eq!(back.extra["src"], 115);
+        assert!(
+            back.extra["src"].is_number(),
+            "src must be a number per SignalK spec"
+        );
     }
 }

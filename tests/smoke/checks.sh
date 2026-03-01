@@ -11,7 +11,7 @@ FAIL=0
 # wget wrapper: fetch body or status code
 # Always exits 0 so set -eu does not kill the script on 404/5xx.
 fetch() { wget -qO- "$1" 2>/dev/null || true; }
-status() { wget -qO/dev/null --server-response "$1" 2>&1 | awk '/HTTP/{print $2}' | tail -1; }
+status() { wget -qO/dev/null --server-response "$1" 2>&1 | grep -v '^wget:' | awk '/HTTP/{print $2}' | tail -1; }
 
 # Node.js helpers for PUT/DELETE (busybox wget lacks --method)
 http_method() {
@@ -385,8 +385,8 @@ check "GET /tracks returns GeoJSON FeatureCollection" \
   "$TRACKS_DATA" '"type":"FeatureCollection"'
 check "tracks has features array" \
   "$TRACKS_DATA" '"features"'
-check "tracks feature has LineString geometry" \
-  "$TRACKS_DATA" '"LineString"'
+check "tracks feature has MultiLineString geometry" \
+  "$TRACKS_DATA" '"MultiLineString"'
 
 # Self vessel track via path parameter
 SELF_TRACK=$(fetch "$BASE/signalk/v1/api/vessels/self/track")

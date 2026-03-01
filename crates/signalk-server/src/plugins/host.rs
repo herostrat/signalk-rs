@@ -133,12 +133,18 @@ impl RustPluginContext {
 
     /// Read the current status message.
     pub fn status(&self) -> String {
-        self.status.lock().unwrap().clone()
+        self.status
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
     }
 
     /// Read the current error message, if any.
     pub fn error(&self) -> Option<String> {
-        self.error_msg.lock().unwrap().clone()
+        self.error_msg
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
     }
 }
 
@@ -204,7 +210,7 @@ impl PluginContext for RustPluginContext {
         };
 
         let handle_id = {
-            let mut id = self.next_sub_id.lock().unwrap();
+            let mut id = self.next_sub_id.lock().unwrap_or_else(|p| p.into_inner());
             let current = *id;
             *id += 1;
             current
@@ -247,14 +253,19 @@ impl PluginContext for RustPluginContext {
 
         self.sub_handles
             .lock()
-            .unwrap()
+            .unwrap_or_else(|p| p.into_inner())
             .insert(handle_id, abort_handle);
 
         Ok(SubscriptionHandle::new(handle_id))
     }
 
     async fn unsubscribe(&self, handle: SubscriptionHandle) -> Result<(), PluginError> {
-        if let Some(abort) = self.sub_handles.lock().unwrap().remove(&handle.id()) {
+        if let Some(abort) = self
+            .sub_handles
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&handle.id())
+        {
             abort.abort();
         }
         Ok(())
@@ -334,13 +345,13 @@ impl PluginContext for RustPluginContext {
     }
 
     fn set_status(&self, msg: &str) {
-        *self.status.lock().unwrap() = msg.to_string();
-        *self.error_msg.lock().unwrap() = None;
+        *self.status.lock().unwrap_or_else(|p| p.into_inner()) = msg.to_string();
+        *self.error_msg.lock().unwrap_or_else(|p| p.into_inner()) = None;
         tracing::debug!(plugin = %self.plugin_id, status = %msg, "Plugin status");
     }
 
     fn set_error(&self, msg: &str) {
-        *self.error_msg.lock().unwrap() = Some(msg.to_string());
+        *self.error_msg.lock().unwrap_or_else(|p| p.into_inner()) = Some(msg.to_string());
         tracing::warn!(plugin = %self.plugin_id, error = %msg, "Plugin error");
     }
 
@@ -382,7 +393,7 @@ pub fn cleanup_plugin(ctx: &RustPluginContext) {
     let handles: Vec<_> = ctx
         .sub_handles
         .lock()
-        .unwrap()
+        .unwrap_or_else(|p| p.into_inner())
         .drain()
         .map(|(_, h)| h)
         .collect();
