@@ -69,20 +69,20 @@ impl ClassThresholds {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetStatus {
     /// Target seen but not yet confirmed (not enough messages in window).
-    Unconfirmed,
+    Acquiring,
     /// Target actively being tracked.
-    Confirmed,
+    Tracking,
     /// Target has gone silent for longer than `lost_after`.
     Lost,
 }
 
 impl TargetStatus {
-    /// String representation matching the de-facto `sensors.ais.status` convention.
+    /// String representation for the `sensors.ais.status` convention.
     pub fn as_str(&self) -> &'static str {
         match self {
-            TargetStatus::Unconfirmed => "unconfirmed",
-            TargetStatus::Confirmed => "confirmed",
-            TargetStatus::Lost => "lost",
+            TargetStatus::Acquiring => "acquiring",
+            TargetStatus::Tracking  => "tracking",
+            TargetStatus::Lost      => "lost",
         }
     }
 }
@@ -138,7 +138,7 @@ impl TrackedTarget {
             mmsi,
             context,
             class,
-            status: TargetStatus::Unconfirmed,
+            status: TargetStatus::Acquiring,
             thresholds,
             first_seen: now,
             last_seen: now,
@@ -171,30 +171,30 @@ impl TrackedTarget {
 
         let old_status = self.status;
         match self.status {
-            TargetStatus::Unconfirmed => {
+            TargetStatus::Acquiring => {
                 if self.recent_messages.len() >= self.thresholds.confirm_count as usize {
-                    self.status = TargetStatus::Confirmed;
+                    self.status = TargetStatus::Tracking;
                     return Some(StatusTransition {
                         mmsi: self.mmsi.clone(),
                         context: self.context.clone(),
                         old_status,
-                        new_status: TargetStatus::Confirmed,
+                        new_status: TargetStatus::Tracking,
                     });
                 }
             }
             TargetStatus::Lost => {
-                // Receiving a message while lost → back to confirmed
-                self.status = TargetStatus::Confirmed;
+                // Receiving a message while lost → back to tracking
+                self.status = TargetStatus::Tracking;
                 self.recent_messages = vec![now];
                 return Some(StatusTransition {
                     mmsi: self.mmsi.clone(),
                     context: self.context.clone(),
                     old_status,
-                    new_status: TargetStatus::Confirmed,
+                    new_status: TargetStatus::Tracking,
                 });
             }
-            TargetStatus::Confirmed => {
-                // Already confirmed, no transition
+            TargetStatus::Tracking => {
+                // Already tracking, no transition
             }
         }
         None
@@ -287,9 +287,9 @@ impl AisTracker {
         let mut unconfirmed = 0;
         for t in self.targets.values() {
             match t.status {
-                TargetStatus::Confirmed => confirmed += 1,
-                TargetStatus::Lost => lost += 1,
-                TargetStatus::Unconfirmed => unconfirmed += 1,
+                TargetStatus::Tracking  => confirmed += 1,
+                TargetStatus::Lost      => lost += 1,
+                TargetStatus::Acquiring => unconfirmed += 1,
             }
         }
         (confirmed, lost, unconfirmed)
@@ -342,14 +342,14 @@ impl AisTracker {
             let elapsed = now.duration_since(target.last_seen);
 
             match target.status {
-                TargetStatus::Unconfirmed => {
-                    // Stale unconfirmed targets: remove if confirm window expired
+                TargetStatus::Acquiring => {
+                    // Stale acquiring targets: remove if confirm window expired
                     // without enough messages
                     if elapsed > target.thresholds.confirm_window {
                         to_remove.push(mmsi.clone());
                     }
                 }
-                TargetStatus::Confirmed => {
+                TargetStatus::Tracking => {
                     if elapsed > target.thresholds.lost_after {
                         let old = target.status;
                         target.status = TargetStatus::Lost;
@@ -380,7 +380,7 @@ impl AisTracker {
     pub fn targets_for_cpa(&self) -> Vec<TargetCpaSnapshot> {
         self.targets
             .values()
-            .filter(|t| t.status == TargetStatus::Confirmed && t.position.is_some())
+            .filter(|t| t.status == TargetStatus::Tracking && t.position.is_some())
             .map(|t| {
                 let (lat, lon) = t.position.unwrap();
                 TargetCpaSnapshot {
@@ -404,6 +404,64 @@ impl AisTracker {
             target.cpa_alarm_active = alarm_active;
         }
     }
+
+    /// Snapshot of all tracked targets for the REST API.
+    pub fn targets_snapshot(&self) -> Vec<TargetSnapshot> {
+        let now = Instant::now();
+        self.targets
+            .values()
+            .map(|t| {
+                let class = match t.class {
+                    TargetClass::Vessel => "vessel",
+                    TargetClass::Aton   => "aton",
+                    TargetClass::Base   => "base",
+                    TargetClass::Sar    => "sar",
+                };
+                let position = t.position.map(|(lat, lon)| {
+                    serde_json::json!({"latitude": lat, "longitude": lon})
+                });
+                TargetSnapshot {
+                    mmsi: t.mmsi.clone(),
+                    context: t.context.clone(),
+                    class,
+                    status: t.status.as_str(),
+                    name: t.name.clone(),
+                    callsign: t.callsign.clone(),
+                    position,
+                    sog: t.sog,
+                    cog: t.cog,
+                    heading: t.heading,
+                    cpa_distance_m: t.last_cpa_m,
+                    cpa_time_s: t.last_tcpa_s,
+                    cpa_alarm_active: t.cpa_alarm_active,
+                    message_count: t.message_count,
+                    last_seen_secs_ago: now.duration_since(t.last_seen).as_secs_f64(),
+                    first_seen_secs_ago: now.duration_since(t.first_seen).as_secs_f64(),
+                }
+            })
+            .collect()
+    }
+}
+
+/// Serializable snapshot of a tracked target for the REST API.
+#[derive(serde::Serialize)]
+pub struct TargetSnapshot {
+    pub mmsi: String,
+    pub context: String,
+    pub class: &'static str,
+    pub status: &'static str,
+    pub name: Option<String>,
+    pub callsign: Option<String>,
+    pub position: Option<serde_json::Value>,
+    pub sog: Option<f64>,
+    pub cog: Option<f64>,
+    pub heading: Option<f64>,
+    pub cpa_distance_m: Option<f64>,
+    pub cpa_time_s: Option<f64>,
+    pub cpa_alarm_active: bool,
+    pub message_count: u32,
+    pub last_seen_secs_ago: f64,
+    pub first_seen_secs_ago: f64,
 }
 
 /// Navigation snapshot of a confirmed target for CPA computation.
@@ -425,14 +483,14 @@ mod tests {
     // ── State Machine ───────────────────────────────────────────────────
 
     #[test]
-    fn new_target_is_unconfirmed() {
+    fn new_target_is_acquiring() {
         let t = TrackedTarget::new(
             "211457160".into(),
             "vessels.urn:mrn:imo:mmsi:211457160".into(),
             Instant::now(),
             None,
         );
-        assert_eq!(t.status, TargetStatus::Unconfirmed);
+        assert_eq!(t.status, TargetStatus::Acquiring);
         assert_eq!(t.class, TargetClass::Vessel);
         assert_eq!(t.message_count, 0);
     }
@@ -446,24 +504,24 @@ mod tests {
             now,
             None,
         );
-        assert_eq!(t.status, TargetStatus::Unconfirmed);
+        assert_eq!(t.status, TargetStatus::Acquiring);
 
-        // First message — still unconfirmed (vessel needs 2)
+        // First message — still acquiring (vessel needs 2)
         let transition = t.record_message(now);
         assert!(transition.is_none());
 
-        // Second message within confirm window → confirmed
+        // Second message within confirm window → tracking
         let transition = t.record_message(now + Duration::from_secs(10));
         assert!(transition.is_some());
         let tr = transition.unwrap();
-        assert_eq!(tr.old_status, TargetStatus::Unconfirmed);
-        assert_eq!(tr.new_status, TargetStatus::Confirmed);
-        assert_eq!(t.status, TargetStatus::Confirmed);
+        assert_eq!(tr.old_status, TargetStatus::Acquiring);
+        assert_eq!(tr.new_status, TargetStatus::Tracking);
+        assert_eq!(t.status, TargetStatus::Tracking);
     }
 
     #[test]
     fn aton_confirms_on_first_message() {
-        // ATONs need only 1 message to confirm
+        // ATONs need only 1 message to start tracking
         let now = Instant::now();
         let mut t = TrackedTarget::new(
             "970012345".into(),
@@ -471,14 +529,14 @@ mod tests {
             now,
             None,
         );
-        // First record_message should confirm (confirm_count=1 for ATONs)
+        // First record_message should start tracking (confirm_count=1 for ATONs)
         let transition = t.record_message(now);
         assert!(transition.is_some());
-        assert_eq!(t.status, TargetStatus::Confirmed);
+        assert_eq!(t.status, TargetStatus::Tracking);
     }
 
     #[test]
-    fn confirmed_to_lost_on_timeout() {
+    fn tracking_to_lost_on_timeout() {
         let now = Instant::now();
         let mut t = TrackedTarget::new(
             "211457160".into(),
@@ -487,9 +545,9 @@ mod tests {
             None,
         );
         t.record_message(now); // first message
-        t.record_message(now + Duration::from_secs(5)); // second → confirms
+        t.record_message(now + Duration::from_secs(5)); // second → tracking
 
-        assert_eq!(t.status, TargetStatus::Confirmed);
+        assert_eq!(t.status, TargetStatus::Tracking);
 
         // Simulate tick after lost_after
         let elapsed = now + Duration::from_secs(5) + Duration::from_secs(361);
@@ -499,12 +557,12 @@ mod tests {
         // Manually check what tick would do
         let old = t.status;
         t.status = TargetStatus::Lost;
-        assert_eq!(old, TargetStatus::Confirmed);
+        assert_eq!(old, TargetStatus::Tracking);
         assert_eq!(t.status, TargetStatus::Lost);
     }
 
     #[test]
-    fn lost_to_confirmed_on_new_message() {
+    fn lost_to_tracking_on_new_message() {
         let now = Instant::now();
         let mut t = TrackedTarget::new(
             "211457160".into(),
@@ -513,15 +571,15 @@ mod tests {
             None,
         );
         t.record_message(now); // first
-        t.record_message(now + Duration::from_secs(5)); // second → confirms
+        t.record_message(now + Duration::from_secs(5)); // second → tracking
         t.status = TargetStatus::Lost; // simulate going lost
 
         let transition = t.record_message(now + Duration::from_secs(500));
         assert!(transition.is_some());
         let tr = transition.unwrap();
         assert_eq!(tr.old_status, TargetStatus::Lost);
-        assert_eq!(tr.new_status, TargetStatus::Confirmed);
-        assert_eq!(t.status, TargetStatus::Confirmed);
+        assert_eq!(tr.new_status, TargetStatus::Tracking);
+        assert_eq!(t.status, TargetStatus::Tracking);
     }
 
     // ── AisTracker ──────────────────────────────────────────────────────
@@ -555,23 +613,23 @@ mod tests {
         let now = Instant::now();
         let mut tracker = AisTracker::new("urn:mrn:signalk:uuid:test-uuid".into());
 
-        // First message — creates unconfirmed target
+        // First message — creates acquiring target
         let result = tracker.update_target(
             "vessels.urn:mrn:imo:mmsi:211457160",
             &[("navigation.speedOverGround".into(), serde_json::json!(5.0))],
             now,
         );
-        assert!(result.is_none()); // still unconfirmed after 1st msg (vessel needs 2)
+        assert!(result.is_none()); // still acquiring after 1st msg (vessel needs 2)
         assert_eq!(tracker.target_count(), 1);
 
-        // Second message — confirms
+        // Second message — starts tracking
         let result = tracker.update_target(
             "vessels.urn:mrn:imo:mmsi:211457160",
             &[("navigation.speedOverGround".into(), serde_json::json!(5.2))],
             now + Duration::from_secs(10),
         );
         assert!(result.is_some());
-        assert_eq!(result.unwrap().new_status, TargetStatus::Confirmed);
+        assert_eq!(result.unwrap().new_status, TargetStatus::Tracking);
     }
 
     #[test]
@@ -614,6 +672,7 @@ mod tests {
         assert_eq!(transitions.len(), 1);
         assert_eq!(transitions[0].new_status, TargetStatus::Lost);
         assert_eq!(tracker.get("211457160").unwrap().status, TargetStatus::Lost);
+
     }
 
     #[test]
@@ -689,8 +748,8 @@ mod tests {
 
     #[test]
     fn status_str_values() {
-        assert_eq!(TargetStatus::Unconfirmed.as_str(), "unconfirmed");
-        assert_eq!(TargetStatus::Confirmed.as_str(), "confirmed");
+        assert_eq!(TargetStatus::Acquiring.as_str(), "acquiring");
+        assert_eq!(TargetStatus::Tracking.as_str(), "tracking");
         assert_eq!(TargetStatus::Lost.as_str(), "lost");
     }
 
@@ -745,13 +804,278 @@ mod tests {
         };
         let mut tracker = AisTracker::with_config("urn:mrn:signalk:uuid:test".into(), config);
 
-        // With confirm_count=1, a vessel should confirm on the first message
+        // With confirm_count=1, a vessel should start tracking on the first message
         let result = tracker.update_target(
             "vessels.urn:mrn:imo:mmsi:211457160",
             &[("navigation.speedOverGround".into(), serde_json::json!(5.0))],
             now,
         );
         assert!(result.is_some());
-        assert_eq!(result.unwrap().new_status, TargetStatus::Confirmed);
+        assert_eq!(result.unwrap().new_status, TargetStatus::Tracking);
+    }
+
+    // ── targets_snapshot() ──────────────────────────────────────────────
+
+    #[test]
+    fn targets_snapshot_empty() {
+        let tracker = AisTracker::new("self".into());
+        assert!(tracker.targets_snapshot().is_empty());
+    }
+
+    #[test]
+    fn targets_snapshot_aton_tracking_after_one_message() {
+        let now = Instant::now();
+        let mut tracker = AisTracker::new("self".into());
+        tracker.update_target("vessels.urn:mrn:imo:mmsi:970012345", &[], now);
+        let snap = tracker.targets_snapshot();
+        let t = snap.iter().find(|s| s.mmsi == "970012345").unwrap();
+        assert_eq!(t.class, "aton");
+        assert_eq!(t.status, "tracking");
+        assert_eq!(t.message_count, 1);
+    }
+
+    #[test]
+    fn targets_snapshot_vessel_acquiring_after_one_message() {
+        let now = Instant::now();
+        let mut tracker = AisTracker::new("self".into());
+        tracker.update_target("vessels.urn:mrn:imo:mmsi:211457160", &[], now);
+        let snap = tracker.targets_snapshot();
+        let t = snap.iter().find(|s| s.mmsi == "211457160").unwrap();
+        assert_eq!(t.class, "vessel");
+        assert_eq!(t.status, "acquiring");
+        assert_eq!(t.message_count, 1);
+        assert!(t.last_seen_secs_ago >= 0.0);
+        assert!(t.first_seen_secs_ago >= 0.0);
+    }
+
+    #[test]
+    fn targets_snapshot_position_format() {
+        let now = Instant::now();
+        let mut tracker = AisTracker::new("self".into());
+        tracker.update_target(
+            "vessels.urn:mrn:imo:mmsi:970012345",
+            &[(
+                "navigation.position".into(),
+                serde_json::json!({"latitude": 54.3, "longitude": 10.5}),
+            )],
+            now,
+        );
+        let snap = tracker.targets_snapshot();
+        let pos = snap[0].position.as_ref().unwrap();
+        assert!((pos["latitude"].as_f64().unwrap() - 54.3).abs() < 1e-6);
+        assert!((pos["longitude"].as_f64().unwrap() - 10.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn targets_snapshot_lost_status() {
+        let now = Instant::now();
+        let mut tracker = AisTracker::new("self".into());
+        tracker.update_target("vessels.urn:mrn:imo:mmsi:970012345", &[], now);
+        // Force lost state
+        tracker.tick(now + Duration::from_secs(1000));
+        let snap = tracker.targets_snapshot();
+        // AtoN lost_after = 900s → after 1000s tick, it's lost
+        let t = snap.iter().find(|s| s.mmsi == "970012345").unwrap();
+        assert_eq!(t.status, "lost");
+    }
+
+    // ── count_by_status() ───────────────────────────────────────────────
+
+    #[test]
+    fn count_by_status_empty() {
+        let tracker = AisTracker::new("self".into());
+        let (confirmed, lost, unconfirmed) = tracker.count_by_status();
+        assert_eq!(confirmed, 0);
+        assert_eq!(lost, 0);
+        assert_eq!(unconfirmed, 0);
+    }
+
+    #[test]
+    fn count_by_status_all_acquiring() {
+        let now = Instant::now();
+        let mut tracker = AisTracker::new("self".into());
+        // Vessels need 2 messages → still acquiring after 1 each
+        tracker.update_target("vessels.urn:mrn:imo:mmsi:211000001", &[], now);
+        tracker.update_target("vessels.urn:mrn:imo:mmsi:211000002", &[], now);
+        let (confirmed, lost, unconfirmed) = tracker.count_by_status();
+        assert_eq!(confirmed, 0);
+        assert_eq!(lost, 0);
+        assert_eq!(unconfirmed, 2);
+    }
+
+    #[test]
+    fn count_by_status_mixed() {
+        let now = Instant::now();
+        let mut tracker = AisTracker::new("self".into());
+        // AtoN: tracking on 1st message
+        tracker.update_target("vessels.urn:mrn:imo:mmsi:970000001", &[], now);
+        tracker.update_target("vessels.urn:mrn:imo:mmsi:970000002", &[], now);
+        // Vessel: acquiring after 1 message
+        tracker.update_target("vessels.urn:mrn:imo:mmsi:211000001", &[], now);
+        // Force one vessel to lost
+        tracker.tick(now + Duration::from_secs(1000));
+
+        let (confirmed, lost, unconfirmed) = tracker.count_by_status();
+        // Both AtoNs → lost (lost_after=900s), vessel → removed (confirm_window=180s)
+        assert_eq!(confirmed, 0);
+        assert_eq!(lost, 2); // AtoNs marked lost but not yet removed (remove_after=3600s)
+        assert_eq!(unconfirmed, 0); // vessel removed (confirm_window expired)
+    }
+
+    #[test]
+    fn count_by_status_includes_lost_before_removal() {
+        let now = Instant::now();
+        let mut tracker = AisTracker::new("self".into());
+        // Create a confirmed vessel, then let it go lost
+        tracker.update_target("vessels.urn:mrn:imo:mmsi:211000001", &[], now);
+        tracker.update_target(
+            "vessels.urn:mrn:imo:mmsi:211000001",
+            &[],
+            now + Duration::from_secs(5),
+        );
+        tracker.tick(now + Duration::from_secs(400)); // → Lost
+
+        let (confirmed, lost, unconfirmed) = tracker.count_by_status();
+        assert_eq!(confirmed, 0);
+        assert_eq!(lost, 1);
+        assert_eq!(unconfirmed, 0);
+    }
+
+    // ── update_target_cpa() ─────────────────────────────────────────────
+
+    #[test]
+    fn update_target_cpa_stores_values() {
+        let now = Instant::now();
+        let mut tracker = AisTracker::new("self".into());
+        tracker.update_target("vessels.urn:mrn:imo:mmsi:970012345", &[], now);
+
+        tracker.update_target_cpa("970012345", 850.0, 240.0, false);
+
+        let t = tracker.get("970012345").unwrap();
+        assert_eq!(t.last_cpa_m, Some(850.0));
+        assert_eq!(t.last_tcpa_s, Some(240.0));
+        assert!(!t.cpa_alarm_active);
+    }
+
+    #[test]
+    fn update_target_cpa_sets_alarm_active() {
+        let now = Instant::now();
+        let mut tracker = AisTracker::new("self".into());
+        tracker.update_target("vessels.urn:mrn:imo:mmsi:970012345", &[], now);
+
+        tracker.update_target_cpa("970012345", 300.0, 120.0, true);
+
+        let t = tracker.get("970012345").unwrap();
+        assert!(t.cpa_alarm_active);
+        assert_eq!(t.last_cpa_m, Some(300.0));
+    }
+
+    #[test]
+    fn update_target_cpa_clears_alarm_active() {
+        let now = Instant::now();
+        let mut tracker = AisTracker::new("self".into());
+        tracker.update_target("vessels.urn:mrn:imo:mmsi:970012345", &[], now);
+        tracker.update_target_cpa("970012345", 300.0, 120.0, true);
+        assert!(tracker.get("970012345").unwrap().cpa_alarm_active);
+
+        // Target moves away — alarm cleared
+        tracker.update_target_cpa("970012345", 2000.0, 0.0, false);
+        assert!(!tracker.get("970012345").unwrap().cpa_alarm_active);
+    }
+
+    #[test]
+    fn update_target_cpa_unknown_mmsi_is_noop() {
+        let mut tracker = AisTracker::new("self".into());
+        // No panic, no target created
+        tracker.update_target_cpa("999999999", 100.0, 60.0, true);
+        assert_eq!(tracker.target_count(), 0);
+    }
+
+    // ── targets_for_cpa() ───────────────────────────────────────────────
+
+    #[test]
+    fn targets_for_cpa_empty_when_no_targets() {
+        let tracker = AisTracker::new("self".into());
+        assert!(tracker.targets_for_cpa().is_empty());
+    }
+
+    #[test]
+    fn targets_for_cpa_excludes_acquiring_targets() {
+        let now = Instant::now();
+        let mut tracker = AisTracker::new("self".into());
+        // Vessel: acquiring after 1 message, but has position
+        tracker.update_target(
+            "vessels.urn:mrn:imo:mmsi:211457160",
+            &[(
+                "navigation.position".into(),
+                serde_json::json!({"latitude": 54.0, "longitude": 10.0}),
+            )],
+            now,
+        );
+        assert_eq!(tracker.get("211457160").unwrap().status, TargetStatus::Acquiring);
+        assert!(tracker.targets_for_cpa().is_empty(), "Acquiring targets excluded from CPA");
+    }
+
+    #[test]
+    fn targets_for_cpa_excludes_targets_without_position() {
+        let now = Instant::now();
+        let mut tracker = AisTracker::new("self".into());
+        // AtoN: tracking on 1st message, but no position
+        tracker.update_target("vessels.urn:mrn:imo:mmsi:970012345", &[], now);
+        assert_eq!(tracker.get("970012345").unwrap().status, TargetStatus::Tracking);
+        assert!(tracker.targets_for_cpa().is_empty(), "Targets without position excluded");
+    }
+
+    #[test]
+    fn targets_for_cpa_excludes_lost_targets() {
+        let now = Instant::now();
+        let mut tracker = AisTracker::new("self".into());
+        tracker.update_target(
+            "vessels.urn:mrn:imo:mmsi:970012345",
+            &[(
+                "navigation.position".into(),
+                serde_json::json!({"latitude": 54.0, "longitude": 10.0}),
+            )],
+            now,
+        );
+        tracker.tick(now + Duration::from_secs(1000)); // → lost
+        assert!(tracker.targets_for_cpa().is_empty(), "Lost targets excluded");
+    }
+
+    #[test]
+    fn targets_for_cpa_includes_tracking_target_with_position() {
+        let now = Instant::now();
+        let mut tracker = AisTracker::new("self".into());
+        tracker.update_target(
+            "vessels.urn:mrn:imo:mmsi:970012345",
+            &[(
+                "navigation.position".into(),
+                serde_json::json!({"latitude": 54.3, "longitude": 10.5}),
+            )],
+            now,
+        );
+        let snaps = tracker.targets_for_cpa();
+        assert_eq!(snaps.len(), 1);
+        assert_eq!(snaps[0].mmsi, "970012345");
+        assert!((snaps[0].lat - 54.3).abs() < 1e-6);
+        assert!((snaps[0].lon - 10.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn targets_for_cpa_inherits_sog_cog_defaults_to_zero() {
+        let now = Instant::now();
+        let mut tracker = AisTracker::new("self".into());
+        // AtoN with position but no SOG/COG
+        tracker.update_target(
+            "vessels.urn:mrn:imo:mmsi:970012345",
+            &[(
+                "navigation.position".into(),
+                serde_json::json!({"latitude": 54.3, "longitude": 10.5}),
+            )],
+            now,
+        );
+        let snaps = tracker.targets_for_cpa();
+        assert_eq!(snaps[0].sog_ms, 0.0);
+        assert_eq!(snaps[0].cog_rad, 0.0);
     }
 }

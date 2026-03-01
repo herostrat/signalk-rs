@@ -247,4 +247,86 @@ mod tests {
             result.cpa_m
         );
     }
+
+    // ── Edge cases ──────────────────────────────────────────────────
+
+    /// Own vessel anchored (SOG=0), target approaching. CPA should be near-zero,
+    /// TCPA positive.
+    #[test]
+    fn own_vessel_stationary() {
+        // Own: 54°N 10°E, anchored (SOG=0)
+        // Target: 54.009°N 10°E (~1km north), heading south at 5 m/s
+        let result = compute_cpa(54.0, 10.0, 0.0, 0.0, 54.009, 10.0, 5.0, PI).unwrap();
+        assert!(result.tcpa_s > 0.0, "TCPA should be positive: target approaching");
+        assert!(result.cpa_m < 50.0, "CPA near-zero: target heading directly for us");
+    }
+
+    /// CPA distance must always be >= 0 for any valid inputs.
+    #[test]
+    fn cpa_result_is_always_non_negative() {
+        let cases = [
+            (54.0_f64, 10.0_f64, 5.0_f64, 0.0_f64, 54.009_f64, 10.0_f64, 5.0_f64, PI),
+            (54.0, 10.0, 5.0, 0.0, 54.0, 10.01, 5.0, 0.0),
+            (54.0, 10.0, 5.0, PI / 2.0, 54.0, 10.004, 8.0, PI / 2.0),
+            (54.0, 10.0, 0.0, 0.0, 54.009, 10.0, 5.0, PI), // own anchored
+        ];
+        for (own_lat, own_lon, own_sog, own_cog, tgt_lat, tgt_lon, tgt_sog, tgt_cog) in cases {
+            let result =
+                compute_cpa(own_lat, own_lon, own_sog, own_cog, tgt_lat, tgt_lon, tgt_sog, tgt_cog)
+                    .unwrap();
+            assert!(
+                result.cpa_m >= 0.0,
+                "CPA must be >= 0, got {} (tcpa={})",
+                result.cpa_m,
+                result.tcpa_s
+            );
+        }
+    }
+
+    /// COG = 0 (north): velocity vector is (vx=0, vy=SOG).
+    /// Verify via a head-on scenario: own north, target south from ahead → collision.
+    #[test]
+    fn due_north_heading_produces_correct_vector() {
+        // Own heading north (COG=0), target approaching from north heading south
+        let result = compute_cpa(54.0, 10.0, 5.0, 0.0, 54.009, 10.0, 5.0, PI).unwrap();
+        // Head-on → very small CPA, positive TCPA
+        assert!(result.cpa_m < 50.0);
+        assert!(result.tcpa_s > 0.0);
+    }
+
+    /// COG = π/2 (east): velocity vector is (vx=SOG, vy=0).
+    /// Two vessels heading east in parallel (same heading, same SOG, laterally offset)
+    /// → same velocity vector → TCPA = +∞.
+    #[test]
+    fn due_east_heading_produces_correct_vector() {
+        // Own: 54°N 10°E heading east at 5 m/s
+        // Target: 54.001°N 10°E (~111m north), also heading east at 5 m/s
+        let result = compute_cpa(54.0, 10.0, 5.0, PI / 2.0, 54.001, 10.0, 5.0, PI / 2.0).unwrap();
+        assert!(
+            result.tcpa_s.is_infinite(),
+            "Parallel same-velocity vessels: TCPA = +∞, got {}",
+            result.tcpa_s
+        );
+        // CPA = lateral separation ~111m
+        assert!(result.cpa_m > 50.0 && result.cpa_m < 200.0);
+    }
+
+    /// Very large distance (100 km): computation should not panic or produce NaN.
+    #[test]
+    fn large_distance_does_not_panic() {
+        // Own: equator; target: ~100km north
+        let result = compute_cpa(0.0, 0.0, 5.0, 0.0, 0.9, 0.0, 5.0, PI);
+        assert!(result.is_some(), "Should return Some for large distance");
+        let r = result.unwrap();
+        assert!(r.cpa_m.is_finite(), "CPA should be finite");
+        assert!(r.cpa_m >= 0.0);
+    }
+
+    /// Same position, same velocity: relative position is zero, v_sq < threshold → TCPA = +∞, CPA = 0.
+    #[test]
+    fn same_position_and_velocity() {
+        let result = compute_cpa(54.0, 10.0, 5.0, 0.0, 54.0, 10.0, 5.0, 0.0).unwrap();
+        assert!(result.tcpa_s.is_infinite());
+        assert!(result.cpa_m < 1.0, "CPA should be ~0 when at same position");
+    }
 }

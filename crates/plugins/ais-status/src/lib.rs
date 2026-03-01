@@ -1,7 +1,7 @@
 /// AIS target tracking plugin for signalk-rs.
 ///
 /// Subscribes to ALL vessel deltas, tracks AIS targets through a lifecycle
-/// state machine (Unconfirmed → Confirmed → Lost → Removed), and emits
+/// state machine (Acquiring → Tracking → Lost → Removed), and emits
 /// `sensors.ais.status` and `sensors.ais.class` deltas for each target.
 ///
 /// Config example (signalk-rs.toml):
@@ -17,8 +17,8 @@ pub mod tracker;
 use async_trait::async_trait;
 use serde::Deserialize;
 use signalk_plugin_api::{
-    Plugin, PluginContext, PluginError, PluginMetadata, SubscriptionHandle, SubscriptionSpec,
-    delta_callback,
+    Plugin, PluginContext, PluginError, PluginMetadata, RouterSetup, SubscriptionHandle,
+    SubscriptionSpec, delta_callback, route_handler,
 };
 use signalk_types::{Delta, PathValue, Source, Subscription, Update};
 use std::sync::{Arc, Mutex};
@@ -207,6 +207,22 @@ impl Plugin for AisStatusPlugin {
             tracker_config,
         )));
 
+        // ── Register plugin routes (/plugins/ais-status/) ─────────────────────
+        let tracker_api = tracker.clone();
+        ctx.register_routes(Box::new(move |router: &mut dyn signalk_plugin_api::PluginRouter| {
+            let t = tracker_api.clone();
+            router.get(
+                "/targets",
+                route_handler(move |_req| {
+                    let t = t.clone();
+                    async move {
+                        let snapshot = t.lock().unwrap().targets_snapshot();
+                        signalk_plugin_api::PluginResponse::json(200, &serde_json::json!(snapshot))
+                    }
+                }),
+            );
+        }) as RouterSetup).await?;
+
         // Subscribe to ALL vessel deltas
         let tracker_sub = tracker.clone();
         let ctx_sub = ctx.clone();
@@ -335,9 +351,9 @@ fn emit_status_delta(ctx: &Arc<dyn PluginContext>, transition: &StatusTransition
         serde_json::json!(transition.new_status.as_str()),
     )];
 
-    // Also emit class on first confirmation
-    if transition.old_status == TargetStatus::Unconfirmed
-        && transition.new_status == TargetStatus::Confirmed
+    // Also emit class on first tracking
+    if transition.old_status == TargetStatus::Acquiring
+        && transition.new_status == TargetStatus::Tracking
     {
         let class = tracker::classify_mmsi(
             AisTracker::parse_mmsi(&transition.context).unwrap_or(&transition.mmsi),
@@ -371,6 +387,31 @@ fn class_to_str(class: TargetClass) -> &'static str {
 }
 
 // ─── CPA helpers ─────────────────────────────────────────────────────────────
+
+/// Pure alarm classification — no side effects, easily testable.
+///
+/// Returns `Some("alarm")`, `Some("warn")`, or `None` based on CPA/TCPA values
+/// and the configured thresholds. Does NOT consider previous alarm state.
+pub(crate) fn classify_cpa_alarm(
+    cpa_m: f64,
+    tcpa_s: f64,
+    tcpa_max_s: f64,
+    cpa_warn_m: Option<f64>,
+    cpa_alarm_m: Option<f64>,
+) -> Option<&'static str> {
+    let is_future_threat = tcpa_s > 0.0 && tcpa_s < tcpa_max_s;
+    if is_future_threat {
+        if cpa_alarm_m.is_some_and(|d| cpa_m < d) {
+            Some("alarm")
+        } else if cpa_warn_m.is_some_and(|d| cpa_m < d) {
+            Some("warn")
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
 
 /// One CPA tick: read own vessel data, compute CPA for all confirmed targets,
 /// emit deltas, and manage collision notifications on state transitions.
@@ -441,18 +482,13 @@ async fn run_cpa_tick(
         cpa_deltas.push((snap.context.clone(), result.cpa_m, result.tcpa_s));
 
         // Determine alarm level
-        let is_future_threat = result.tcpa_s > 0.0 && result.tcpa_s < tcpa_max_s;
-        let alarm_level: Option<&'static str> = if is_future_threat {
-            if cpa_alarm_m.is_some_and(|d| result.cpa_m < d) {
-                Some("alarm")
-            } else if cpa_warn_m.is_some_and(|d| result.cpa_m < d) {
-                Some("warn")
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let alarm_level = classify_cpa_alarm(
+            result.cpa_m,
+            result.tcpa_s,
+            tcpa_max_s,
+            cpa_warn_m,
+            cpa_alarm_m,
+        );
 
         let is_active = alarm_level.is_some();
         if is_active != snap.cpa_alarm_active {
@@ -543,5 +579,80 @@ async fn run_cpa_tick(
                 warn!("Failed to clear CPA alarm: {e}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── classify_cpa_alarm ───────────────────────────────────────────
+
+    const WARN_M: f64 = 1000.0;   // 1 km warn distance
+    const ALARM_M: f64 = 500.0;   // 500 m alarm distance
+    const MAX_S: f64 = 3600.0;    // ignore threats > 1 hour away
+
+    #[test]
+    fn alarm_when_cpa_below_alarm_distance() {
+        // CPA 300 m, TCPA 5 min → alarm level
+        let level = classify_cpa_alarm(300.0, 300.0, MAX_S, Some(WARN_M), Some(ALARM_M));
+        assert_eq!(level, Some("alarm"));
+    }
+
+    #[test]
+    fn warn_when_cpa_between_warn_and_alarm_distance() {
+        // CPA 800 m (< warn 1000, > alarm 500) → warn level
+        let level = classify_cpa_alarm(800.0, 300.0, MAX_S, Some(WARN_M), Some(ALARM_M));
+        assert_eq!(level, Some("warn"));
+    }
+
+    #[test]
+    fn none_when_cpa_outside_warn_distance() {
+        // CPA 2 km — safe
+        let level = classify_cpa_alarm(2000.0, 300.0, MAX_S, Some(WARN_M), Some(ALARM_M));
+        assert_eq!(level, None);
+    }
+
+    #[test]
+    fn none_when_tcpa_is_negative_past_cpa() {
+        // TCPA < 0 means closest approach already happened — no threat
+        let level = classify_cpa_alarm(100.0, -60.0, MAX_S, Some(WARN_M), Some(ALARM_M));
+        assert_eq!(level, None);
+    }
+
+    #[test]
+    fn none_when_tcpa_exceeds_max() {
+        // TCPA 2 hours, max 1 hour → too far away to care
+        let level = classify_cpa_alarm(100.0, 7200.0, MAX_S, Some(WARN_M), Some(ALARM_M));
+        assert_eq!(level, None);
+    }
+
+    #[test]
+    fn none_when_thresholds_disabled() {
+        // Both thresholds None → CPA alarm system disabled
+        let level = classify_cpa_alarm(10.0, 30.0, MAX_S, None, None);
+        assert_eq!(level, None);
+    }
+
+    #[test]
+    fn warn_only_config_gives_no_alarm_level() {
+        // Only warn configured (no alarm threshold) → can only produce "warn", never "alarm"
+        let level = classify_cpa_alarm(100.0, 300.0, MAX_S, Some(WARN_M), None);
+        assert_eq!(level, Some("warn"));
+    }
+
+    #[test]
+    fn alarm_only_config_does_not_produce_warn() {
+        // Only alarm threshold configured, CPA between alarm and would-be-warn
+        // cpa_m 800 > alarm_m 500 → no alarm; no warn threshold → None
+        let level = classify_cpa_alarm(800.0, 300.0, MAX_S, None, Some(ALARM_M));
+        assert_eq!(level, None);
+    }
+
+    #[test]
+    fn tcpa_zero_is_not_a_future_threat() {
+        // TCPA = 0 means passing right now — treated as past, no alarm
+        let level = classify_cpa_alarm(10.0, 0.0, MAX_S, Some(WARN_M), Some(ALARM_M));
+        assert_eq!(level, None);
     }
 }
