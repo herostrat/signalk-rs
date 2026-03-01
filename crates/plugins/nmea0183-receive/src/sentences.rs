@@ -621,6 +621,47 @@ pub fn from_vwt(vwt: &nmea::sentences::VwtData) -> Vec<PathValue> {
     out
 }
 
+/// RMB — Recommended Minimum Navigation Information
+/// Provides: destination position, range, bearing, cross-track error
+/// Only emits values when sentence status is active (not void).
+pub fn from_rmb(rmb: &nmea::sentences::RmbData) -> Vec<PathValue> {
+    if !rmb.status {
+        return vec![];
+    }
+
+    let mut out = Vec::new();
+
+    if let (Some(lat), Some(lon)) = (rmb.dest_latitude, rmb.dest_longitude) {
+        out.push(PathValue::new(
+            "navigation.courseGreatCircle.nextPoint.position",
+            json!({ "latitude": lat, "longitude": lon }),
+        ));
+    }
+
+    if let Some(nm) = rmb.range_to_dest {
+        out.push(PathValue::new(
+            "navigation.courseGreatCircle.nextPoint.distance",
+            json!(nm as f64 * NM_TO_M),
+        ));
+    }
+
+    if let Some(deg) = rmb.bearing_to_dest {
+        out.push(PathValue::new(
+            "navigation.courseGreatCircle.nextPoint.bearingTrue",
+            json!(deg as f64 * DEG_TO_RAD),
+        ));
+    }
+
+    if let Some(xte_nm) = rmb.cross_track_error {
+        out.push(PathValue::new(
+            "navigation.courseGreatCircle.crossTrackError",
+            json!(xte_nm as f64 * NM_TO_M),
+        ));
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1168,5 +1209,112 @@ mod tests {
             .find(|p| p.path == "environment.wind.speedTrue")
             .unwrap();
         assert!((spd.value.as_f64().unwrap() - 20.0 * KNOTS_TO_MS).abs() < 1e-6);
+    }
+
+    fn rmb_active() -> nmea::sentences::RmbData {
+        nmea::sentences::RmbData {
+            status: true,
+            cross_track_error: Some(0.5),
+            origin_waypoint_id: None,
+            dest_waypoint_id: None,
+            dest_latitude: Some(54.0),
+            dest_longitude: Some(10.0),
+            range_to_dest: Some(1.0),
+            bearing_to_dest: Some(90.0),
+            closing_velocity: Some(3.0),
+            arrived: false,
+        }
+    }
+
+    #[test]
+    fn rmb_active_emits_all_fields() {
+        let values = from_rmb(&rmb_active());
+        assert!(!values.is_empty());
+
+        let pos = values
+            .iter()
+            .find(|p| p.path == "navigation.courseGreatCircle.nextPoint.position")
+            .unwrap();
+        assert_eq!(pos.value["latitude"].as_f64().unwrap(), 54.0);
+        assert_eq!(pos.value["longitude"].as_f64().unwrap(), 10.0);
+
+        let dist = values
+            .iter()
+            .find(|p| p.path == "navigation.courseGreatCircle.nextPoint.distance")
+            .unwrap();
+        assert!((dist.value.as_f64().unwrap() - NM_TO_M).abs() < 1.0); // 1 NM → 1852 m
+
+        let bearing = values
+            .iter()
+            .find(|p| p.path == "navigation.courseGreatCircle.nextPoint.bearingTrue")
+            .unwrap();
+        assert!((bearing.value.as_f64().unwrap() - std::f64::consts::PI / 2.0).abs() < 1e-6); // 90° → π/2
+
+        let xte = values
+            .iter()
+            .find(|p| p.path == "navigation.courseGreatCircle.crossTrackError")
+            .unwrap();
+        assert!((xte.value.as_f64().unwrap() - 0.5 * NM_TO_M).abs() < 1.0); // 0.5 NM → 926 m
+    }
+
+    #[test]
+    fn rmb_void_emits_nothing() {
+        let rmb = nmea::sentences::RmbData {
+            status: false,
+            cross_track_error: Some(0.5),
+            origin_waypoint_id: None,
+            dest_waypoint_id: None,
+            dest_latitude: Some(54.0),
+            dest_longitude: Some(10.0),
+            range_to_dest: Some(1.0),
+            bearing_to_dest: Some(90.0),
+            closing_velocity: Some(3.0),
+            arrived: false,
+        };
+        assert!(from_rmb(&rmb).is_empty());
+    }
+
+    #[test]
+    fn rmb_missing_position_skips_position_path() {
+        let rmb = nmea::sentences::RmbData {
+            status: true,
+            cross_track_error: None,
+            origin_waypoint_id: None,
+            dest_waypoint_id: None,
+            dest_latitude: None,
+            dest_longitude: None,
+            range_to_dest: Some(2.0),
+            bearing_to_dest: Some(180.0),
+            closing_velocity: None,
+            arrived: false,
+        };
+        let values = from_rmb(&rmb);
+        assert!(
+            values
+                .iter()
+                .all(|p| p.path != "navigation.courseGreatCircle.nextPoint.position")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|p| p.path == "navigation.courseGreatCircle.nextPoint.distance")
+        );
+    }
+
+    #[test]
+    fn rmb_unit_conversions() {
+        // 1 NM = 1852 m exactly; 90 deg = π/2 rad
+        let values = from_rmb(&rmb_active());
+        let dist = values
+            .iter()
+            .find(|p| p.path == "navigation.courseGreatCircle.nextPoint.distance")
+            .unwrap();
+        assert_eq!(dist.value.as_f64().unwrap(), 1852.0);
+
+        let bearing = values
+            .iter()
+            .find(|p| p.path == "navigation.courseGreatCircle.nextPoint.bearingTrue")
+            .unwrap();
+        assert!((bearing.value.as_f64().unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-6);
     }
 }

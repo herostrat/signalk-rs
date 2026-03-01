@@ -17,6 +17,14 @@ use tracing::{debug, info, warn};
 
 use crate::resources::ResourceProviderRegistry;
 
+/// Tracks whether the active course was set by the REST API or an NMEA sentence.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+enum CourseSource {
+    #[default]
+    Api,
+    Nmea,
+}
+
 /// Persistent course configuration (independent of active navigation state).
 ///
 /// Exposed via `GET /signalk/v2/api/vessels/self/navigation/course/_config`.
@@ -41,6 +49,7 @@ impl Default for CourseConfig {
 pub struct CourseManager {
     state: RwLock<Option<CourseState>>,
     config: RwLock<CourseConfig>,
+    source: RwLock<CourseSource>,
     store: Arc<RwLock<SignalKStore>>,
     state_file: PathBuf,
     resource_providers: Arc<ResourceProviderRegistry>,
@@ -55,6 +64,7 @@ impl CourseManager {
         CourseManager {
             state: RwLock::new(None),
             config: RwLock::new(CourseConfig::default()),
+            source: RwLock::new(CourseSource::default()),
             store,
             state_file: data_dir.join("course").join("state.json"),
             resource_providers,
@@ -351,8 +361,16 @@ impl CourseManager {
     }
 
     /// Enable API-only mode: NMEA sources will not override the course.
+    ///
+    /// If the course is currently NMEA-sourced it is automatically cleared.
     pub async fn enable_api_only(&self) {
         self.config.write().await.api_only = true;
+        if *self.source.read().await == CourseSource::Nmea {
+            *self.state.write().await = None;
+            *self.source.write().await = CourseSource::Api;
+            self.emit_clear_deltas().await;
+            let _ = self.persist_state(None).await;
+        }
     }
 
     /// Disable API-only mode.
@@ -479,11 +497,87 @@ impl CourseManager {
     }
 
     /// Apply a new course state: persist and emit deltas.
+    /// Always marks the source as `Api` (REST API callers only).
     pub(crate) async fn apply_state(&self, course_state: CourseState) -> Result<(), PluginError> {
         self.persist_state(Some(&course_state)).await?;
         self.emit_deltas(&course_state).await;
         *self.state.write().await = Some(course_state);
+        *self.source.write().await = CourseSource::Api;
         Ok(())
+    }
+
+    /// Apply a destination received from an NMEA sentence.
+    ///
+    /// Ignored when `api_only = true`. Sets source to `Nmea`.
+    async fn apply_nmea_position(&self, position: Position) -> Result<(), PluginError> {
+        let config = self.config.read().await;
+        if config.api_only {
+            return Ok(());
+        }
+        let arrival_circle = config.arrival_circle;
+        drop(config);
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let previous = self.current_vessel_position().await;
+
+        let course_state = CourseState {
+            start_time: Some(now),
+            arrival_circle,
+            active_route: None,
+            next_point: Some(CoursePoint {
+                type_: PointType::Destination,
+                position,
+                href: None,
+            }),
+            previous_point: previous.map(|pos| CoursePoint {
+                type_: PointType::Destination,
+                position: pos,
+                href: None,
+            }),
+        };
+
+        self.persist_state(Some(&course_state)).await?;
+        self.emit_deltas(&course_state).await;
+        *self.state.write().await = Some(course_state);
+        *self.source.write().await = CourseSource::Nmea;
+        Ok(())
+    }
+
+    /// Start a background task that listens for NMEA-sourced course deltas.
+    ///
+    /// When a `navigation.courseGreatCircle.nextPoint.position` delta from a
+    /// non-course-manager source arrives and `api_only = false`, the position
+    /// is applied as an NMEA-sourced destination.
+    pub async fn start_nmea_listener(
+        self: Arc<Self>,
+        mut rx: tokio::sync::broadcast::Receiver<signalk_types::Delta>,
+    ) {
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(delta) => {
+                        for update in &delta.updates {
+                            if update.source.label == "course-manager" {
+                                continue;
+                            }
+                            for pv in &update.values {
+                                if pv.path == "navigation.courseGreatCircle.nextPoint.position" {
+                                    if let Ok(pos) =
+                                        serde_json::from_value::<Position>(pv.value.clone())
+                                    {
+                                        if let Err(e) = self.apply_nmea_position(pos).await {
+                                            warn!("NMEA course apply failed: {e}");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {} // skip lagged
+                }
+            }
+        });
     }
 
     /// Persist course state to disk.

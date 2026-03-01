@@ -53,6 +53,7 @@ pub fn sentence_to_delta(raw: &str, source_label: &str) -> Option<Delta> {
         nmea::ParseResult::VLW(vlw) => sentences::from_vlw(&vlw),
         nmea::ParseResult::VWR(vwr) => sentences::from_vwr(&vwr),
         nmea::ParseResult::VWT(vwt) => sentences::from_vwt(&vwt),
+        nmea::ParseResult::RMB(rmb) => sentences::from_rmb(&rmb),
         nmea::ParseResult::XDR(ref xdr) => xdr::from_xdr(xdr),
         _ => return None,
     };

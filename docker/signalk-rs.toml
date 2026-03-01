@@ -59,3 +59,10 @@ config = { addr = "0.0.0.0:10110", source_label = "nmea0183-sim" }
 [[plugins]]
 id = "nmea2000"
 config = { interface = "vcan0", source_label = "nmea2000-sim" }
+
+# Anchor alarm: anchor set at North Pole, 100m radius.
+# Simulator vessel is near Kiel (~54°N 10°E), so alarm triggers immediately.
+[[plugins]]
+id = "anchor-alarm"
+enabled = true
+config = { position = { latitude = 90.0, longitude = 0.0 }, radius = 100.0 }

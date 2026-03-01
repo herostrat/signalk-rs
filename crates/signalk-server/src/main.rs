@@ -268,6 +268,10 @@ async fn main() -> Result<()> {
     // ── Course manager: restore persisted state + arrival check timer ────────
     state.course_manager.load().await;
     {
+        let rx = state.store.read().await.subscribe();
+        state.course_manager.clone().start_nmea_listener(rx).await;
+    }
+    {
         let course_manager = state.course_manager.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));

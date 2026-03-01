@@ -2,6 +2,7 @@ mod helpers;
 
 use axum::{body::Body, http::Request};
 use helpers::{get, put_json};
+use std::sync::Arc;
 use tower::ServiceExt;
 
 /// Build a test app backed by a real temp directory for course persistence.
@@ -311,4 +312,124 @@ async fn advance_without_active_route_returns_error() {
     )
     .await;
     assert_eq!(status, 400);
+}
+
+// ─── api_only semantics ───────────────────────────────────────────────────────
+
+/// Build a test app with course support AND return the Arc<ServerState> for direct
+/// access (e.g. to start the NMEA listener and inject deltas).
+fn test_app_course_state() -> (
+    axum::Router,
+    Arc<signalk_server::ServerState>,
+    tempfile::TempDir,
+) {
+    let tmp = tempfile::tempdir().unwrap();
+    let config = signalk_server::config::ServerConfig {
+        data_dir: tmp.path().to_string_lossy().to_string(),
+        ..signalk_server::config::ServerConfig::default()
+    };
+    let (store, _rx) = signalk_store::store::SignalKStore::new(config.vessel.uuid.clone());
+    let state = signalk_server::ServerState::new(config, store);
+    let router = signalk_server::build_router(state.clone(), &[]);
+    (router, state, tmp)
+}
+
+/// Inject an NMEA-style delta with a nextPoint position into the store.
+fn nmea_course_delta(lat: f64, lon: f64) -> signalk_types::Delta {
+    signalk_types::Delta::self_vessel(vec![signalk_types::Update::new(
+        signalk_types::Source::nmea0183("gps-chartplotter", "GP"),
+        vec![signalk_types::PathValue::new(
+            "navigation.courseGreatCircle.nextPoint.position",
+            serde_json::json!({ "latitude": lat, "longitude": lon }),
+        )],
+    )])
+}
+
+#[tokio::test]
+async fn api_only_false_nmea_sets_course() {
+    let (app, state, _tmp) = test_app_course_state();
+
+    // Subscribe before injecting delta
+    let rx = state.store.read().await.subscribe();
+    state.course_manager.clone().start_nmea_listener(rx).await;
+
+    // Inject NMEA delta
+    let delta = nmea_course_delta(54.0, 10.0);
+    state.store.write().await.apply_delta(delta);
+
+    // Give the listener time to process
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let (status, body) = get(app, COURSE_BASE).await;
+    assert_eq!(status, 200);
+    assert_eq!(body["nextPoint"]["position"]["latitude"], 54.0);
+    assert_eq!(body["nextPoint"]["position"]["longitude"], 10.0);
+}
+
+#[tokio::test]
+async fn api_only_true_nmea_ignored() {
+    let (app, state, _tmp) = test_app_course_state();
+
+    // Enable api_only before starting the listener
+    state.course_manager.enable_api_only().await;
+
+    let rx = state.store.read().await.subscribe();
+    state.course_manager.clone().start_nmea_listener(rx).await;
+
+    // Inject NMEA delta — should be silently ignored
+    let delta = nmea_course_delta(54.0, 10.0);
+    state.store.write().await.apply_delta(delta);
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    // Course should still be empty
+    let (status, body) = get(app, COURSE_BASE).await;
+    assert_eq!(status, 200);
+    assert_eq!(body, serde_json::json!({}));
+}
+
+#[tokio::test]
+async fn enable_api_only_clears_nmea_course() {
+    let (app, state, _tmp) = test_app_course_state();
+
+    let rx = state.store.read().await.subscribe();
+    state.course_manager.clone().start_nmea_listener(rx).await;
+
+    // Set course via NMEA
+    let delta = nmea_course_delta(54.0, 10.0);
+    state.store.write().await.apply_delta(delta);
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    // Verify course is set
+    let (_, body) = get(app.clone(), COURSE_BASE).await;
+    assert_eq!(body["nextPoint"]["position"]["latitude"], 54.0);
+
+    // Enable api_only — should auto-clear the NMEA-sourced course
+    state.course_manager.enable_api_only().await;
+
+    let (status, body) = get(app, COURSE_BASE).await;
+    assert_eq!(status, 200);
+    assert_eq!(body, serde_json::json!({}));
+}
+
+#[tokio::test]
+async fn rest_api_always_works_regardless_of_api_only() {
+    let (app, state, _tmp) = test_app_course_state();
+
+    // Enable api_only
+    state.course_manager.enable_api_only().await;
+
+    // REST PUT destination must still succeed with api_only=true
+    let (status, _) = put_json(
+        app.clone(),
+        &format!("{COURSE_BASE}/destination"),
+        serde_json::json!({
+            "position": { "latitude": 55.0, "longitude": 12.0 }
+        }),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    let (_, body) = get(app, COURSE_BASE).await;
+    assert_eq!(body["nextPoint"]["position"]["latitude"], 55.0);
 }

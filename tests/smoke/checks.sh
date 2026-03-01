@@ -204,6 +204,25 @@ check "POST silence non-existent notification returns 404" \
 check "POST acknowledge non-existent notification returns 404" \
   "$(http_status POST "$BASE/signalk/v2/api/notifications/nonexistent.alarm/acknowledge")" "404"
 
+echo "  Notifications API (Happy Path)"
+# Anchor alarm should be active: anchor is at North Pole, vessel near Kiel.
+NOTIF=$(fetch "$BASE/signalk/v1/api/vessels/self/notifications/navigation/anchor")
+check "anchor alarm is active (alarm state)" "$NOTIF" '"state":"alarm"'
+check "alarm has message field" "$NOTIF" '"message"'
+check "alarm has method array" "$NOTIF" '"method"'
+
+# Silence the alarm
+check "POST silence alarm returns 200" \
+  "$(http_status POST "$BASE/signalk/v2/api/notifications/navigation.anchor/silence")" "200"
+AFTER_SILENCE=$(fetch "$BASE/signalk/v1/api/vessels/self/notifications/navigation/anchor")
+check "alarm silenced flag is true" "$AFTER_SILENCE" '"silenced":true'
+
+# Acknowledge the alarm
+check "POST acknowledge alarm returns 200" \
+  "$(http_status POST "$BASE/signalk/v2/api/notifications/navigation.anchor/acknowledge")" "200"
+AFTER_ACK=$(fetch "$BASE/signalk/v1/api/vessels/self/notifications/navigation/anchor")
+check "alarm acknowledged flag is true" "$AFTER_ACK" '"acknowledged":true'
+
 # --- Admin UI ---
 echo "  Admin UI"
 check "Admin UI serves static files (200)" \

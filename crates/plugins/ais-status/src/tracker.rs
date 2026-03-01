@@ -118,6 +118,11 @@ pub struct TrackedTarget {
     pub sog: Option<f64>,
     pub cog: Option<f64>,
     pub heading: Option<f64>,
+    // CPA state
+    pub last_cpa_m: Option<f64>,
+    pub last_tcpa_s: Option<f64>,
+    /// Whether a CPA notification is currently active for this target.
+    pub cpa_alarm_active: bool,
 }
 
 impl TrackedTarget {
@@ -145,6 +150,9 @@ impl TrackedTarget {
             sog: None,
             cog: None,
             heading: None,
+            last_cpa_m: None,
+            last_tcpa_s: None,
+            cpa_alarm_active: false,
         }
     }
 
@@ -367,6 +375,47 @@ impl AisTracker {
 
         transitions
     }
+
+    /// Snapshot of a confirmed target's navigation data for CPA computation.
+    pub fn targets_for_cpa(&self) -> Vec<TargetCpaSnapshot> {
+        self.targets
+            .values()
+            .filter(|t| t.status == TargetStatus::Confirmed && t.position.is_some())
+            .map(|t| {
+                let (lat, lon) = t.position.unwrap();
+                TargetCpaSnapshot {
+                    mmsi: t.mmsi.clone(),
+                    context: t.context.clone(),
+                    lat,
+                    lon,
+                    sog_ms: t.sog.unwrap_or(0.0),
+                    cog_rad: t.cog.unwrap_or(0.0),
+                    cpa_alarm_active: t.cpa_alarm_active,
+                }
+            })
+            .collect()
+    }
+
+    /// Update a target's CPA state after computation.
+    pub fn update_target_cpa(&mut self, mmsi: &str, cpa_m: f64, tcpa_s: f64, alarm_active: bool) {
+        if let Some(target) = self.targets.get_mut(mmsi) {
+            target.last_cpa_m = Some(cpa_m);
+            target.last_tcpa_s = Some(tcpa_s);
+            target.cpa_alarm_active = alarm_active;
+        }
+    }
+}
+
+/// Navigation snapshot of a confirmed target for CPA computation.
+#[derive(Debug, Clone)]
+pub struct TargetCpaSnapshot {
+    pub mmsi: String,
+    pub context: String,
+    pub lat: f64,
+    pub lon: f64,
+    pub sog_ms: f64,
+    pub cog_rad: f64,
+    pub cpa_alarm_active: bool,
 }
 
 #[cfg(test)]
