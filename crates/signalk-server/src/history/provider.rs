@@ -877,6 +877,73 @@ mod tests {
     }
 
     #[test]
+    fn query_nonexistent_path_returns_empty() {
+        let p = test_provider();
+        // Insert data for path A
+        p.record_batch(&[(
+            "vessels.self".into(),
+            "navigation.speedOverGround".into(),
+            5.0,
+            Some("2026-03-02T12:00:00Z".into()),
+        )])
+        .unwrap();
+
+        // Query path B — should return empty, not error
+        let resp = p
+            .get_values(&ValuesRequest {
+                context: "vessels.self".into(),
+                path_specs: vec![PathSpec {
+                    path: "navigation.courseOverGroundTrue".into(),
+                    method: AggregateMethod::Average,
+                }],
+                from: Some("2026-03-02T12:00:00Z".into()),
+                to: Some("2026-03-02T13:00:00Z".into()),
+                duration: None,
+                resolution: None,
+            })
+            .unwrap();
+        assert!(resp.data.is_empty());
+    }
+
+    #[test]
+    fn record_high_frequency_values() {
+        let p = test_provider();
+        let mut batch: Vec<(String, String, f64, Option<String>)> = Vec::new();
+        // 1000 values at 1-second intervals: 12:00:00 to 12:16:39
+        for i in 0..1000u32 {
+            let minutes = i / 60;
+            let secs = i % 60;
+            batch.push((
+                "vessels.self".into(),
+                "navigation.speedOverGround".into(),
+                5.0 + (i as f64) * 0.001,
+                Some(format!("2026-03-02T12:{minutes:02}:{secs:02}Z")),
+            ));
+        }
+        p.record_batch(&batch).unwrap();
+
+        let resp = p
+            .get_values(&ValuesRequest {
+                context: "vessels.self".into(),
+                path_specs: vec![PathSpec {
+                    path: "navigation.speedOverGround".into(),
+                    method: AggregateMethod::Average,
+                }],
+                from: Some("2026-03-02T12:00:00Z".into()),
+                to: Some("2026-03-02T12:59:59Z".into()),
+                duration: None,
+                resolution: None,
+            })
+            .unwrap();
+
+        assert_eq!(resp.data.len(), 1000, "all 1000 values should be returned");
+        // Verify ordering: first value < last value
+        let first = resp.data[0][1].as_f64().unwrap();
+        let last = resp.data[999][1].as_f64().unwrap();
+        assert!(first < last, "values should be in chronological order");
+    }
+
+    #[test]
     fn vacuum_succeeds() {
         let p = test_provider();
         p.record_batch(&[(

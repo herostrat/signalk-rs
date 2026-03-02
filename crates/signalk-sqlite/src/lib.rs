@@ -254,6 +254,84 @@ mod tests {
     }
 
     #[test]
+    fn history_and_tracks_share_connection() {
+        let db = Database::open_in_memory().unwrap();
+        let conn = db.conn();
+
+        // Write history data
+        conn.execute(
+            "INSERT INTO history_raw (timestamp, context, path, value) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params!["2026-03-02T12:00:00Z", "vessels.self", "nav.sog", 5.0],
+        )
+        .unwrap();
+
+        // Write track data on the SAME connection
+        conn.execute(
+            "INSERT INTO track_points (context, lat, lon, timestamp) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params!["vessels.self", 54.0, 10.0, "2026-03-02T12:00:00Z"],
+        )
+        .unwrap();
+
+        // Read both back
+        let hist_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM history_raw", [], |row| row.get(0))
+            .unwrap();
+        let track_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM track_points", [], |row| row.get(0))
+            .unwrap();
+
+        assert_eq!(hist_count, 1);
+        assert_eq!(track_count, 1);
+    }
+
+    #[test]
+    fn concurrent_writes_no_deadlock() {
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+
+        let db = Database::open_in_memory().unwrap();
+        let conn = Arc::new(Mutex::new(db.into_conn()));
+
+        let conn_h = conn.clone();
+        let conn_t = conn.clone();
+
+        let h1 = thread::spawn(move || {
+            for i in 0..100 {
+                let c = conn_h.lock().unwrap();
+                c.execute(
+                    "INSERT INTO history_raw (timestamp, context, path, value) VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![format!("2026-03-02T12:00:{i:02}Z"), "vessels.self", "nav.sog", i as f64],
+                )
+                .unwrap();
+            }
+        });
+
+        let h2 = thread::spawn(move || {
+            for i in 0..100 {
+                let c = conn_t.lock().unwrap();
+                c.execute(
+                    "INSERT INTO track_points (context, lat, lon, timestamp) VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params!["vessels.self", 54.0 + i as f64 * 0.001, 10.0, format!("2026-03-02T12:00:{i:02}Z")],
+                )
+                .unwrap();
+            }
+        });
+
+        h1.join().unwrap();
+        h2.join().unwrap();
+
+        let c = conn.lock().unwrap();
+        let hist: i64 = c
+            .query_row("SELECT COUNT(*) FROM history_raw", [], |row| row.get(0))
+            .unwrap();
+        let tracks: i64 = c
+            .query_row("SELECT COUNT(*) FROM track_points", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(hist, 100);
+        assert_eq!(tracks, 100);
+    }
+
+    #[test]
     fn file_based_database() {
         let dir = std::env::temp_dir().join("signalk-sqlite-test");
         let _ = std::fs::create_dir_all(&dir);

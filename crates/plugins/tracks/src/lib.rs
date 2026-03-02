@@ -496,6 +496,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn delta_to_track_point_pipeline() {
+        let mut plugin = TracksPlugin::new();
+        let ctx = Arc::new(MockPluginContext::new());
+
+        // min_interval=0 so every delta gets recorded
+        plugin
+            .start(serde_json::json!({ "min_interval_secs": 0 }), ctx.clone())
+            .await
+            .unwrap();
+
+        // Send position delta
+        let delta = Delta::with_context(
+            "vessels.self".to_string(),
+            vec![Update::new(
+                Source::plugin("test"),
+                vec![PathValue::new(
+                    "navigation.position",
+                    serde_json::json!({ "latitude": 54.321, "longitude": 10.654 }),
+                )],
+            )],
+        );
+        ctx.deliver_delta(&delta);
+
+        // Verify data landed in SQLite via the shared connection
+        {
+            let conn = ctx.database.lock().unwrap();
+            let (lat, lon): (f64, f64) = conn
+                .query_row(
+                    "SELECT lat, lon FROM track_points WHERE context = 'vessels.self'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert!((lat - 54.321).abs() < 1e-6);
+            assert!((lon - 10.654).abs() < 1e-6);
+        }
+
+        plugin.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn prune_removes_old_track_points() {
+        let mut plugin = TracksPlugin::new();
+        let ctx = Arc::new(MockPluginContext::new());
+
+        plugin
+            .start(
+                serde_json::json!({ "min_interval_secs": 0, "max_age_hours": 24 }),
+                ctx.clone(),
+            )
+            .await
+            .unwrap();
+
+        // Insert an old point directly via SQL (48 hours ago)
+        let old_ts = (chrono::Utc::now() - chrono::Duration::hours(48)).to_rfc3339();
+        {
+            let conn = ctx.database.lock().unwrap();
+            conn.execute(
+                "INSERT INTO track_points (context, lat, lon, timestamp) VALUES (?1, ?2, ?3, ?4)",
+                signalk_sqlite::rusqlite::params!["vessels.self", 54.0, 10.0, old_ts],
+            )
+            .unwrap();
+
+            let count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM track_points", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(count, 1, "point should exist before prune");
+        }
+
+        // The store has access to the same connection; use it to prune
+        let store = SqliteTrackStore::new(ctx.database().unwrap());
+        store.prune(chrono::TimeDelta::hours(24));
+
+        {
+            let conn = ctx.database.lock().unwrap();
+            let count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM track_points", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(count, 0, "old point should be pruned");
+        }
+
+        plugin.stop().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn resolution_filter_skips_rapid_updates() {
         let mut plugin = TracksPlugin::new();
         let ctx = Arc::new(MockPluginContext::new());

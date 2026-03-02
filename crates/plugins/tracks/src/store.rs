@@ -437,6 +437,62 @@ mod tests {
     }
 
     #[test]
+    fn query_empty_db_returns_empty() {
+        let store = sqlite_store();
+        let tracks = store.query(&TrackQuery::default());
+        assert!(tracks.is_empty());
+        assert_eq!(store.total_points(), 0);
+        assert_eq!(store.vessel_count(), 0);
+    }
+
+    #[test]
+    fn record_and_query_multiple_vessels_filtered() {
+        let store = sqlite_store();
+        // 3 vessels × 5 points each
+        for v in ["vessels.self", "vessels.ais.123", "vessels.ais.456"] {
+            for i in 0..5 {
+                store.record(v, point(54.0 + i as f64 * 0.1, 10.0, 10 - i));
+            }
+        }
+
+        assert_eq!(store.total_points(), 15);
+        assert_eq!(store.vessel_count(), 3);
+
+        // Filtered query
+        let tracks = store.query(&TrackQuery {
+            context: Some("vessels.ais.123".into()),
+            ..Default::default()
+        });
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].context, "vessels.ais.123");
+        let pts: usize = tracks[0].segments.iter().map(|s| s.points.len()).sum();
+        assert_eq!(pts, 5);
+    }
+
+    #[test]
+    fn aux_data_roundtrip() {
+        let store = sqlite_store();
+        let now = Utc::now();
+        store.record(
+            "v",
+            TrackPoint {
+                lat: 54.0,
+                lon: 10.0,
+                timestamp: now,
+                sog: Some(5.14),
+                cog: Some(1.57),
+                depth: Some(12.5),
+            },
+        );
+
+        let tracks = store.query(&TrackQuery::default());
+        let pt = &tracks[0].segments[0].points[0];
+        assert!((pt.sog.unwrap() - 5.14).abs() < 1e-10);
+        assert!((pt.cog.unwrap() - 1.57).abs() < 1e-10);
+        assert!((pt.depth.unwrap() - 12.5).abs() < 1e-10);
+    }
+
+    #[test]
     fn segment_by_gap_single_segment() {
         let now = Utc::now();
         let points = vec![
