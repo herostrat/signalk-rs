@@ -4,8 +4,8 @@ use super::query::{
     AggregateMethod, ContextsRequest, PathsRequest, TimeRange, ValueMeta, ValuesRequest,
     ValuesResponse,
 };
-use signalk_sqlite::Database;
-use std::sync::Mutex;
+use signalk_sqlite::rusqlite::Connection;
+use std::sync::{Arc, Mutex};
 
 /// Trait for history data providers.
 ///
@@ -40,20 +40,19 @@ pub trait HistoryProvider: Send + Sync {
 
 /// SQLite-backed history provider.
 pub struct SqliteHistoryProvider {
-    db: Mutex<Database>,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl SqliteHistoryProvider {
-    pub fn new(db: Database) -> Self {
-        SqliteHistoryProvider { db: Mutex::new(db) }
+    pub fn new(conn: Arc<Mutex<Connection>>) -> Self {
+        SqliteHistoryProvider { conn }
     }
 }
 
 impl HistoryProvider for SqliteHistoryProvider {
     fn record_batch(&self, batch: &[(String, String, f64, Option<String>)]) -> Result<(), String> {
-        let db = self.db.lock().map_err(|e| format!("lock: {e}"))?;
-        let tx = db
-            .conn()
+        let conn = self.conn.lock().map_err(|e| format!("lock: {e}"))?;
+        let tx = conn
             .unchecked_transaction()
             .map_err(|e| format!("tx: {e}"))?;
 
@@ -89,11 +88,10 @@ impl HistoryProvider for SqliteHistoryProvider {
         retention_raw_days: u32,
         retention_daily_days: u32,
     ) -> Result<(), String> {
-        let db = self.db.lock().map_err(|e| format!("lock: {e}"))?;
+        let conn = self.conn.lock().map_err(|e| format!("lock: {e}"))?;
 
         // Aggregate old raw data into daily summaries
-        db.conn()
-            .execute_batch(&format!(
+        conn.execute_batch(&format!(
                 "INSERT OR REPLACE INTO history_daily (date, context, path, avg_value, min_value, max_value, count)
                  SELECT
                      substr(timestamp, 1, 10) AS date,
@@ -116,9 +114,8 @@ impl HistoryProvider for SqliteHistoryProvider {
     }
 
     fn db_size_bytes(&self) -> Result<u64, String> {
-        let db = self.db.lock().map_err(|e| format!("lock: {e}"))?;
-        let size: i64 = db
-            .conn()
+        let conn = self.conn.lock().map_err(|e| format!("lock: {e}"))?;
+        let size: i64 = conn
             .query_row(
                 "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()",
                 [],
@@ -129,12 +126,13 @@ impl HistoryProvider for SqliteHistoryProvider {
     }
 
     fn vacuum(&self) -> Result<(), String> {
-        let db = self.db.lock().map_err(|e| format!("lock: {e}"))?;
-        db.vacuum().map_err(|e| format!("vacuum: {e}"))
+        let conn = self.conn.lock().map_err(|e| format!("lock: {e}"))?;
+        conn.execute_batch("VACUUM")
+            .map_err(|e| format!("vacuum: {e}"))
     }
 
     fn get_values(&self, req: &ValuesRequest) -> Result<ValuesResponse, String> {
-        let db = self.db.lock().map_err(|e| format!("lock: {e}"))?;
+        let conn = self.conn.lock().map_err(|e| format!("lock: {e}"))?;
         let (from_ts, to_ts) = resolve_time_range(&req.from, &req.to, &req.duration)?;
 
         let explicit_resolution = req
@@ -155,7 +153,7 @@ impl HistoryProvider for SqliteHistoryProvider {
 
         for spec in &req.path_specs {
             let rows = query_path_values(
-                db.conn(),
+                &conn,
                 &req.context,
                 &spec.path,
                 &from_ts,
@@ -227,14 +225,13 @@ impl HistoryProvider for SqliteHistoryProvider {
     }
 
     fn get_contexts(&self, req: &ContextsRequest) -> Result<Vec<String>, String> {
-        let db = self.db.lock().map_err(|e| format!("lock: {e}"))?;
+        let conn = self.conn.lock().map_err(|e| format!("lock: {e}"))?;
         let (from_ts, to_ts) = resolve_time_range(&req.from, &req.to, &req.duration)?;
 
         let mut contexts: Vec<String> = Vec::new();
 
         // From raw
-        let mut stmt = db
-            .conn()
+        let mut stmt = conn
             .prepare(
                 "SELECT DISTINCT context FROM history_raw \
                  WHERE timestamp >= ?1 AND timestamp <= ?2",
@@ -254,8 +251,7 @@ impl HistoryProvider for SqliteHistoryProvider {
         // From daily
         let from_date = &from_ts[..10.min(from_ts.len())];
         let to_date = &to_ts[..10.min(to_ts.len())];
-        let mut stmt = db
-            .conn()
+        let mut stmt = conn
             .prepare(
                 "SELECT DISTINCT context FROM history_daily \
                  WHERE date >= ?1 AND date <= ?2",
@@ -278,14 +274,13 @@ impl HistoryProvider for SqliteHistoryProvider {
     }
 
     fn get_paths(&self, req: &PathsRequest) -> Result<Vec<String>, String> {
-        let db = self.db.lock().map_err(|e| format!("lock: {e}"))?;
+        let conn = self.conn.lock().map_err(|e| format!("lock: {e}"))?;
         let (from_ts, to_ts) = resolve_time_range(&req.from, &req.to, &req.duration)?;
 
         let mut paths: Vec<String> = Vec::new();
 
         // From raw
-        let mut stmt = db
-            .conn()
+        let mut stmt = conn
             .prepare(
                 "SELECT DISTINCT path FROM history_raw \
                  WHERE context = ?1 AND timestamp >= ?2 AND timestamp <= ?3",
@@ -306,8 +301,7 @@ impl HistoryProvider for SqliteHistoryProvider {
         // From daily
         let from_date = &from_ts[..10.min(from_ts.len())];
         let to_date = &to_ts[..10.min(to_ts.len())];
-        let mut stmt = db
-            .conn()
+        let mut stmt = conn
             .prepare(
                 "SELECT DISTINCT path FROM history_daily \
                  WHERE context = ?1 AND date >= ?2 AND date <= ?3",
@@ -609,10 +603,12 @@ fn query_daily_values(
 mod tests {
     use super::super::query::PathSpec;
     use super::*;
+    use signalk_sqlite::Database;
 
     fn test_provider() -> SqliteHistoryProvider {
         let db = Database::open_in_memory().unwrap();
-        SqliteHistoryProvider::new(db)
+        let conn = Arc::new(Mutex::new(db.into_conn()));
+        SqliteHistoryProvider::new(conn)
     }
 
     #[test]
@@ -796,23 +792,20 @@ mod tests {
         p.aggregate_and_prune(0, 36500).unwrap();
 
         // Raw should be empty
-        let db = p.db.lock().unwrap();
-        let raw_count: i64 = db
-            .conn()
+        let conn = p.conn.lock().unwrap();
+        let raw_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM history_raw", [], |row| row.get(0))
             .unwrap();
         assert_eq!(raw_count, 0);
 
         // Daily should have aggregated data
-        let daily_count: i64 = db
-            .conn()
+        let daily_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM history_daily", [], |row| row.get(0))
             .unwrap();
         assert!(daily_count > 0, "expected daily data after aggregation");
 
         // Verify aggregation values
-        let (avg, min, max, count): (f64, f64, f64, i64) = db
-            .conn()
+        let (avg, min, max, count): (f64, f64, f64, i64) = conn
             .query_row(
                 "SELECT avg_value, min_value, max_value, count FROM history_daily \
              WHERE context = 'vessels.self' AND path = 'nav.sog'",

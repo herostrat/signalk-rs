@@ -17,12 +17,13 @@
 
 use crate::geojson::tracks_to_geojson;
 use crate::gpx::tracks_to_gpx;
-use crate::store::TrackStore;
+use crate::simplify::simplify_track_points;
+use crate::store::SqliteTrackStore;
 use crate::types::{TrackFormat, TrackQuery};
 use chrono::DateTime;
 use signalk_plugin_api::{PluginRequest, PluginResponse};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// Parse a query string into a HashMap of key-value pairs.
 fn parse_query(query: &str) -> HashMap<String, String> {
@@ -104,6 +105,10 @@ pub fn parse_track_query(query_str: &str) -> Result<TrackQuery, String> {
         );
     }
 
+    if let Some(s) = params.get("simplify") {
+        q.simplify = Some(s.parse().map_err(|e| format!("invalid 'simplify': {e}"))?);
+    }
+
     if let Some(fmt) = params.get("format") {
         q.format = match fmt.as_str() {
             "gpx" => TrackFormat::Gpx,
@@ -120,17 +125,24 @@ pub fn parse_track_query(query_str: &str) -> Result<TrackQuery, String> {
 }
 
 /// Handle `GET /` — query tracks and return GeoJSON or GPX.
-pub fn handle_get_tracks(
-    store: &Arc<Mutex<dyn TrackStore>>,
-    req: &PluginRequest,
-) -> PluginResponse {
+pub fn handle_get_tracks(store: &Arc<SqliteTrackStore>, req: &PluginRequest) -> PluginResponse {
     let query = match parse_track_query(req.query.as_deref().unwrap_or("")) {
         Ok(q) => q,
         Err(e) => return PluginResponse::json(400, &serde_json::json!({ "error": e })),
     };
 
     let format = query.format;
-    let tracks = store.lock().unwrap().query(&query);
+    let simplify_epsilon = query.simplify;
+    let mut tracks = store.query(&query);
+
+    // Apply Douglas-Peucker simplification if requested
+    if let Some(epsilon) = simplify_epsilon {
+        for track in &mut tracks {
+            for seg in &mut track.segments {
+                seg.points = simplify_track_points(&seg.points, epsilon);
+            }
+        }
+    }
 
     match format {
         TrackFormat::GeoJson => {
@@ -141,7 +153,13 @@ pub fn handle_get_tracks(
             let gpx = tracks_to_gpx(&tracks);
             PluginResponse {
                 status: 200,
-                headers: vec![("Content-Type".into(), "application/gpx+xml".into())],
+                headers: vec![
+                    ("Content-Type".into(), "application/gpx+xml".into()),
+                    (
+                        "Content-Disposition".into(),
+                        "attachment; filename=\"track.gpx\"".into(),
+                    ),
+                ],
                 body: gpx.into_bytes(),
             }
         }
@@ -149,26 +167,23 @@ pub fn handle_get_tracks(
 }
 
 /// Handle `GET /summary` — vessel track summary.
-pub fn handle_get_summary(store: &Arc<Mutex<dyn TrackStore>>) -> PluginResponse {
-    let summary = store.lock().unwrap().summary();
+pub fn handle_get_summary(store: &Arc<SqliteTrackStore>) -> PluginResponse {
+    let summary = store.summary();
     PluginResponse::json(200, &summary)
 }
 
 /// Handle `DELETE /` — clear tracks for one or all vessels.
-pub fn handle_delete_tracks(
-    store: &Arc<Mutex<dyn TrackStore>>,
-    req: &PluginRequest,
-) -> PluginResponse {
+pub fn handle_delete_tracks(store: &Arc<SqliteTrackStore>, req: &PluginRequest) -> PluginResponse {
     let params = parse_query(req.query.as_deref().unwrap_or(""));
 
     if let Some(context) = params.get("context") {
-        store.lock().unwrap().clear_vessel(context);
+        store.clear_vessel(context);
         PluginResponse::json(
             200,
             &serde_json::json!({ "message": format!("cleared tracks for {context}") }),
         )
     } else {
-        store.lock().unwrap().clear_all();
+        store.clear_all();
         PluginResponse::json(200, &serde_json::json!({ "message": "all tracks cleared" }))
     }
 }
@@ -176,12 +191,13 @@ pub fn handle_delete_tracks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::InMemoryTrackStore;
     use crate::types::TrackPoint;
     use chrono::Utc;
+    use std::sync::Mutex;
 
-    fn make_store() -> Arc<Mutex<dyn TrackStore>> {
-        let mut store = InMemoryTrackStore::new(1000);
+    fn make_store() -> Arc<SqliteTrackStore> {
+        let db = signalk_sqlite::Database::open_in_memory().unwrap();
+        let store = SqliteTrackStore::new(Arc::new(Mutex::new(db.into_conn())));
         store.record(
             "vessels.self",
             TrackPoint {
@@ -193,7 +209,7 @@ mod tests {
                 depth: None,
             },
         );
-        Arc::new(Mutex::new(store))
+        Arc::new(store)
     }
 
     #[test]
@@ -312,14 +328,14 @@ mod tests {
 
         let resp = handle_delete_tracks(&store, &req);
         assert_eq!(resp.status, 200);
-        assert_eq!(store.lock().unwrap().total_points(), 0);
+        assert_eq!(store.total_points(), 0);
     }
 
     #[test]
     fn delete_single_vessel() {
         let store = make_store();
         // Add another vessel
-        store.lock().unwrap().record(
+        store.record(
             "vessels.other",
             TrackPoint {
                 lat: 55.0,
@@ -341,8 +357,8 @@ mod tests {
 
         let resp = handle_delete_tracks(&store, &req);
         assert_eq!(resp.status, 200);
-        assert_eq!(store.lock().unwrap().vessel_count(), 1);
-        assert_eq!(store.lock().unwrap().total_points(), 1);
+        assert_eq!(store.vessel_count(), 1);
+        assert_eq!(store.total_points(), 1);
     }
 
     #[test]

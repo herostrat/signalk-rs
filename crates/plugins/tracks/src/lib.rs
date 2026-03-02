@@ -7,11 +7,12 @@
 /// ```toml
 /// [[plugins]]
 /// id = "tracks"
-/// config = { min_interval_secs = 5, max_points = 50000, max_age_hours = 24 }
+/// config = { min_interval_secs = 5, max_age_hours = 24 }
 /// ```
 pub mod api;
 pub mod geojson;
 pub mod gpx;
+pub mod simplify;
 pub mod store;
 pub mod types;
 
@@ -28,7 +29,7 @@ use std::sync::{Arc, Mutex};
 use tracing::{debug, info};
 
 use crate::api::{handle_delete_tracks, handle_get_summary, handle_get_tracks};
-use crate::store::{InMemoryTrackStore, TrackStore};
+use crate::store::SqliteTrackStore;
 use crate::types::TrackPoint;
 
 // ─── Config ─────────────────────────────────────────────────────────────────
@@ -38,10 +39,6 @@ struct TracksConfig {
     /// Minimum seconds between recorded points per vessel. Default: 5.
     #[serde(default = "default_min_interval")]
     min_interval_secs: u64,
-
-    /// Maximum points per vessel (ring buffer size). Default: 50_000.
-    #[serde(default = "default_max_points")]
-    max_points: usize,
 
     /// Maximum age of points in hours before pruning. Default: 24.
     #[serde(default = "default_max_age_hours")]
@@ -63,9 +60,6 @@ struct TracksConfig {
 fn default_min_interval() -> u64 {
     5
 }
-fn default_max_points() -> usize {
-    50_000
-}
 fn default_max_age_hours() -> u64 {
     24
 }
@@ -80,7 +74,6 @@ impl Default for TracksConfig {
     fn default() -> Self {
         TracksConfig {
             min_interval_secs: default_min_interval(),
-            max_points: default_max_points(),
             max_age_hours: default_max_age_hours(),
             tick_interval_secs: default_tick_interval(),
             track_self: true,
@@ -143,11 +136,6 @@ impl Plugin for TracksPlugin {
                     "description": "Minimum seconds between recorded points per vessel",
                     "default": 5
                 },
-                "max_points": {
-                    "type": "integer",
-                    "description": "Maximum points per vessel (ring buffer size)",
-                    "default": 50000
-                },
                 "max_age_hours": {
                     "type": "integer",
                     "description": "Maximum age of points in hours before pruning",
@@ -186,19 +174,18 @@ impl Plugin for TracksPlugin {
 
         info!(
             min_interval = cfg.min_interval_secs,
-            max_points = cfg.max_points,
             max_age_hours = cfg.max_age_hours,
             track_self = cfg.track_self,
             track_others = cfg.track_others,
             "Tracks plugin starting"
         );
 
-        let store: Arc<Mutex<dyn TrackStore>> =
-            Arc::new(Mutex::new(InMemoryTrackStore::new(cfg.max_points)));
+        let conn = ctx
+            .database()
+            .ok_or_else(|| PluginError::runtime("no shared database available".to_string()))?;
+        let store = Arc::new(SqliteTrackStore::new(conn));
 
         // ── Register plugin routes (/plugins/tracks/) ──────────────────────
-        // The spec routes (/signalk/v1/api/tracks, /vessels/{id}/track) are
-        // defined in signalk-server and delegate to GET / here.
         let store_get = store.clone();
         let store_summary = store.clone();
         let store_delete = store.clone();
@@ -359,7 +346,7 @@ impl Plugin for TracksPlugin {
                         depth: aux.depth,
                     };
 
-                    store_sub.lock().unwrap().record(context, point);
+                    store_sub.record(context, point);
                 }),
             )
             .await?;
@@ -378,11 +365,9 @@ impl Plugin for TracksPlugin {
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
-                        let (total, vessels) = {
-                            let mut s = store_tick.lock().unwrap();
-                            s.prune(max_age);
-                            (s.total_points(), s.vessel_count())
-                        };
+                        store_tick.prune(max_age);
+                        let total = store_tick.total_points();
+                        let vessels = store_tick.vessel_count();
                         ctx_tick.set_status(&format!(
                             "Recording {total} points across {vessels} vessels"
                         ));
@@ -446,7 +431,6 @@ mod tests {
             .start(
                 serde_json::json!({
                     "min_interval_secs": 10,
-                    "max_points": 10000,
                     "max_age_hours": 48,
                     "track_self": true,
                     "track_others": false

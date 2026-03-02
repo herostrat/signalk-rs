@@ -17,64 +17,56 @@ pub use config::HistoryConfig;
 pub use provider::{HistoryProvider, SqliteHistoryProvider};
 pub use query::{ContextsRequest, PathsRequest, ValuesRequest, ValuesResponse};
 
-use signalk_sqlite::Database;
+use signalk_sqlite::rusqlite::Connection;
 use signalk_store::store::SignalKStore;
-use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 use tracing::info;
 
 /// Central manager for the history subsystem.
 ///
-/// Owns the SQLite database and coordinates ingestion, aggregation, and queries.
+/// Coordinates ingestion, aggregation, and queries using a shared database.
 pub struct HistoryManager {
     provider: RwLock<Arc<dyn HistoryProvider>>,
     config: HistoryConfig,
 }
 
 impl HistoryManager {
-    /// Create a new history manager with the given config and data directory.
-    ///
-    /// Opens (or creates) the SQLite database and sets up the default provider.
-    pub fn new(config: HistoryConfig, data_dir: &Path) -> Result<Arc<Self>, String> {
+    /// Create a new history manager using the shared database connection.
+    pub fn new(config: HistoryConfig, conn: Arc<Mutex<Connection>>) -> Arc<Self> {
         if !config.enabled {
             info!("History subsystem disabled");
             let provider: Arc<dyn HistoryProvider> = Arc::new(DisabledProvider);
-            return Ok(Arc::new(HistoryManager {
+            return Arc::new(HistoryManager {
                 provider: RwLock::new(provider),
                 config,
-            }));
+            });
         }
 
-        let db_path = data_dir.join("history.db");
-        info!(?db_path, "Opening history database");
-
-        let db = Database::open(&db_path).map_err(|e| format!("History DB: {e}"))?;
-        let provider = Arc::new(SqliteHistoryProvider::new(db));
-
-        Ok(Arc::new(HistoryManager {
+        let provider = Arc::new(SqliteHistoryProvider::new(conn));
+        Arc::new(HistoryManager {
             provider: RwLock::new(provider as Arc<dyn HistoryProvider>),
             config,
-        }))
+        })
     }
 
     /// Create a history manager with an in-memory database (for tests).
-    pub fn new_in_memory(config: HistoryConfig) -> Result<Arc<Self>, String> {
+    pub fn new_in_memory(config: HistoryConfig) -> Arc<Self> {
         if !config.enabled {
             let provider: Arc<dyn HistoryProvider> = Arc::new(DisabledProvider);
-            return Ok(Arc::new(HistoryManager {
+            return Arc::new(HistoryManager {
                 provider: RwLock::new(provider),
                 config,
-            }));
+            });
         }
 
-        let db = Database::open_in_memory().map_err(|e| format!("History DB: {e}"))?;
-        let provider = Arc::new(SqliteHistoryProvider::new(db));
-
-        Ok(Arc::new(HistoryManager {
+        let db = signalk_sqlite::Database::open_in_memory().expect("in-memory DB");
+        let conn = Arc::new(Mutex::new(db.into_conn()));
+        let provider = Arc::new(SqliteHistoryProvider::new(conn));
+        Arc::new(HistoryManager {
             provider: RwLock::new(provider as Arc<dyn HistoryProvider>),
             config,
-        }))
+        })
     }
 
     /// Start the ingestion and aggregation background tasks.

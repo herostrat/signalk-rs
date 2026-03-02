@@ -1,4 +1,4 @@
-/// Derives `navigation.courseGreatCircle.bearingTrackTrue` from vessel position
+/// Derives `navigation.course.calcValues.bearingTrackTrue` from vessel position
 /// and next waypoint position.
 ///
 /// Uses the initial bearing (forward azimuth) formula.
@@ -18,13 +18,13 @@ impl Calculator for CourseBearing {
     fn inputs(&self) -> &[&str] {
         &[
             "navigation.position",
-            "navigation.courseGreatCircle.nextPoint.position",
+            "navigation.course.nextPoint.position",
         ]
     }
 
     fn calculate(&self, values: &HashMap<String, serde_json::Value>) -> Option<Vec<PathValue>> {
         let pos = values.get("navigation.position")?;
-        let next = values.get("navigation.courseGreatCircle.nextPoint.position")?;
+        let next = values.get("navigation.course.nextPoint.position")?;
 
         let lat1 = pos.get("latitude")?.as_f64()?;
         let lon1 = pos.get("longitude")?.as_f64()?;
@@ -34,7 +34,7 @@ impl Calculator for CourseBearing {
         let bearing = initial_bearing(lat1, lon1, lat2, lon2);
 
         Some(vec![PathValue::new(
-            "navigation.courseGreatCircle.bearingTrackTrue",
+            "navigation.course.calcValues.bearingTrackTrue",
             serde_json::json!(bearing),
         )])
     }
@@ -54,14 +54,14 @@ mod tests {
             serde_json::json!({"latitude": 49.0, "longitude": -123.0}),
         );
         values.insert(
-            "navigation.courseGreatCircle.nextPoint.position".to_string(),
+            "navigation.course.nextPoint.position".to_string(),
             serde_json::json!({"latitude": 50.0, "longitude": -123.0}),
         );
 
         let result = calc.calculate(&values).unwrap();
         assert_eq!(
             result[0].path,
-            "navigation.courseGreatCircle.bearingTrackTrue"
+            "navigation.course.calcValues.bearingTrackTrue"
         );
         let value = result[0].value.as_f64().unwrap();
         // Going north: bearing ≈ 0
@@ -80,7 +80,7 @@ mod tests {
             serde_json::json!({"latitude": 0.0, "longitude": 0.0}),
         );
         values.insert(
-            "navigation.courseGreatCircle.nextPoint.position".to_string(),
+            "navigation.course.nextPoint.position".to_string(),
             serde_json::json!({"latitude": 0.0, "longitude": 1.0}),
         );
 

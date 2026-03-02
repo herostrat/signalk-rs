@@ -15,6 +15,7 @@
 /// | PUT    | `.../course/activeRoute/nextPoint` | `advance_next_point` |
 /// | PUT    | `.../course/activeRoute/pointIndex` | `set_point_index` |
 /// | PUT    | `.../course/activeRoute/reverse` | `reverse_route` |
+/// | PUT    | `.../course/targetArrivalTime` | `set_target_arrival_time` |
 /// | PUT    | `.../course/arrivalCircle` | `set_arrival_circle` |
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use signalk_types::v2::{
@@ -93,6 +94,21 @@ pub async fn set_point_index(
 /// `PUT /signalk/v2/api/vessels/self/navigation/course/activeRoute/reverse`
 pub async fn reverse_route(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
     match state.course_manager.reverse_route().await {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+    }
+}
+
+/// `PUT /signalk/v2/api/vessels/self/navigation/course/targetArrivalTime`
+pub async fn set_target_arrival_time(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let time = req
+        .get("value")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    match state.course_manager.set_target_arrival_time(time).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     }

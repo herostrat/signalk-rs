@@ -145,8 +145,7 @@ pub fn test_app_with_handler(handler_path: &str, plugin_id: &str, bridge_socket:
     ));
     let history_manager = signalk_server::history::HistoryManager::new_in_memory(
         signalk_server::history::HistoryConfig::default(),
-    )
-    .expect("History manager init");
+    );
     let state = signalk_server::ServerState::new_shared(
         config,
         store,

@@ -1,4 +1,4 @@
-/// Derives `navigation.course.crossTrackError` steering error indicator.
+/// Derives `navigation.course.steerError` — steering error indicator.
 ///
 /// steerError = COG − bearing to next waypoint (signed angle in radians).
 /// Positive = veering to starboard of the course line.
@@ -19,14 +19,14 @@ impl Calculator for SteerError {
     fn inputs(&self) -> &[&str] {
         &[
             "navigation.courseOverGroundTrue",
-            "navigation.courseGreatCircle.nextPoint.bearingTrue",
+            "navigation.course.calcValues.bearingTrackTrue",
         ]
     }
 
     fn calculate(&self, values: &HashMap<String, serde_json::Value>) -> Option<Vec<PathValue>> {
         let cog = values.get("navigation.courseOverGroundTrue")?.as_f64()?;
         let bearing = values
-            .get("navigation.courseGreatCircle.nextPoint.bearingTrue")?
+            .get("navigation.course.calcValues.bearingTrackTrue")?
             .as_f64()?;
 
         // Signed difference, range [−π, π]
@@ -57,7 +57,7 @@ mod tests {
             serde_json::json!(1.0),
         );
         values.insert(
-            "navigation.courseGreatCircle.nextPoint.bearingTrue".into(),
+            "navigation.course.calcValues.bearingTrackTrue".into(),
             serde_json::json!(1.0),
         );
         let result = calc.calculate(&values).unwrap();
@@ -75,7 +75,7 @@ mod tests {
             serde_json::json!(1.2),
         );
         values.insert(
-            "navigation.courseGreatCircle.nextPoint.bearingTrue".into(),
+            "navigation.course.calcValues.bearingTrackTrue".into(),
             serde_json::json!(1.0),
         );
         let result = calc.calculate(&values).unwrap();
@@ -93,7 +93,7 @@ mod tests {
             serde_json::json!(0.1),
         );
         values.insert(
-            "navigation.courseGreatCircle.nextPoint.bearingTrue".into(),
+            "navigation.course.calcValues.bearingTrackTrue".into(),
             serde_json::json!(2.0 * PI - 0.1),
         );
         let result = calc.calculate(&values).unwrap();

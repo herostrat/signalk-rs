@@ -9,6 +9,7 @@ description = "Rust client library for standalone (Tier 3) signalk-rs plugins ov
 [dependencies]
 signalk-plugin-api.workspace = true
 signalk-types.workspace = true
+signalk-sqlite.workspace = true
 tokio = { workspace = true, features = ["net", "io-util"] }
 serde.workspace = true
 serde_json.workspace = true

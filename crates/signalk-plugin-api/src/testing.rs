@@ -63,10 +63,14 @@ pub struct MockPluginContext {
 
     /// Data directory for tests.
     pub data_directory: PathBuf,
+
+    /// Shared in-memory SQLite database for tests.
+    pub database: Arc<Mutex<signalk_sqlite::rusqlite::Connection>>,
 }
 
 impl MockPluginContext {
     pub fn new() -> Self {
+        let db = signalk_sqlite::Database::open_in_memory().unwrap();
         MockPluginContext {
             emitted_deltas: Arc::new(Mutex::new(Vec::new())),
             registered_put_paths: Arc::new(Mutex::new(Vec::new())),
@@ -78,6 +82,7 @@ impl MockPluginContext {
             next_sub_id: Arc::new(Mutex::new(1)),
             delta_input_handlers: Arc::new(Mutex::new(Vec::new())),
             data_directory: PathBuf::from("/tmp/signalk-plugin-test"),
+            database: Arc::new(Mutex::new(db.into_conn())),
         }
     }
 
@@ -198,6 +203,10 @@ impl PluginContext for MockPluginContext {
 
     fn data_dir(&self) -> PathBuf {
         self.data_directory.clone()
+    }
+
+    fn database(&self) -> Option<Arc<Mutex<signalk_sqlite::rusqlite::Connection>>> {
+        Some(self.database.clone())
     }
 
     fn set_status(&self, msg: &str) {

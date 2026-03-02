@@ -46,7 +46,7 @@ impl AutopilotMode {
             #[cfg(feature = "experimental")]
             AutopilotMode::WindTrue => "environment.wind.angleTrue",
             #[cfg(feature = "experimental")]
-            AutopilotMode::Route => "navigation.course.nextPoint.bearing",
+            AutopilotMode::Route => "navigation.course.calcValues.bearingTrackTrue",
         }
     }
 

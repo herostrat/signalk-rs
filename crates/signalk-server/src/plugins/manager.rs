@@ -47,6 +47,8 @@ pub struct PluginManager {
     data_dir: PathBuf,
     /// Autopilot provider registry (optional — set after construction)
     autopilot_manager: Option<Arc<AutopilotManager>>,
+    /// Shared SQLite database connection (set after construction).
+    database: Option<Arc<std::sync::Mutex<signalk_sqlite::rusqlite::Connection>>>,
 }
 
 impl PluginManager {
@@ -74,12 +76,21 @@ impl PluginManager {
             config_dir,
             data_dir,
             autopilot_manager: None,
+            database: None,
         }
     }
 
     /// Set the autopilot provider registry so plugins can register via `register_autopilot_provider()`.
     pub fn set_autopilot_manager(&mut self, manager: Arc<AutopilotManager>) {
         self.autopilot_manager = Some(manager);
+    }
+
+    /// Set the shared SQLite database connection for plugins.
+    pub fn set_database(
+        &mut self,
+        db: Arc<std::sync::Mutex<signalk_sqlite::rusqlite::Connection>>,
+    ) {
+        self.database = Some(db);
     }
 
     /// Register a plugin instance. Must be called before `start_all`.
@@ -141,6 +152,7 @@ impl PluginManager {
             self.delta_filter.clone(),
             self.webapp_registry.clone(),
             self.autopilot_manager.clone(),
+            self.database.clone(),
         ));
 
         entry.context = Some(ctx.clone());

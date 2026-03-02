@@ -1,4 +1,4 @@
-/// Derives `navigation.courseGreatCircle.previousPoint.distance` from vessel position
+/// Derives `navigation.course.calcValues.previousPoint.distance` from vessel position
 /// and previous waypoint position.
 ///
 /// Uses haversine formula. Output in meters.
@@ -18,13 +18,13 @@ impl Calculator for PreviousPointDistance {
     fn inputs(&self) -> &[&str] {
         &[
             "navigation.position",
-            "navigation.courseGreatCircle.previousPoint.position",
+            "navigation.course.previousPoint.position",
         ]
     }
 
     fn calculate(&self, values: &HashMap<String, serde_json::Value>) -> Option<Vec<PathValue>> {
         let pos = values.get("navigation.position")?;
-        let prev = values.get("navigation.courseGreatCircle.previousPoint.position")?;
+        let prev = values.get("navigation.course.previousPoint.position")?;
 
         let lat1 = pos.get("latitude")?.as_f64()?;
         let lon1 = pos.get("longitude")?.as_f64()?;
@@ -34,7 +34,7 @@ impl Calculator for PreviousPointDistance {
         let distance = haversine_meters(lat1, lon1, lat2, lon2);
 
         Some(vec![PathValue::new(
-            "navigation.courseGreatCircle.previousPoint.distance",
+            "navigation.course.calcValues.previousPoint.distance",
             serde_json::json!(distance),
         )])
     }
@@ -53,14 +53,14 @@ mod tests {
             serde_json::json!({"latitude": 49.3200, "longitude": -123.0724}),
         );
         values.insert(
-            "navigation.courseGreatCircle.previousPoint.position".to_string(),
+            "navigation.course.previousPoint.position".to_string(),
             serde_json::json!({"latitude": 49.2827, "longitude": -123.1207}),
         );
 
         let result = calc.calculate(&values).unwrap();
         assert_eq!(
             result[0].path,
-            "navigation.courseGreatCircle.previousPoint.distance"
+            "navigation.course.calcValues.previousPoint.distance"
         );
         let distance = result[0].value.as_f64().unwrap();
         assert!(
@@ -78,7 +78,7 @@ mod tests {
             serde_json::json!({"latitude": 49.0, "longitude": -123.0}),
         );
         values.insert(
-            "navigation.courseGreatCircle.previousPoint.position".to_string(),
+            "navigation.course.previousPoint.position".to_string(),
             serde_json::json!({"latitude": 49.0, "longitude": -123.0}),
         );
 

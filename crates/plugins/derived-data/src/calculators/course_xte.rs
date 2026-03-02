@@ -1,4 +1,4 @@
-/// Derives `navigation.courseGreatCircle.crossTrackError` from vessel position,
+/// Derives `navigation.course.calcValues.crossTrackError` from vessel position,
 /// previous point, and next point.
 ///
 /// Cross-track error (XTE) is the signed distance from the vessel to the
@@ -23,15 +23,15 @@ impl Calculator for CourseXte {
     fn inputs(&self) -> &[&str] {
         &[
             "navigation.position",
-            "navigation.courseGreatCircle.nextPoint.position",
-            "navigation.courseGreatCircle.previousPoint.position",
+            "navigation.course.nextPoint.position",
+            "navigation.course.previousPoint.position",
         ]
     }
 
     fn calculate(&self, values: &HashMap<String, serde_json::Value>) -> Option<Vec<PathValue>> {
         let pos = values.get("navigation.position")?;
-        let next = values.get("navigation.courseGreatCircle.nextPoint.position")?;
-        let prev = values.get("navigation.courseGreatCircle.previousPoint.position")?;
+        let next = values.get("navigation.course.nextPoint.position")?;
+        let prev = values.get("navigation.course.previousPoint.position")?;
 
         let lat = pos.get("latitude")?.as_f64()?;
         let lon = pos.get("longitude")?.as_f64()?;
@@ -43,7 +43,7 @@ impl Calculator for CourseXte {
         let xte = cross_track_error((lat, lon), (prev_lat, prev_lon), (next_lat, next_lon));
 
         Some(vec![PathValue::new(
-            "navigation.courseGreatCircle.crossTrackError",
+            "navigation.course.calcValues.crossTrackError",
             serde_json::json!(xte),
         )])
     }
@@ -63,11 +63,11 @@ mod tests {
             serde_json::json!({"latitude": 49.15, "longitude": -123.12}),
         );
         values.insert(
-            "navigation.courseGreatCircle.previousPoint.position".to_string(),
+            "navigation.course.previousPoint.position".to_string(),
             serde_json::json!({"latitude": 49.0, "longitude": -123.12}),
         );
         values.insert(
-            "navigation.courseGreatCircle.nextPoint.position".to_string(),
+            "navigation.course.nextPoint.position".to_string(),
             serde_json::json!({"latitude": 49.3, "longitude": -123.12}),
         );
 
@@ -89,11 +89,11 @@ mod tests {
             serde_json::json!({"latitude": 49.15, "longitude": -122.0}),
         );
         values.insert(
-            "navigation.courseGreatCircle.previousPoint.position".to_string(),
+            "navigation.course.previousPoint.position".to_string(),
             serde_json::json!({"latitude": 49.0, "longitude": -123.0}),
         );
         values.insert(
-            "navigation.courseGreatCircle.nextPoint.position".to_string(),
+            "navigation.course.nextPoint.position".to_string(),
             serde_json::json!({"latitude": 49.3, "longitude": -123.0}),
         );
 
@@ -114,7 +114,7 @@ mod tests {
             serde_json::json!({"latitude": 49.0, "longitude": -123.0}),
         );
         values.insert(
-            "navigation.courseGreatCircle.nextPoint.position".to_string(),
+            "navigation.course.nextPoint.position".to_string(),
             serde_json::json!({"latitude": 50.0, "longitude": -123.0}),
         );
         // No previous point

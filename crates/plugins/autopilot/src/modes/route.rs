@@ -21,12 +21,25 @@
 /// to oscillate around the track. The cascaded approach inherits the well-tuned
 /// heading PID as the inner loop, giving good transient response and steady-state
 /// tracking.
+///
+/// # Integration with Course API
+///
+/// Route mode reads two values from the SignalK store:
+/// - `navigation.course.calcValues.bearingTrackTrue` — bearing to next waypoint
+/// - `navigation.crossTrackError` — signed distance from track (m, + = starboard)
+///
+/// These are computed by the derived-data plugin from course state set via
+/// the V2 Course API or bridged from NMEA instruments.
+///
+/// Waypoint advancement is automatic (CourseManager arrival detection) —
+/// when the next waypoint changes, bearingTrackTrue and XTE update, and
+/// the autopilot follows the new leg without intervention.
 use crate::pd::{self, PidConfig, PidController};
 
 /// Input parameters for route mode computation.
 pub struct RouteInput {
     pub current_heading: f64,
-    /// Bearing to waypoint (from SK `navigation.course.nextPoint.bearing`)
+    /// Bearing to waypoint (from SK `navigation.course.calcValues.bearingTrackTrue`)
     pub btw: f64,
     /// Cross-track error in metres (positive = starboard of track)
     pub xte_m: f64,

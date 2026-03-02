@@ -1,4 +1,4 @@
-/// Derives `navigation.courseGreatCircle.nextPoint.estimatedTimeOfArrival` from distance and VMG.
+/// Derives `navigation.course.calcValues.nextPoint.estimatedTimeOfArrival` from distance and VMG.
 ///
 /// ETA seconds = distance / VMG
 ///
@@ -18,17 +18,17 @@ impl Calculator for Eta {
 
     fn inputs(&self) -> &[&str] {
         &[
-            "navigation.courseGreatCircle.nextPoint.distance",
-            "navigation.courseGreatCircle.nextPoint.velocityMadeGood",
+            "navigation.course.calcValues.nextPoint.distance",
+            "navigation.course.calcValues.nextPoint.velocityMadeGood",
         ]
     }
 
     fn calculate(&self, values: &HashMap<String, serde_json::Value>) -> Option<Vec<PathValue>> {
         let distance = values
-            .get("navigation.courseGreatCircle.nextPoint.distance")?
+            .get("navigation.course.calcValues.nextPoint.distance")?
             .as_f64()?;
         let vmg = values
-            .get("navigation.courseGreatCircle.nextPoint.velocityMadeGood")?
+            .get("navigation.course.calcValues.nextPoint.velocityMadeGood")?
             .as_f64()?;
 
         if vmg <= 0.1 || distance < 0.0 {
@@ -39,7 +39,7 @@ impl Calculator for Eta {
         let eta_seconds = distance / vmg;
 
         Some(vec![PathValue::new(
-            "navigation.courseGreatCircle.nextPoint.estimatedTimeOfArrival",
+            "navigation.course.calcValues.nextPoint.estimatedTimeOfArrival",
             serde_json::json!(eta_seconds),
         )])
     }
@@ -55,11 +55,11 @@ mod tests {
         let mut values = HashMap::new();
         // 10 NM = 18520m, 5 m/s VMG → 3704 seconds ≈ 62 min
         values.insert(
-            "navigation.courseGreatCircle.nextPoint.distance".into(),
+            "navigation.course.calcValues.nextPoint.distance".into(),
             serde_json::json!(18520.0),
         );
         values.insert(
-            "navigation.courseGreatCircle.nextPoint.velocityMadeGood".into(),
+            "navigation.course.calcValues.nextPoint.velocityMadeGood".into(),
             serde_json::json!(5.0),
         );
         let result = calc.calculate(&values).unwrap();
@@ -72,11 +72,11 @@ mod tests {
         let calc = Eta;
         let mut values = HashMap::new();
         values.insert(
-            "navigation.courseGreatCircle.nextPoint.distance".into(),
+            "navigation.course.calcValues.nextPoint.distance".into(),
             serde_json::json!(18520.0),
         );
         values.insert(
-            "navigation.courseGreatCircle.nextPoint.velocityMadeGood".into(),
+            "navigation.course.calcValues.nextPoint.velocityMadeGood".into(),
             serde_json::json!(0.0),
         );
         assert!(calc.calculate(&values).is_none());

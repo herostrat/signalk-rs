@@ -212,6 +212,14 @@ async fn main() -> Result<()> {
     // ── Autopilot manager ─────────────────────────────────────────────────────
     let autopilot_manager = AutopilotManager::new();
 
+    // ── Shared database ─────────────────────────────────────────────────────
+    let db_path = PathBuf::from(&config.data_dir).join("signalk-rs.db");
+    info!(?db_path, "Opening shared database");
+    let shared_db = {
+        let db = signalk_sqlite::Database::open(&db_path).expect("Failed to open database");
+        Arc::new(std::sync::Mutex::new(db.into_conn()))
+    };
+
     let mut plugin_manager = PluginManager::new(
         store.clone(),
         route_table.clone(),
@@ -224,6 +232,7 @@ async fn main() -> Result<()> {
         data_dir,
     );
     plugin_manager.set_autopilot_manager(autopilot_manager.clone());
+    plugin_manager.set_database(shared_db.clone());
 
     // Register all compiled-in Tier 1 plugins
     plugin_manager.register(Box::new(autopilot::AutopilotPlugin::new()));
@@ -265,9 +274,7 @@ async fn main() -> Result<()> {
     ));
 
     // ── History manager ────────────────────────────────────────────────────
-    let history_manager =
-        HistoryManager::new(config.history.clone(), &PathBuf::from(&config.data_dir))
-            .expect("Failed to initialize history manager");
+    let history_manager = HistoryManager::new(config.history.clone(), shared_db.clone());
 
     let state = ServerState::new_shared(
         config.clone(),

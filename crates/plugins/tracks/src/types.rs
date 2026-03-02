@@ -61,6 +61,9 @@ pub struct TrackQuery {
     pub radius: Option<(f64, f64, f64)>,
     /// Maximum number of points to return per vessel.
     pub limit: Option<usize>,
+    /// Douglas-Peucker simplification tolerance in degrees.
+    /// `None` = no simplification. ~0.00001° ≈ 1 m at equator.
+    pub simplify: Option<f64>,
     /// Output format.
     pub format: TrackFormat,
 }

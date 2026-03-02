@@ -138,7 +138,7 @@ impl Plugin for AutopilotPlugin {
                     Subscription::path("environment.wind.angleApparent"),
                     Subscription::path("environment.wind.angleTrue"),
                     Subscription::path("environment.wind.speedApparent"),
-                    Subscription::path("navigation.course.nextPoint.bearing"),
+                    Subscription::path("navigation.course.calcValues.bearingTrackTrue"),
                     Subscription::path("navigation.crossTrackError"),
                     Subscription::path("steering.rudderAngle"),
                 ]),

@@ -3,7 +3,7 @@
 /// Handles set/clear destination, active route management, waypoint
 /// advancement, and arrival detection. On every state change, persists to
 /// disk and emits deltas into the SignalK store under
-/// `navigation.courseGreatCircle.*`.
+/// `navigation.course.*`.
 use signalk_plugin_api::PluginError;
 use signalk_store::store::SignalKStore;
 use signalk_types::geo::{haversine_meters, route_remaining_distance};
@@ -90,9 +90,26 @@ impl CourseManager {
         }
     }
 
-    /// Get the current course state.
+    /// Get the current course state (with resolved waypoints for active routes).
     pub async fn get_state(&self) -> Option<CourseState> {
-        self.state.read().await.clone()
+        let mut state = self.state.read().await.clone()?;
+
+        // Populate waypoints array for REST response (not persisted)
+        if let Some(ref mut route) = state.active_route
+            && route.waypoints.is_none()
+            && let Ok(points) = self.resolve_route_points(&route.href).await
+        {
+            let wps = if route.reverse {
+                let mut reversed = points;
+                reversed.reverse();
+                reversed
+            } else {
+                points
+            };
+            route.waypoints = Some(wps);
+        }
+
+        Some(state)
     }
 
     /// Set a direct destination (position or waypoint href).
@@ -112,6 +129,7 @@ impl CourseManager {
 
         let course_state = CourseState {
             start_time: Some(now),
+            target_arrival_time: None,
             arrival_circle: self
                 .state
                 .read()
@@ -121,12 +139,12 @@ impl CourseManager {
                 .unwrap_or(0.0),
             active_route: None,
             next_point: Some(CoursePoint {
-                type_: PointType::Destination,
+                type_: PointType::Location,
                 position,
                 href: req.href,
             }),
             previous_point: previous.map(|pos| CoursePoint {
-                type_: PointType::Destination,
+                type_: PointType::VesselPosition,
                 position: pos,
                 href: None,
             }),
@@ -157,6 +175,7 @@ impl CourseManager {
         let point_total = points.len();
         let course_state = CourseState {
             start_time: Some(now),
+            target_arrival_time: None,
             arrival_circle: self
                 .state
                 .read()
@@ -170,14 +189,15 @@ impl CourseManager {
                 point_index,
                 point_total,
                 name: None,
+                waypoints: None,
             }),
             next_point: Some(CoursePoint {
-                type_: PointType::Waypoint,
+                type_: PointType::RoutePoint,
                 position: points[0].clone(),
                 href: None,
             }),
             previous_point: previous.map(|pos| CoursePoint {
-                type_: PointType::Destination,
+                type_: PointType::VesselPosition,
                 position: pos,
                 href: None,
             }),
@@ -231,7 +251,7 @@ impl CourseManager {
 
         active_route.point_index = new_index;
         course.next_point = Some(CoursePoint {
-            type_: PointType::Waypoint,
+            type_: PointType::RoutePoint,
             position: points[new_index].clone(),
             href: None,
         });
@@ -276,7 +296,7 @@ impl CourseManager {
         course.previous_point = course.next_point.clone();
         active_route.point_index = index;
         course.next_point = Some(CoursePoint {
-            type_: PointType::Waypoint,
+            type_: PointType::RoutePoint,
             position: points[index].clone(),
             href: None,
         });
@@ -318,7 +338,7 @@ impl CourseManager {
         active_route.point_total = points.len();
         course.previous_point = course.next_point.clone();
         course.next_point = points.first().map(|pos| CoursePoint {
-            type_: PointType::Waypoint,
+            type_: PointType::RoutePoint,
             position: pos.clone(),
             href: None,
         });
@@ -329,6 +349,20 @@ impl CourseManager {
         self.persist_state(Some(&course_clone)).await?;
         self.emit_deltas(&course_clone).await;
 
+        Ok(())
+    }
+
+    /// Set the target arrival time (ISO 8601 string).
+    pub async fn set_target_arrival_time(&self, time: Option<String>) -> Result<(), PluginError> {
+        let mut state = self.state.write().await;
+        let course = state
+            .as_mut()
+            .ok_or_else(|| PluginError::runtime("No active course"))?;
+        course.target_arrival_time = time;
+        let course_clone = course.clone();
+        drop(state);
+        self.persist_state(Some(&course_clone)).await?;
+        self.emit_deltas(&course_clone).await;
         Ok(())
     }
 
@@ -397,7 +431,7 @@ impl CourseManager {
         let distance = {
             let store = self.store.read().await;
             store
-                .get_self_path("navigation.courseGreatCircle.nextPoint.distance")
+                .get_self_path("navigation.course.calcValues.nextPoint.distance")
                 .and_then(|sv| sv.value.as_f64())
         };
 
@@ -442,24 +476,24 @@ impl CourseManager {
             "calcMethod": "GreatCircle"
         });
 
-        if let Some(v) = get("navigation.courseGreatCircle.bearingTrackTrue") {
+        if let Some(v) = get("navigation.course.calcValues.bearingTrackTrue") {
             result["bearingTrackTrue"] = v;
         }
-        if let Some(v) = get("navigation.courseGreatCircle.bearingTrackMagnetic") {
+        if let Some(v) = get("navigation.course.calcValues.bearingTrackMagnetic") {
             result["bearingTrackMagnetic"] = v;
         }
-        if let Some(v) = get("navigation.courseGreatCircle.crossTrackError") {
+        if let Some(v) = get("navigation.course.calcValues.crossTrackError") {
             result["crossTrackError"] = v;
         }
 
         let mut next_point = serde_json::Map::new();
-        if let Some(v) = get("navigation.courseGreatCircle.nextPoint.distance") {
+        if let Some(v) = get("navigation.course.calcValues.nextPoint.distance") {
             next_point.insert("distance".into(), v);
         }
-        if let Some(v) = get("navigation.courseGreatCircle.nextPoint.velocityMadeGood") {
+        if let Some(v) = get("navigation.course.calcValues.nextPoint.velocityMadeGood") {
             next_point.insert("velocityMadeGood".into(), v);
         }
-        if let Some(v) = get("navigation.courseGreatCircle.nextPoint.estimatedTimeOfArrival") {
+        if let Some(v) = get("navigation.course.calcValues.nextPoint.estimatedTimeOfArrival") {
             next_point.insert("estimatedTimeOfArrival".into(), v);
         }
         if !next_point.is_empty() {
@@ -467,7 +501,7 @@ impl CourseManager {
         }
 
         let mut prev_point = serde_json::Map::new();
-        if let Some(v) = get("navigation.courseGreatCircle.previousPoint.distance") {
+        if let Some(v) = get("navigation.course.calcValues.previousPoint.distance") {
             prev_point.insert("distance".into(), v);
         }
         if !prev_point.is_empty() {
@@ -522,15 +556,16 @@ impl CourseManager {
 
         let course_state = CourseState {
             start_time: Some(now),
+            target_arrival_time: None,
             arrival_circle,
             active_route: None,
             next_point: Some(CoursePoint {
-                type_: PointType::Destination,
+                type_: PointType::Location,
                 position,
                 href: None,
             }),
             previous_point: previous.map(|pos| CoursePoint {
-                type_: PointType::Destination,
+                type_: PointType::VesselPosition,
                 position: pos,
                 href: None,
             }),
@@ -545,7 +580,7 @@ impl CourseManager {
 
     /// Start a background task that listens for NMEA-sourced course deltas.
     ///
-    /// When a `navigation.courseGreatCircle.nextPoint.position` delta from a
+    /// When a `navigation.course.nextPoint.position` delta from a
     /// non-course-manager source arrives and `api_only = false`, the position
     /// is applied as an NMEA-sourced destination.
     pub async fn start_nmea_listener(
@@ -561,7 +596,8 @@ impl CourseManager {
                                 continue;
                             }
                             for pv in &update.values {
-                                if pv.path == "navigation.courseGreatCircle.nextPoint.position"
+                                if (pv.path == "navigation.courseGreatCircle.nextPoint.position"
+                                    || pv.path == "navigation.courseRhumbline.nextPoint.position")
                                     && let Ok(pos) =
                                         serde_json::from_value::<Position>(pv.value.clone())
                                     && let Err(e) = self.apply_nmea_position(pos).await
@@ -608,21 +644,21 @@ impl CourseManager {
 
         if let Some(ref next) = state.next_point {
             values.push(PathValue::new(
-                "navigation.courseGreatCircle.nextPoint.position",
+                "navigation.course.nextPoint.position",
                 serde_json::json!({
                     "latitude": next.position.latitude,
                     "longitude": next.position.longitude
                 }),
             ));
             values.push(PathValue::new(
-                "navigation.courseGreatCircle.nextPoint.type",
+                "navigation.course.nextPoint.type",
                 serde_json::to_value(next.type_).unwrap_or_default(),
             ));
         }
 
         if let Some(ref prev) = state.previous_point {
             values.push(PathValue::new(
-                "navigation.courseGreatCircle.previousPoint.position",
+                "navigation.course.previousPoint.position",
                 serde_json::json!({
                     "latitude": prev.position.latitude,
                     "longitude": prev.position.longitude
@@ -632,21 +668,28 @@ impl CourseManager {
 
         if let Some(ref route) = state.active_route {
             values.push(PathValue::new(
-                "navigation.courseGreatCircle.activeRoute.href",
+                "navigation.course.activeRoute.href",
                 serde_json::Value::String(route.href.clone()),
             ));
         }
 
         if let Some(ref start_time) = state.start_time {
             values.push(PathValue::new(
-                "navigation.courseGreatCircle.startTime",
+                "navigation.course.startTime",
                 serde_json::Value::String(start_time.clone()),
+            ));
+        }
+
+        if let Some(ref target) = state.target_arrival_time {
+            values.push(PathValue::new(
+                "navigation.course.targetArrivalTime",
+                serde_json::Value::String(target.clone()),
             ));
         }
 
         if state.arrival_circle > 0.0 {
             values.push(PathValue::new(
-                "navigation.courseGreatCircle.nextPoint.arrivalCircle",
+                "navigation.course.arrivalCircle",
                 serde_json::json!(state.arrival_circle),
             ));
         }
@@ -691,7 +734,7 @@ impl CourseManager {
 
             let total_remaining = vessel_to_next + remaining;
             values.push(PathValue::new(
-                "navigation.courseGreatCircle.activeRoute.distanceRemaining",
+                "navigation.course.activeRoute.distanceRemaining",
                 serde_json::json!(total_remaining),
             ));
         }
@@ -706,13 +749,14 @@ impl CourseManager {
     /// Emit null values for all course paths (on clear).
     async fn emit_clear_deltas(&self) {
         let paths = [
-            "navigation.courseGreatCircle.nextPoint.position",
-            "navigation.courseGreatCircle.nextPoint.type",
-            "navigation.courseGreatCircle.nextPoint.arrivalCircle",
-            "navigation.courseGreatCircle.previousPoint.position",
-            "navigation.courseGreatCircle.activeRoute.href",
-            "navigation.courseGreatCircle.activeRoute.distanceRemaining",
-            "navigation.courseGreatCircle.startTime",
+            "navigation.course.nextPoint.position",
+            "navigation.course.nextPoint.type",
+            "navigation.course.arrivalCircle",
+            "navigation.course.targetArrivalTime",
+            "navigation.course.previousPoint.position",
+            "navigation.course.activeRoute.href",
+            "navigation.course.activeRoute.distanceRemaining",
+            "navigation.course.startTime",
         ];
 
         let values: Vec<PathValue> = paths
@@ -938,7 +982,7 @@ mod tests {
         let state = mgr.get_state().await.unwrap();
         assert!(state.start_time.is_some());
         let next = state.next_point.unwrap();
-        assert_eq!(next.type_, PointType::Destination);
+        assert_eq!(next.type_, PointType::Location);
         assert_eq!(next.position.latitude, 49.27);
     }
 
@@ -1027,7 +1071,7 @@ mod tests {
         // Check that the store has the course data
         let s = store.read().await;
         let next_pos = s
-            .get_self_path("navigation.courseGreatCircle.nextPoint.position")
+            .get_self_path("navigation.course.nextPoint.position")
             .unwrap();
         assert_eq!(next_pos.value["latitude"], 49.27);
     }
@@ -1073,7 +1117,7 @@ mod tests {
             let delta = Delta::self_vessel(vec![Update::new(
                 Source::plugin("derived-data"),
                 vec![PathValue::new(
-                    "navigation.courseGreatCircle.nextPoint.distance",
+                    "navigation.course.calcValues.nextPoint.distance",
                     serde_json::json!(500.0),
                 )],
             )]);
@@ -1111,7 +1155,7 @@ mod tests {
             let delta = Delta::self_vessel(vec![Update::new(
                 Source::plugin("derived-data"),
                 vec![PathValue::new(
-                    "navigation.courseGreatCircle.nextPoint.distance",
+                    "navigation.course.calcValues.nextPoint.distance",
                     serde_json::json!(50.0),
                 )],
             )]);
@@ -1153,9 +1197,7 @@ mod tests {
         mgr.set_arrival_circle(200.0).await.unwrap();
 
         let s = store.read().await;
-        let arrival = s
-            .get_self_path("navigation.courseGreatCircle.nextPoint.arrivalCircle")
-            .unwrap();
+        let arrival = s.get_self_path("navigation.course.arrivalCircle").unwrap();
         assert_eq!(arrival.value.as_f64().unwrap(), 200.0);
     }
 
@@ -1189,11 +1231,11 @@ mod tests {
                 Source::plugin("derived-data"),
                 vec![
                     PathValue::new(
-                        "navigation.courseGreatCircle.nextPoint.distance",
+                        "navigation.course.calcValues.nextPoint.distance",
                         serde_json::json!(5000.0),
                     ),
                     PathValue::new(
-                        "navigation.courseGreatCircle.bearingTrackTrue",
+                        "navigation.course.calcValues.bearingTrackTrue",
                         serde_json::json!(1.57),
                     ),
                 ],
@@ -1214,6 +1256,7 @@ mod tests {
     ) -> CourseState {
         CourseState {
             start_time: Some(chrono::Utc::now().to_rfc3339()),
+            target_arrival_time: None,
             arrival_circle,
             active_route: Some(ActiveRoute {
                 href: "/resources/routes/test-route".into(),
@@ -1221,9 +1264,10 @@ mod tests {
                 point_index,
                 point_total,
                 name: None,
+                waypoints: None,
             }),
             next_point: Some(CoursePoint {
-                type_: PointType::Waypoint,
+                type_: PointType::RoutePoint,
                 position: Position {
                     latitude: 50.0,
                     longitude: -124.0,
@@ -1254,7 +1298,7 @@ mod tests {
             let delta = Delta::self_vessel(vec![Update::new(
                 Source::plugin("derived-data"),
                 vec![PathValue::new(
-                    "navigation.courseGreatCircle.nextPoint.distance",
+                    "navigation.course.calcValues.nextPoint.distance",
                     serde_json::json!(50.0),
                 )],
             )]);
@@ -1293,7 +1337,7 @@ mod tests {
             let delta = Delta::self_vessel(vec![Update::new(
                 Source::plugin("derived-data"),
                 vec![PathValue::new(
-                    "navigation.courseGreatCircle.nextPoint.distance",
+                    "navigation.course.calcValues.nextPoint.distance",
                     serde_json::json!(30.0),
                 )],
             )]);
@@ -1341,7 +1385,7 @@ mod tests {
             let delta = Delta::self_vessel(vec![Update::new(
                 Source::plugin("derived-data"),
                 vec![PathValue::new(
-                    "navigation.courseGreatCircle.nextPoint.distance",
+                    "navigation.course.calcValues.nextPoint.distance",
                     serde_json::json!(40.0),
                 )],
             )]);

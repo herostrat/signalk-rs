@@ -74,7 +74,7 @@ impl std::fmt::Display for ResourceType {
 /// The full course/navigation state.
 ///
 /// Persisted to disk and emitted as SignalK deltas under
-/// `navigation.courseGreatCircle.*`.
+/// `navigation.course.*`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CourseState {
@@ -82,12 +82,15 @@ pub struct CourseState {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_time: Option<String>,
 
+    /// User-specified target arrival time (ISO 8601). Serializes as null when unset.
+    #[serde(default)]
+    pub target_arrival_time: Option<String>,
+
     /// Arrival circle radius in meters.
     #[serde(default)]
     pub arrival_circle: f64,
 
-    /// Active route being followed.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Active route being followed (null when not following a route).
     pub active_route: Option<ActiveRoute>,
 
     /// The next point we are navigating toward.
@@ -124,6 +127,11 @@ pub struct ActiveRoute {
     /// Route name (if available).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+
+    /// All route waypoint positions (populated at runtime for REST responses, not persisted).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub waypoints: Option<Vec<Position>>,
 }
 
 /// A point in the course (next destination or previous waypoint).
@@ -144,14 +152,15 @@ pub struct CoursePoint {
 
 /// Type of a course point.
 ///
-/// Serializes as lowercase per SignalK spec (consistent with all other enum fields).
+/// Serializes as PascalCase per SignalK v2 Course API spec.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub enum PointType {
-    /// A directly set destination (lat/lon).
-    Destination,
-    /// A waypoint from a route or resource.
-    Waypoint,
+    /// A direct lat/lon destination (navigate to a position or waypoint).
+    Location,
+    /// The vessel's position when navigation was started (used for previousPoint).
+    VesselPosition,
+    /// A point from an active route.
+    RoutePoint,
 }
 
 #[cfg(test)]
@@ -199,10 +208,11 @@ mod tests {
     fn course_state_roundtrip() {
         let state = CourseState {
             start_time: Some("2026-02-27T12:00:00Z".into()),
+            target_arrival_time: None,
             arrival_circle: 50.0,
             active_route: None,
             next_point: Some(CoursePoint {
-                type_: PointType::Destination,
+                type_: PointType::Location,
                 position: Position {
                     latitude: 49.27,
                     longitude: -123.19,
@@ -213,7 +223,11 @@ mod tests {
             previous_point: None,
         };
         let json = serde_json::to_value(&state).unwrap();
-        assert_eq!(json["nextPoint"]["type"], "destination");
+        assert_eq!(json["nextPoint"]["type"], "Location");
+        // activeRoute serializes as null (not omitted)
+        assert_eq!(json["activeRoute"], serde_json::Value::Null);
+        // targetArrivalTime serializes as null
+        assert_eq!(json["targetArrivalTime"], serde_json::Value::Null);
         let back: CourseState = serde_json::from_value(json).unwrap();
         assert_eq!(back, state);
     }
@@ -228,13 +242,17 @@ mod tests {
 
     #[test]
     fn point_type_serde() {
-        let json = serde_json::to_value(PointType::Waypoint).unwrap();
-        assert_eq!(json, "waypoint");
+        let json = serde_json::to_value(PointType::RoutePoint).unwrap();
+        assert_eq!(json, "RoutePoint");
         let back: PointType = serde_json::from_value(json).unwrap();
-        assert_eq!(back, PointType::Waypoint);
+        assert_eq!(back, PointType::RoutePoint);
         assert_eq!(
-            serde_json::to_value(PointType::Destination).unwrap(),
-            "destination"
+            serde_json::to_value(PointType::Location).unwrap(),
+            "Location"
+        );
+        assert_eq!(
+            serde_json::to_value(PointType::VesselPosition).unwrap(),
+            "VesselPosition"
         );
     }
 }

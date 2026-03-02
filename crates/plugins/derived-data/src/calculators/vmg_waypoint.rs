@@ -1,4 +1,4 @@
-/// Derives `navigation.courseGreatCircle.nextPoint.velocityMadeGood` from SOG, COG, and bearing.
+/// Derives `navigation.course.calcValues.nextPoint.velocityMadeGood` from SOG, COG, and bearing.
 ///
 /// VMG to waypoint = SOG × cos(COG − bearing)
 ///
@@ -19,7 +19,7 @@ impl Calculator for VmgWaypoint {
         &[
             "navigation.speedOverGround",
             "navigation.courseOverGroundTrue",
-            "navigation.courseGreatCircle.bearingTrackTrue",
+            "navigation.course.calcValues.bearingTrackTrue",
         ]
     }
 
@@ -27,7 +27,7 @@ impl Calculator for VmgWaypoint {
         let sog = values.get("navigation.speedOverGround")?.as_f64()?;
         let cog = values.get("navigation.courseOverGroundTrue")?.as_f64()?;
         let bearing = values
-            .get("navigation.courseGreatCircle.bearingTrackTrue")?
+            .get("navigation.course.calcValues.bearingTrackTrue")?
             .as_f64()?;
 
         if !sog.is_finite() || !cog.is_finite() || !bearing.is_finite() {
@@ -37,7 +37,7 @@ impl Calculator for VmgWaypoint {
         let vmg = sog * (cog - bearing).cos();
 
         Some(vec![PathValue::new(
-            "navigation.courseGreatCircle.nextPoint.velocityMadeGood",
+            "navigation.course.calcValues.nextPoint.velocityMadeGood",
             serde_json::json!(vmg),
         )])
     }
@@ -57,7 +57,7 @@ mod tests {
             serde_json::json!(1.0), // COG = 1.0 rad
         );
         values.insert(
-            "navigation.courseGreatCircle.bearingTrackTrue".into(),
+            "navigation.course.calcValues.bearingTrackTrue".into(),
             serde_json::json!(1.0), // bearing = 1.0 rad (same direction)
         );
 
@@ -75,7 +75,7 @@ mod tests {
             serde_json::json!(0.0),
         );
         values.insert(
-            "navigation.courseGreatCircle.bearingTrackTrue".into(),
+            "navigation.course.calcValues.bearingTrackTrue".into(),
             serde_json::json!(FRAC_PI_2), // 90° off
         );
 
@@ -93,7 +93,7 @@ mod tests {
             serde_json::json!(0.0),
         );
         values.insert(
-            "navigation.courseGreatCircle.bearingTrackTrue".into(),
+            "navigation.course.calcValues.bearingTrackTrue".into(),
             serde_json::json!(PI), // 180° off — sailing away
         );
 
@@ -114,7 +114,7 @@ mod tests {
             serde_json::json!(1.0),
         );
         values.insert(
-            "navigation.courseGreatCircle.bearingTrackTrue".into(),
+            "navigation.course.calcValues.bearingTrackTrue".into(),
             serde_json::json!(2.0),
         );
 

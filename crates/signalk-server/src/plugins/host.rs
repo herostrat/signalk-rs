@@ -101,6 +101,8 @@ pub struct RustPluginContext {
     webapp_registry: Arc<RwLock<WebappRegistry>>,
     /// Autopilot provider registry (optional — only present in full server context)
     autopilot_manager: Option<Arc<AutopilotManager>>,
+    /// Shared SQLite database connection.
+    database: Option<Arc<Mutex<signalk_sqlite::rusqlite::Connection>>>,
 }
 
 impl RustPluginContext {
@@ -117,6 +119,7 @@ impl RustPluginContext {
         delta_filter: Arc<DeltaFilterChain>,
         webapp_registry: Arc<RwLock<WebappRegistry>>,
         autopilot_manager: Option<Arc<AutopilotManager>>,
+        database: Option<Arc<Mutex<signalk_sqlite::rusqlite::Connection>>>,
     ) -> Self {
         RustPluginContext {
             plugin_id,
@@ -134,6 +137,7 @@ impl RustPluginContext {
             delta_filter,
             webapp_registry,
             autopilot_manager,
+            database,
         }
     }
 
@@ -350,6 +354,10 @@ impl PluginContext for RustPluginContext {
         self.data_dir.clone()
     }
 
+    fn database(&self) -> Option<Arc<Mutex<signalk_sqlite::rusqlite::Connection>>> {
+        self.database.clone()
+    }
+
     fn set_status(&self, msg: &str) {
         *self.status.lock().unwrap_or_else(|p| p.into_inner()) = msg.to_string();
         *self.error_msg.lock().unwrap_or_else(|p| p.into_inner()) = None;
@@ -453,6 +461,7 @@ mod tests {
             delta_filter,
             webapp_registry,
             None, // no autopilot manager in tests
+            None, // no shared database in tests
         ));
 
         (ctx, store)

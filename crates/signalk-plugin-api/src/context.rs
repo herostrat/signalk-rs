@@ -440,6 +440,15 @@ pub trait PluginContext: Send + Sync {
     /// Path to the plugin's data directory (for files, caches, etc.).
     fn data_dir(&self) -> PathBuf;
 
+    // ── Database ──────────────────────────────────────────────────────
+
+    /// Shared SQLite database connection for persistent plugin storage.
+    ///
+    /// Returns the server-wide `signalk-rs.db` connection. Plugins use this
+    /// to read/write their tables (e.g. `track_points`). The connection is
+    /// wrapped in a `Mutex` because `rusqlite::Connection` is Send but not Sync.
+    fn database(&self) -> Option<Arc<std::sync::Mutex<signalk_sqlite::rusqlite::Connection>>>;
+
     // ── Status ──────────────────────────────────────────────────────────
 
     /// Report the plugin's current status (shown in admin UI).

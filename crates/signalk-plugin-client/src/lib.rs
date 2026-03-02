@@ -274,6 +274,21 @@ impl PluginContext for RemotePluginContext {
             "register_delta_input_handler not supported in remote context",
         ))
     }
+
+    async fn register_autopilot_provider(
+        &self,
+        _provider: std::sync::Arc<dyn signalk_plugin_api::autopilot::AutopilotProvider>,
+    ) -> Result<(), PluginError> {
+        Err(PluginError::runtime(
+            "register_autopilot_provider not supported in remote context",
+        ))
+    }
+
+    fn database(
+        &self,
+    ) -> Option<std::sync::Arc<std::sync::Mutex<signalk_sqlite::rusqlite::Connection>>> {
+        None // Not available for remote (Tier 3) plugins
+    }
 }
 
 #[cfg(test)]

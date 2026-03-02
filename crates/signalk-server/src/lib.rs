@@ -86,8 +86,7 @@ impl ServerState {
         ));
         let autopilot_manager = AutopilotManager::new();
         let history_config = history::HistoryConfig::default();
-        let history_manager =
-            HistoryManager::new_in_memory(history_config).expect("History manager init");
+        let history_manager = HistoryManager::new_in_memory(history_config);
         Arc::new(ServerState {
             config,
             store,
@@ -266,6 +265,10 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
         .route(
             "/signalk/v2/api/vessels/self/navigation/course/activeRoute/reverse",
             put(api::v2::course::reverse_route),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/navigation/course/targetArrivalTime",
+            put(api::v2::course::set_target_arrival_time),
         )
         .route(
             "/signalk/v2/api/vessels/self/navigation/course/arrivalCircle",
