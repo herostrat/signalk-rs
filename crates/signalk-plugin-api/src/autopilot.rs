@@ -46,10 +46,30 @@ pub struct AutopilotData {
 }
 
 /// Capabilities exposed by an autopilot provider.
+///
+/// Spec: https://demo.signalk.org/documentation/develop/rest-api/autopilot_api.html
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AutopilotOptions {
-    /// List of supported mode strings (e.g. `["compass", "wind", "route"]`).
-    pub modes: Vec<String>,
+    /// Available device states (e.g. `["enabled", "disabled"]`).
+    pub state: Vec<String>,
+    /// Supported control modes (e.g. `["compass", "wind", "route"]`).
+    pub mode: Vec<String>,
+    /// Available actions with current availability status.
+    pub actions: Vec<AutopilotAction>,
+}
+
+/// An autopilot action (tack, gybe, dodge, etc.) with availability status.
+///
+/// Normalised action IDs per spec: `"dodge"`, `"tack"`, `"gybe"`,
+/// `"courseCurrentPoint"`, `"courseNextPoint"`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutopilotAction {
+    /// Normalised action identifier.
+    pub id: String,
+    /// Human-readable name.
+    pub name: String,
+    /// Whether the action is currently available in the device's state.
+    pub available: bool,
 }
 
 /// Tack/gybe direction.
@@ -141,4 +161,23 @@ pub trait AutopilotProvider: Send + Sync + 'static {
     /// Dodge is a temporary heading offset for obstacle avoidance. Pass
     /// `None` to return to the original target.
     async fn dodge(&self, offset_rad: Option<f64>) -> Result<(), PluginError>;
+
+    // ── Course operations ──────────────────────────────────────────
+
+    /// Start steering to the current course destination.
+    ///
+    /// Sets the autopilot to an appropriate GPS/route mode and engages.
+    /// Requires an active course (nextPoint) in the navigation state.
+    ///
+    /// Implementations that do not support course following should return
+    /// `Err(PluginError::bad_request("course following not supported"))`.
+    async fn course_current_point(&self) -> Result<(), PluginError>;
+
+    /// React to waypoint advancement on the active route.
+    ///
+    /// For software autopilots: ensure the route mode remains active.
+    /// For hardware autopilots: send the "next waypoint" command to the device.
+    ///
+    /// Note: The server advances the course waypoint before calling this method.
+    async fn course_next_point(&self) -> Result<(), PluginError>;
 }

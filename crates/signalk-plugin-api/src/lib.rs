@@ -56,7 +56,9 @@ pub mod resources;
 pub mod testing;
 
 // Re-export core traits and commonly used types.
-pub use autopilot::{AutopilotData, AutopilotOptions, AutopilotProvider, TackDirection};
+pub use autopilot::{
+    AutopilotAction, AutopilotData, AutopilotOptions, AutopilotProvider, TackDirection,
+};
 pub use context::{
     DeltaCallback, DeltaInputHandler, PluginContext, PluginRequest, PluginResponse, PluginRouter,
     PutCommand, PutHandler, PutHandlerResult, RegisteredRoute, RouteCollector, RouteHandler,

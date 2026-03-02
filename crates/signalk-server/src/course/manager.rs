@@ -456,6 +456,12 @@ impl CourseManager {
             if let Err(e) = self.advance_next_point(1).await {
                 warn!("Failed to auto-advance waypoint: {e}");
             }
+            // TODO: Notify the active AutopilotProvider via course_next_point()
+            // so hardware autopilots can send the appropriate NMEA command to the
+            // device. The software autopilot doesn't need this (it reads the new
+            // bearingTrackTrue via subscription), but a hardware provider would.
+            // Requires: CourseManager gets Arc<AutopilotManager> to resolve the
+            // default provider and call provider.course_next_point().await.
         } else {
             info!(distance, "Arrival at destination detected");
             self.emit_arrival_notification().await;

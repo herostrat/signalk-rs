@@ -1,4 +1,3 @@
-use axum::Json;
 /// SignalK V2 Autopilot API handlers.
 ///
 /// Spec: https://demo.signalk.org/documentation/develop/rest-api/autopilot_api.html
@@ -7,12 +6,13 @@ use axum::Json;
 /// to registered `AutopilotProvider` plugins.
 ///
 /// Device ID `_default` resolves to whichever provider is currently default.
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use serde::Deserialize;
 use serde_json::{Value, json};
 use signalk_plugin_api::TackDirection;
+use signalk_types::{Delta, PathValue, Source, Update};
 use std::sync::Arc;
 
 use crate::ServerState;
@@ -62,6 +62,12 @@ fn plugin_err(e: signalk_plugin_api::PluginError) -> Response {
             Json(json!({"message": e.to_string()})),
         )
             .into_response()
+    } else if e.is_bad_request() {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"message": e.to_string()})),
+        )
+            .into_response()
     } else {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -71,30 +77,43 @@ fn plugin_err(e: signalk_plugin_api::PluginError) -> Response {
     }
 }
 
+/// Parse a tack/gybe direction from the URL path segment.
+fn parse_direction(s: &str) -> Option<TackDirection> {
+    match s.to_lowercase().as_str() {
+        "port" => Some(TackDirection::Port),
+        "starboard" => Some(TackDirection::Starboard),
+        _ => None,
+    }
+}
+
+/// 400 response for invalid tack/gybe direction.
+fn bad_direction(s: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(json!({"message": format!("Invalid direction: '{s}'. Use 'port' or 'starboard'.")})),
+    )
+        .into_response()
+}
+
 // ─── Discovery ────────────────────────────────────────────────────────────────
 
 /// GET /signalk/v2/api/vessels/self/autopilots
 ///
-/// Returns a map of all registered autopilot devices.
+/// Spec: returns a flat object `{ "device-id": { "provider": "plugin-name", "isDefault": true } }`.
 pub async fn list_autopilots(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
     let entries = state.autopilot_manager.list().await;
-    let default_id = state.autopilot_manager.default_id().await;
 
     let mut map = serde_json::Map::new();
-    for (id, is_default) in entries {
+    for (id, provider_name, is_default) in entries {
         map.insert(
-            id.clone(),
+            id,
             json!({
-                "id": id,
+                "provider": provider_name,
                 "isDefault": is_default,
             }),
         );
     }
-    let result = json!({
-        "devices": map,
-        "defaultId": default_id,
-    });
-    Json(result)
+    Json(Value::Object(map))
 }
 
 // ─── Default provider ─────────────────────────────────────────────────────────
@@ -117,7 +136,15 @@ pub async fn set_default_provider(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     match state.autopilot_manager.set_default(&id).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => {
+            // Emit defaultPilot delta so WS subscribers see the change
+            let delta = Delta::self_vessel(vec![Update::new(
+                Source::plugin("autopilot-api"),
+                vec![PathValue::new("steering.autopilot.defaultPilot", json!(id))],
+            )]);
+            state.store.write().await.apply_delta(delta);
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => plugin_err(e),
     }
 }
@@ -309,7 +336,10 @@ pub async fn tack(
     State(state): State<Arc<ServerState>>,
     Path((device_id, direction)): Path<(String, String)>,
 ) -> Response {
-    let dir = parse_direction(&direction);
+    let dir = match parse_direction(&direction) {
+        Some(d) => d,
+        None => return bad_direction(&direction),
+    };
     let provider = resolve_provider!(state, &device_id);
     match provider.tack(dir).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -322,7 +352,10 @@ pub async fn gybe(
     State(state): State<Arc<ServerState>>,
     Path((device_id, direction)): Path<(String, String)>,
 ) -> Response {
-    let dir = parse_direction(&direction);
+    let dir = match parse_direction(&direction) {
+        Some(d) => d,
+        None => return bad_direction(&direction),
+    };
     let provider = resolve_provider!(state, &device_id);
     match provider.gybe(dir).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -384,20 +417,47 @@ pub async fn dodge_exit(
     }
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Course operations ────────────────────────────────────────────────────────
 
-fn parse_direction(s: &str) -> TackDirection {
-    match s.to_lowercase().as_str() {
-        "port" => TackDirection::Port,
-        _ => TackDirection::Starboard, // default
+/// POST /signalk/v2/api/vessels/self/autopilots/{device_id}/courseCurrentPoint
+///
+/// Activate course-following mode: set Route mode + engage towards the current
+/// course destination. Requires an active course (nextPoint) in nav state.
+pub async fn course_current_point(
+    State(state): State<Arc<ServerState>>,
+    Path(device_id): Path<String>,
+) -> Response {
+    let provider = resolve_provider!(state, &device_id);
+    match provider.course_current_point().await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => plugin_err(e),
     }
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+/// POST /signalk/v2/api/vessels/self/autopilots/{device_id}/courseNextPoint
+///
+/// Advance to the next waypoint on the active route, then ensure the autopilot
+/// remains engaged in route mode.
+///
+/// Coordination: the handler advances the course via CourseManager, then the
+/// provider ensures route mode stays active.
+pub async fn course_next_point(
+    State(state): State<Arc<ServerState>>,
+    Path(device_id): Path<String>,
+) -> Response {
+    // Advance the course waypoint first (server-level coordination)
+    if let Err(e) = state.course_manager.advance_next_point(1).await {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"message": format!("Failed to advance waypoint: {e}")})),
+        )
+            .into_response();
+    }
 
-#[derive(Deserialize)]
-#[allow(dead_code)]
-struct ValueBody {
-    value: f64,
-    units: Option<String>,
+    // Then tell the provider to ensure route mode is active
+    let provider = resolve_provider!(state, &device_id);
+    match provider.course_next_point().await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => plugin_err(e),
+    }
 }

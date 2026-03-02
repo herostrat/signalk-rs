@@ -335,6 +335,14 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
                 .put(api::v2::autopilot::dodge_adjust)
                 .delete(api::v2::autopilot::dodge_exit),
         )
+        .route(
+            "/signalk/v2/api/vessels/self/autopilots/{device_id}/courseCurrentPoint",
+            post(api::v2::autopilot::course_current_point),
+        )
+        .route(
+            "/signalk/v2/api/vessels/self/autopilots/{device_id}/courseNextPoint",
+            post(api::v2::autopilot::course_next_point),
+        )
         // -- Notifications API ------------------------------------------------
         // Alarm interaction: silence and acknowledge active notifications.
         .route(

@@ -11,10 +11,8 @@
 /// | `heading`  | "compass"    | Stable          | Heading hold, PID controller        |
 /// | `wind`     | "wind"       | Stable          | AWA hold, CircularFilter + PID      |
 /// | `wind`     | "wind_true"  | Experimental    | TWA hold, CircularFilter + PID      |
-/// | `route`    | "route"      | Experimental    | Cascaded LOS guidance + heading PID |
+/// | `route`    | "route"      | Stable          | Cascaded LOS guidance + heading PID |
 ///
-/// Experimental modes are gated behind the `autopilot-experimental` feature
-/// (see `signalk-server/Cargo.toml`).
+/// `wind_true` remains experimental (gated behind the `experimental` feature).
 pub mod heading;
-#[cfg(feature = "experimental")]
 pub mod route;

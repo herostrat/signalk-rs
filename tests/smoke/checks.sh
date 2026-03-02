@@ -460,6 +460,27 @@ ALL_FEATURE_COUNT=$(echo "$TRACKS_AFTER_DELETE" | node -e "
 check "all tracks empty after delete" \
   "$ALL_FEATURE_COUNT" "0"
 
+# --- Autopilot API ---
+echo "  Autopilot API"
+check "AP: list autopilots has isDefault" \
+  "$(fetch "$BASE/signalk/v2/api/vessels/self/autopilots")" '"isDefault"'
+check "AP: list autopilots has provider" \
+  "$(fetch "$BASE/signalk/v2/api/vessels/self/autopilots")" '"provider"'
+check "AP: default status has state" \
+  "$(fetch "$BASE/signalk/v2/api/vessels/self/autopilots/_default")" '"state"'
+check "AP: default provider has id" \
+  "$(fetch "$BASE/signalk/v2/api/vessels/self/autopilots/_providers/_default")" '"id"'
+check "AP: get state has value" \
+  "$(fetch "$BASE/signalk/v2/api/vessels/self/autopilots/_default/state")" '"value"'
+check "AP: get mode has value" \
+  "$(fetch "$BASE/signalk/v2/api/vessels/self/autopilots/_default/mode")" '"value"'
+check "AP: get target has value" \
+  "$(fetch "$BASE/signalk/v2/api/vessels/self/autopilots/_default/target")" '"value"'
+check "AP: default data has options.actions" \
+  "$(fetch "$BASE/signalk/v2/api/vessels/self/autopilots/_default")" '"actions"'
+check "AP: default data has options.mode" \
+  "$(fetch "$BASE/signalk/v2/api/vessels/self/autopilots/_default")" '"mode"'
+
 # --- Summary ---
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

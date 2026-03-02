@@ -7,8 +7,8 @@ use std::time::Instant;
 
 /// Active control algorithm.
 ///
-/// Stable modes are always available. Experimental modes are gated behind the
-/// `experimental` Cargo feature — they are excluded from release builds.
+/// Stable modes: Compass, Wind, Route.
+/// Experimental: WindTrue (gated behind the `experimental` Cargo feature).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AutopilotMode {
@@ -22,7 +22,6 @@ pub enum AutopilotMode {
     WindTrue,
     /// Route following via cascaded LOS guidance.
     /// Outer loop: XTE → heading correction. Inner loop: PID on desired heading.
-    #[cfg(feature = "experimental")]
     Route,
 }
 
@@ -33,7 +32,6 @@ impl AutopilotMode {
             AutopilotMode::Wind => "wind",
             #[cfg(feature = "experimental")]
             AutopilotMode::WindTrue => "wind_true",
-            #[cfg(feature = "experimental")]
             AutopilotMode::Route => "route",
         }
     }
@@ -45,7 +43,6 @@ impl AutopilotMode {
             AutopilotMode::Wind => "environment.wind.angleApparent",
             #[cfg(feature = "experimental")]
             AutopilotMode::WindTrue => "environment.wind.angleTrue",
-            #[cfg(feature = "experimental")]
             AutopilotMode::Route => "navigation.course.calcValues.bearingTrackTrue",
         }
     }
@@ -57,7 +54,6 @@ impl AutopilotMode {
             AutopilotMode::Wind => "steering.autopilot.target.windAngleApparent",
             #[cfg(feature = "experimental")]
             AutopilotMode::WindTrue => "steering.autopilot.target.windAngleTrue",
-            #[cfg(feature = "experimental")]
             AutopilotMode::Route => "steering.autopilot.target.headingTrue",
         }
     }
@@ -71,7 +67,6 @@ impl std::str::FromStr for AutopilotMode {
             "wind" => Ok(AutopilotMode::Wind),
             #[cfg(feature = "experimental")]
             "wind_true" => Ok(AutopilotMode::WindTrue),
-            #[cfg(feature = "experimental")]
             "route" => Ok(AutopilotMode::Route),
             other => Err(format!("unknown autopilot mode: {other}")),
         }

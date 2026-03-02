@@ -408,7 +408,7 @@ impl PluginContext for RustPluginContext {
             PluginError::runtime("register_autopilot_provider: no AutopilotManager available")
         })?;
         let device_id = provider.device_id().to_string();
-        manager.register(provider).await;
+        manager.register(provider, &self.plugin_id).await;
         tracing::info!(
             plugin = %self.plugin_id,
             device_id = %device_id,

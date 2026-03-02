@@ -201,7 +201,6 @@ impl Plugin for AutopilotPlugin {
             .round()
             .max(1.0) as u64;
 
-        #[allow(unused_variables)] // `xte` only used by cfg(experimental) Route mode
         let tick_abort = tokio::spawn(async move {
             // PID controller — maintains integral state across ticks
             let mut pid = PidController::new(cfg.integral_limit);
@@ -381,7 +380,7 @@ impl Plugin for AutopilotPlugin {
                             emit_rudder(&ctx_tick, 0.0).await;
                             emit_notification(
                                 &ctx_tick,
-                                "steering.autopilot.headingSensorFailure",
+                                "steering.autopilot.heading",
                                 NotificationState::Alarm,
                                 "Heading sensor glitch — autopilot disengaged",
                             )
@@ -484,7 +483,6 @@ impl Plugin for AutopilotPlugin {
                     }
 
                     // ── Route: cascaded LOS guidance ─────────────────────────
-                    #[cfg(feature = "experimental")]
                     AutopilotMode::Route => {
                         let current_heading = match heading {
                             Some(h) => h,
@@ -606,6 +604,7 @@ impl Plugin for AutopilotPlugin {
         let provider = Arc::new(ProviderHandle {
             device_id,
             state: Arc::clone(&self.state),
+            ctx: Arc::clone(&ctx),
         });
         ctx.register_autopilot_provider(provider).await?;
 
@@ -649,13 +648,15 @@ pub(crate) async fn emit_autopilot_state(
     mode: &AutopilotMode,
 ) {
     let source = Source::plugin("autopilot");
+    let engaged = state_str == "enabled";
+    let is_wind_mode = *mode == AutopilotMode::Wind;
+    #[cfg(feature = "experimental")]
+    let is_wind_mode = is_wind_mode || *mode == AutopilotMode::WindTrue;
+
     let mut values = vec![
         PathValue::new("steering.autopilot.state", serde_json::json!(state_str)),
         PathValue::new("steering.autopilot.mode", serde_json::json!(mode_str)),
-        PathValue::new(
-            "steering.autopilot.engaged",
-            serde_json::json!(state_str == "enabled"),
-        ),
+        PathValue::new("steering.autopilot.engaged", serde_json::json!(engaged)),
     ];
     if let Some(target) = target_rad {
         values.push(PathValue::new(
@@ -663,6 +664,16 @@ pub(crate) async fn emit_autopilot_state(
             serde_json::json!(target),
         ));
     }
+    // Emit available actions (dodge/tack/gybe based on local state;
+    // courseCurrentPoint/courseNextPoint depend on store, omitted here).
+    values.push(PathValue::new(
+        "steering.autopilot.actions",
+        serde_json::json!({
+            "dodge": engaged,
+            "tack": engaged && is_wind_mode,
+            "gybe": engaged && is_wind_mode,
+        }),
+    ));
     let delta = Delta::self_vessel(vec![Update::new(source, values)]);
     let _ = ctx.handle_message(delta).await;
 }

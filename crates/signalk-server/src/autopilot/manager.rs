@@ -11,8 +11,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// Per-provider entry: the provider itself + the plugin name that registered it.
+struct ProviderEntry {
+    provider: Arc<dyn AutopilotProvider>,
+    plugin_name: String,
+}
+
 pub struct AutopilotManager {
-    providers: RwLock<HashMap<String, Arc<dyn AutopilotProvider>>>,
+    providers: RwLock<HashMap<String, ProviderEntry>>,
     default_id: RwLock<Option<String>>,
 }
 
@@ -25,19 +31,31 @@ impl AutopilotManager {
     }
 
     /// Register a provider. The first registration automatically becomes the default.
-    pub async fn register(&self, provider: Arc<dyn AutopilotProvider>) {
+    ///
+    /// `plugin_name` is the registering plugin's ID (e.g. `"autopilot"`).
+    pub async fn register(&self, provider: Arc<dyn AutopilotProvider>, plugin_name: &str) {
         let id = provider.device_id().to_string();
         let mut map = self.providers.write().await;
         let mut def = self.default_id.write().await;
         if map.is_empty() {
             *def = Some(id.clone());
         }
-        map.insert(id, provider);
+        map.insert(
+            id,
+            ProviderEntry {
+                provider,
+                plugin_name: plugin_name.to_string(),
+            },
+        );
     }
 
     /// Look up a provider by device ID.
     pub async fn get(&self, id: &str) -> Option<Arc<dyn AutopilotProvider>> {
-        self.providers.read().await.get(id).cloned()
+        self.providers
+            .read()
+            .await
+            .get(id)
+            .map(|e| Arc::clone(&e.provider))
     }
 
     /// Return the default provider, if any.
@@ -51,12 +69,18 @@ impl AutopilotManager {
         self.default_id.read().await.clone()
     }
 
-    /// List all registered providers as `(device_id, is_default)` pairs.
-    pub async fn list(&self) -> Vec<(String, bool)> {
+    /// List all registered providers as `(device_id, provider_name, is_default)` tuples.
+    pub async fn list(&self) -> Vec<(String, String, bool)> {
         let map = self.providers.read().await;
         let def = self.default_id.read().await.clone();
-        map.keys()
-            .map(|id| (id.clone(), def.as_deref() == Some(id)))
+        map.iter()
+            .map(|(id, entry)| {
+                (
+                    id.clone(),
+                    entry.plugin_name.clone(),
+                    def.as_deref() == Some(id.as_str()),
+                )
+            })
             .collect()
     }
 

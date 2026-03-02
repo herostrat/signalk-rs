@@ -34,6 +34,10 @@ pub enum PluginError {
     #[error("not found: {0}")]
     NotFound(String),
 
+    /// The request is invalid (maps to HTTP 400 in API handlers).
+    #[error("bad request: {0}")]
+    BadRequest(String),
+
     /// Catch-all for other errors.
     #[error("{0}")]
     Other(#[from] Box<dyn std::error::Error + Send + Sync>),
@@ -53,8 +57,18 @@ impl PluginError {
         PluginError::NotFound(msg.into())
     }
 
+    /// Construct a bad-request error (invalid input, maps to HTTP 400).
+    pub fn bad_request(msg: impl Into<String>) -> Self {
+        PluginError::BadRequest(msg.into())
+    }
+
     /// Returns true if this error represents a missing resource (HTTP 404).
     pub fn is_not_found(&self) -> bool {
         matches!(self, PluginError::NotFound(_))
+    }
+
+    /// Returns true if this error represents an invalid request (HTTP 400).
+    pub fn is_bad_request(&self) -> bool {
+        matches!(self, PluginError::BadRequest(_))
     }
 }
