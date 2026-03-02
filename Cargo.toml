@@ -43,6 +43,9 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }
 
+# JSON Schema generation
+schemars = { version = "1" }
+
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 

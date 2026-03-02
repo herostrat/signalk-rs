@@ -2,6 +2,7 @@ pub mod api;
 pub mod auth;
 pub mod autopilot;
 pub mod config;
+pub mod config_reference;
 pub mod course;
 pub mod history;
 pub mod plugins;
@@ -384,6 +385,7 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
         // Admin API  —  our own, not part of the SignalK spec
         // Plugin lifecycle management, used by the Admin UI at /admin/.
         // ════════════════════════════════════════════════════════════════════
+        .route("/admin/api/config-reference", get(api::admin::config_reference))
         .route("/admin/api/plugins", get(api::admin::list_plugins))
         .route(
             "/admin/api/plugins/{plugin_id}",

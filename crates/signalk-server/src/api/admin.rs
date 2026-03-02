@@ -8,6 +8,7 @@
 ///   POST   /admin/api/plugins/{pluginId}/restart → restart a running plugin
 ///   POST   /admin/api/plugins/{pluginId}/enable  → start a stopped plugin
 ///   POST   /admin/api/plugins/{pluginId}/disable → stop a running plugin
+///   GET    /admin/api/config-reference           → auto-generated config reference (TOML)
 use axum::{
     Json,
     extract::{Path, State},
@@ -351,6 +352,34 @@ async fn sync_tier1_status(state: &ServerState, mgr: &crate::plugins::manager::P
             enabled,
         );
     }
+}
+
+/// GET /admin/api/config-reference — auto-generated config reference as TOML.
+///
+/// Collects schemas from ALL registered plugins (Tier 1, 2, 3) and the server
+/// config, then generates a fully commented TOML reference. Works for Rust plugins
+/// (schemars-derived), Node.js bridge plugins (JS `plugin.schema()`), and any
+/// future plugin tier that provides a JSON Schema.
+pub async fn config_reference(State(state): State<Arc<ServerState>>) -> Response {
+    let server_schema =
+        serde_json::to_value(schemars::schema_for!(crate::config::ServerConfig)).unwrap();
+
+    let registry = state.plugin_registry.read().await;
+    let mut plugin_schemas: Vec<(String, String, Option<serde_json::Value>)> = registry
+        .all()
+        .into_iter()
+        .map(|info| (info.id.clone(), info.name.clone(), info.schema.clone()))
+        .collect();
+    plugin_schemas.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let toml = crate::config_reference::generate_full_reference(&server_schema, &plugin_schemas);
+
+    (
+        StatusCode::OK,
+        [("content-type", "text/toml; charset=utf-8")],
+        toml,
+    )
+        .into_response()
 }
 
 /// Populate PluginRegistry with initial Tier 1 statuses after start_all().

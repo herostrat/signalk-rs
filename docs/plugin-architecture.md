@@ -95,15 +95,20 @@ crates/
   signalk-plugin-api/         Canonical plugin API definition (traits + types)
   signalk-plugin-client/      Rust client for Tier 3 standalone plugins
   signalk-internal/           UDS transport, Internal API server
+  signalk-sqlite/             Shared SQLite database (WAL, migrations)
   signalk-server/             axum server, PluginManager, RustPluginContext
 
 crates/plugins/
   nmea0183-receive/           NMEA 0183 TCP + serial input
+  nmea0183-send/              NMEA 0183 TCP output
+  nmea2000-receive/           NMEA 2000 SocketCAN input
+  nmea2000-send/              NMEA 2000 SocketCAN output
   anchor-alarm/               Anchor alarm plugin
   sensor-data-simulator/      Dev-only sensor data generator
   derived-data/               Derived data calculators
   ais-status/                 AIS target tracking
-  nmea2000-receive/           NMEA 2000 SocketCAN input
+  autopilot/                  Software autopilot (V2 API provider)
+  tracks/                     Track recording (SQLite)
 ```
 
 ### Dependency Graph
@@ -120,7 +125,9 @@ signalk-store         (types)
     ^
 signalk-internal      (types, plugin-api)
     ^
-signalk-server        (everything + axum, tokio, plugins)
+signalk-sqlite        (rusqlite)
+    ^
+signalk-server        (everything + axum, tokio, plugins, sqlite)
 ```
 
 **Invariant:** Plugins never see `signalk-store`, `signalk-internal`, or `signalk-server`.
@@ -143,6 +150,10 @@ id = "anchor-alarm"
 config = { position = { latitude = 49.27, longitude = -123.19 }, radius = 75.0 }
 
 [[plugins]]
-id = "course-provider"
-enabled = false
+id = "autopilot"
+config = { device_id = "default", initial_mode = "compass" }
+
+[[plugins]]
+id = "tracks"
+config = { min_interval_secs = 10, max_age_hours = 720 }
 ```

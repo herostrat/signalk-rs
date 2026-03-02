@@ -23,7 +23,8 @@ use calculators::{Calculator, path_matches_input};
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
+#[schemars(default)]
 struct DerivedDataConfig {
     /// List of calculator names to disable. All calculators are enabled by default.
     #[serde(default)]
@@ -64,17 +65,7 @@ impl Plugin for DerivedDataPlugin {
     }
 
     fn schema(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({
-            "type": "object",
-            "properties": {
-                "disabled": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "List of calculator names to disable",
-                    "default": []
-                }
-            }
-        }))
+        Some(serde_json::to_value(schemars::schema_for!(DerivedDataConfig)).unwrap())
     }
 
     async fn start(

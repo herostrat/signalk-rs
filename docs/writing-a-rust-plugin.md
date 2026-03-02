@@ -191,15 +191,11 @@ ctx.register_put_handler(
 ### REST Endpoints
 
 ```rust
-use signalk_plugin_api::{route_handler, PluginRequest, PluginResponse};
+use signalk_plugin_api::{route_handler, PluginResponse};
 
 ctx.register_routes(Box::new(|router| {
     router.get("/status", route_handler(|_req| async {
-        Ok(PluginResponse {
-            status: 200,
-            headers: vec![("content-type".into(), "application/json".into())],
-            body: serde_json::json!({"status": "ok"}).to_string().into_bytes(),
-        })
+        PluginResponse::json(200, &serde_json::json!({"status": "ok"}))
     }));
 })).await?;
 // Accessible at: GET /plugins/my-plugin/status
@@ -210,6 +206,72 @@ ctx.register_routes(Box::new(|router| {
 ```rust
 ctx.set_status("Connected, processing 47 sentences/s");
 ctx.set_error("Connection lost, retrying in 5s");
+```
+
+### Config Persistence
+
+```rust
+// Save plugin configuration (survives restarts)
+ctx.save_options(serde_json::json!({"threshold": 42})).await?;
+
+// Load previously saved configuration
+let opts = ctx.read_options().await?;
+
+// Plugin-specific data directory (for files, caches, etc.)
+let dir = ctx.data_dir();
+```
+
+### Notifications
+
+```rust
+use signalk_types::{Notification, NotificationState};
+
+// Raise a notification (alarm, warning, etc.)
+ctx.raise_notification(
+    "navigation.anchor",
+    Notification::new(NotificationState::Alarm, "Anchor dragging!"),
+    "my-plugin",
+).await?;
+
+// Clear a notification (sets state to Normal)
+ctx.clear_notification("navigation.anchor", "my-plugin").await?;
+```
+
+### Database (Tier 1 only)
+
+```rust
+// Access the shared SQLite connection (WAL mode, thread-safe)
+if let Some(db) = ctx.database() {
+    let conn = db.lock().unwrap();
+    conn.execute("CREATE TABLE IF NOT EXISTS my_data (id INTEGER PRIMARY KEY)", [])?;
+}
+```
+
+### Advanced Features
+
+```rust
+// Multi-source data: get all sources for a path
+let sources = ctx.get_self_path_sources("navigation.headingTrue").await?;
+// Returns HashMap<source_ref, Value> — e.g. {"gps.GP": 1.57, "compass.HC": 1.56}
+
+// Delta input handler: filter/modify deltas before they reach the store
+ctx.register_delta_input_handler(Box::new(|delta| {
+    // Return Some(delta) to pass through, None to drop
+    Some(delta)
+})).await?;
+
+// Register as autopilot provider (V2 API)
+ctx.register_autopilot_provider(my_provider).await?;
+
+// Register as resource provider (routes, waypoints, etc.)
+ctx.register_resource_provider("routes", my_resource_provider).await?;
+
+// Register a static webapp
+ctx.register_webapp(WebAppRegistration {
+    display_name: "My Dashboard".into(),
+    description: Some("Custom dashboard".into()),
+    public_dir: PathBuf::from("/path/to/dist"),
+}).await?;
 ```
 
 ## Testing with MockPluginContext
@@ -236,12 +298,28 @@ mod tests {
 ```
 
 The `MockPluginContext` records all interactions:
+
+**Inspection fields** (all `Arc<Mutex<...>>`):
 - `emitted_deltas` — deltas sent via `handle_message`
-- `registered_put_paths` — paths registered via `register_put_handler`
+- `registered_put_paths` — `(context, path)` pairs from `register_put_handler`
 - `status_messages` / `error_messages` — status updates
 - `saved_options` — config saved via `save_options`
-- `stored_values` — pre-seeded values for `get_self_path`
-- `deliver_delta()` — simulate incoming deltas to subscriptions
+- `stored_values` — values for `get_self_path` (pre-seeded via `seed_value()`)
+- `subscriptions` — active subscription callbacks
+- `delta_input_handlers` — registered delta input filters
+- `database` — in-memory SQLite connection (for plugins that use `database()`)
+- `data_directory` — test data directory (defaults to `/tmp/signalk-plugin-test`)
+
+**Helper methods:**
+- `seed_value(path, value)` — pre-seed a value for `get_self_path` to return
+- `deliver_delta(delta)` — simulate an incoming delta to all active subscriptions
+  (applies delta input handlers first; drops delta if any handler returns `None`)
+- `delta_input_handler_count()` — number of registered delta input filters
+
+**Behavior notes:**
+- `handle_message()` records deltas in `emitted_deltas` (does **not** update `stored_values` —
+  use `seed_value()` to pre-populate values for `get_self_path`)
+- `database()` returns an in-memory SQLite connection (shared across calls)
 
 ## Best Practices
 
@@ -252,3 +330,6 @@ The `MockPluginContext` records all interactions:
 5. **Spawn background tasks inside `start()`** — keep `start()` fast
 6. **Store abort handles** for cleanup in `stop()`
 7. **Test with `MockPluginContext`** — no server needed
+8. **Use `ctx.database()`** for persistent storage — shared SQLite with WAL mode (see `tracks` plugin)
+9. **Use `ctx.raise_notification()`** for alarms — default impl builds the delta for you (see `anchor-alarm`)
+10. **Use `register_autopilot_provider()`** for V2 autopilot integrations (see `autopilot` plugin)

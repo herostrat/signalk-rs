@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use crate::history::HistoryConfig;
 
 /// Server configuration loaded from TOML file or environment.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[schemars(default)]
 pub struct ServerConfig {
     pub server: ServerSettings,
     pub vessel: VesselSettings,
@@ -69,7 +70,7 @@ pub struct ServerConfig {
 }
 
 /// Configuration for a single plugin instance.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PluginConfig {
     /// Plugin identifier, e.g. "nmea0183-tcp", "anchor-alarm".
     pub id: String,
@@ -89,7 +90,7 @@ fn default_plugin_config() -> serde_json::Value {
     serde_json::json!({})
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ServerSettings {
     /// Public HTTP+WS port (default: 3000)
     pub port: u16,
@@ -99,7 +100,7 @@ pub struct ServerSettings {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct VesselSettings {
     /// Vessel UUID — generated on first start if empty
     pub uuid: String,
@@ -107,7 +108,7 @@ pub struct VesselSettings {
     pub mmsi: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AuthSettings {
     /// JWT signing secret — MUST be set in production
     pub jwt_secret: String,
@@ -133,7 +134,7 @@ fn default_http_bridge_port() -> u16 {
     3002
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InternalSettings {
     /// Transport backend: "uds" or "http"
     pub transport: String,

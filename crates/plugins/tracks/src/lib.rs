@@ -34,25 +34,26 @@ use crate::types::TrackPoint;
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[schemars(default)]
 struct TracksConfig {
-    /// Minimum seconds between recorded points per vessel. Default: 5.
+    /// Minimum seconds between recorded points per vessel.
     #[serde(default = "default_min_interval")]
     min_interval_secs: u64,
 
-    /// Maximum age of points in hours before pruning. Default: 24.
+    /// Maximum age of points in hours before pruning.
     #[serde(default = "default_max_age_hours")]
     max_age_hours: u64,
 
-    /// Tick interval in seconds for pruning. Default: 60.
+    /// Tick interval in seconds for pruning.
     #[serde(default = "default_tick_interval")]
     tick_interval_secs: u64,
 
-    /// Track own vessel position. Default: true.
+    /// Track own vessel position.
     #[serde(default = "default_true")]
     track_self: bool,
 
-    /// Track other vessels (AIS targets). Default: true.
+    /// Track other vessels (AIS targets).
     #[serde(default = "default_true")]
     track_others: bool,
 }
@@ -128,36 +129,7 @@ impl Plugin for TracksPlugin {
     }
 
     fn schema(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({
-            "type": "object",
-            "properties": {
-                "min_interval_secs": {
-                    "type": "integer",
-                    "description": "Minimum seconds between recorded points per vessel",
-                    "default": 5
-                },
-                "max_age_hours": {
-                    "type": "integer",
-                    "description": "Maximum age of points in hours before pruning",
-                    "default": 24
-                },
-                "tick_interval_secs": {
-                    "type": "integer",
-                    "description": "Pruning check interval in seconds",
-                    "default": 60
-                },
-                "track_self": {
-                    "type": "boolean",
-                    "description": "Track own vessel position",
-                    "default": true
-                },
-                "track_others": {
-                    "type": "boolean",
-                    "description": "Track other vessels (AIS targets etc.)",
-                    "default": true
-                }
-            }
-        }))
+        Some(serde_json::to_value(schemars::schema_for!(TracksConfig)).unwrap())
     }
 
     async fn start(

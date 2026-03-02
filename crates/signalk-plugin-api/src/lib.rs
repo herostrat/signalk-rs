@@ -68,3 +68,6 @@ pub use context::{
 pub use error::PluginError;
 pub use plugin::{Plugin, PluginMetadata, PluginStatus};
 pub use resources::ResourceProvider;
+
+// Re-export schemars so plugins can derive JsonSchema without adding schemars directly.
+pub use schemars;

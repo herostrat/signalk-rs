@@ -16,9 +16,49 @@ pub mod pgn;
 
 use async_trait::async_trait;
 use nmea2000::N2kTransport;
+use serde::Deserialize;
 use signalk_plugin_api::{Plugin, PluginContext, PluginError, PluginMetadata};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
+
+// ─── Config struct ──────────────────────────────────────────────────────────
+
+/// Configuration for the NMEA 2000 input plugin.
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[schemars(default)]
+pub struct N2kConfig {
+    /// Interface: CAN interface (can0) for socketcan, serial port (/dev/ttyUSB0) for slcan/actisense.
+    #[serde(default = "default_interface")]
+    pub interface: String,
+    /// Transport type: socketcan, slcan, or actisense.
+    #[serde(default = "default_transport")]
+    pub transport: String,
+    /// Source label for SignalK deltas.
+    #[serde(default = "default_n2k_source_label")]
+    pub source_label: String,
+}
+
+impl Default for N2kConfig {
+    fn default() -> Self {
+        N2kConfig {
+            interface: default_interface(),
+            transport: default_transport(),
+            source_label: default_n2k_source_label(),
+        }
+    }
+}
+
+fn default_interface() -> String {
+    "can0".to_string()
+}
+
+fn default_transport() -> String {
+    "socketcan".to_string()
+}
+
+fn default_n2k_source_label() -> String {
+    "nmea2000".to_string()
+}
 
 pub struct Nmea2000Plugin {
     abort_handle: Option<tokio::task::AbortHandle>,
@@ -48,28 +88,7 @@ impl Plugin for Nmea2000Plugin {
     }
 
     fn schema(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({
-            "type": "object",
-            "required": ["interface"],
-            "properties": {
-                "interface": {
-                    "type": "string",
-                    "description": "Interface: CAN interface (can0) for socketcan, serial port (/dev/ttyUSB0) for slcan/actisense",
-                    "default": "can0"
-                },
-                "transport": {
-                    "type": "string",
-                    "description": "Transport type: socketcan, slcan, or actisense",
-                    "default": "socketcan",
-                    "enum": ["socketcan", "slcan", "actisense"]
-                },
-                "source_label": {
-                    "type": "string",
-                    "description": "Source label for SignalK deltas",
-                    "default": "nmea2000"
-                }
-            }
-        }))
+        Some(serde_json::to_value(schemars::schema_for!(N2kConfig)).unwrap())
     }
 
     async fn start(
@@ -77,20 +96,12 @@ impl Plugin for Nmea2000Plugin {
         config: serde_json::Value,
         ctx: Arc<dyn PluginContext>,
     ) -> Result<(), PluginError> {
-        let interface = config["interface"]
-            .as_str()
-            .ok_or_else(|| PluginError::config("missing 'interface'"))?
-            .to_string();
+        let cfg: N2kConfig =
+            serde_json::from_value(config).map_err(|e| PluginError::config(format!("{e}")))?;
 
-        let transport = config["transport"]
-            .as_str()
-            .unwrap_or("socketcan")
-            .to_string();
-
-        let source_label = config["source_label"]
-            .as_str()
-            .unwrap_or("nmea2000")
-            .to_string();
+        let interface = cfg.interface;
+        let transport = cfg.transport;
+        let source_label = cfg.source_label;
 
         info!(interface = %interface, transport = %transport, "NMEA 2000 plugin starting");
 
@@ -232,19 +243,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn plugin_rejects_missing_interface() {
+    async fn plugin_rejects_invalid_config() {
         use signalk_plugin_api::testing::MockPluginContext;
 
         let mut plugin = Nmea2000Plugin::new();
         let ctx = Arc::new(MockPluginContext::new());
-        let result = plugin.start(serde_json::json!({}), ctx).await;
+        // Wrong type for interface should fail deserialization
+        let result = plugin
+            .start(serde_json::json!({"interface": 42}), ctx)
+            .await;
         assert!(result.is_err());
     }
 
     #[test]
     fn default_transport_is_socketcan() {
-        let config = serde_json::json!({"interface": "can0"});
-        let transport = config["transport"].as_str().unwrap_or("socketcan");
-        assert_eq!(transport, "socketcan");
+        let cfg = N2kConfig::default();
+        assert_eq!(cfg.transport, "socketcan");
+        assert_eq!(cfg.interface, "can0");
+        assert_eq!(cfg.source_label, "nmea2000");
     }
 }

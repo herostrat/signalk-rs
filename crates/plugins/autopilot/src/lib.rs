@@ -104,6 +104,10 @@ impl Plugin for AutopilotPlugin {
         )
     }
 
+    fn schema(&self) -> Option<serde_json::Value> {
+        Some(serde_json::to_value(schemars::schema_for!(AutopilotConfig)).unwrap())
+    }
+
     async fn start(
         &mut self,
         config: serde_json::Value,

@@ -32,14 +32,18 @@ use tracing::{debug, info, warn};
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[schemars(default)]
 struct SendConfig {
+    /// TCP port for NMEA sentence output.
     #[serde(default = "default_port")]
     port: u16,
 
+    /// NMEA talker ID (e.g. GP, GN, II).
     #[serde(default = "default_talker_id")]
     talker_id: String,
 
+    /// Sentence generation interval in milliseconds.
     #[serde(default = "default_interval")]
     interval_ms: u64,
 }
@@ -259,28 +263,7 @@ impl Plugin for Nmea0183SendPlugin {
     }
 
     fn schema(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({
-            "type": "object",
-            "properties": {
-                "port": {
-                    "type": "integer",
-                    "description": "TCP port for NMEA sentence output",
-                    "default": 10111,
-                    "minimum": 1024
-                },
-                "talker_id": {
-                    "type": "string",
-                    "description": "NMEA talker ID (e.g. GP, GN, II)",
-                    "default": "GP"
-                },
-                "interval_ms": {
-                    "type": "integer",
-                    "description": "Sentence generation interval in milliseconds",
-                    "default": 1000,
-                    "minimum": 100
-                }
-            }
-        }))
+        Some(serde_json::to_value(schemars::schema_for!(SendConfig)).unwrap())
     }
 
     async fn start(

@@ -35,17 +35,22 @@ use tracing::{debug, info, warn};
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[schemars(default)]
 struct SendConfig {
+    /// CAN interface (can0) or serial port (/dev/ttyUSB0).
     #[serde(default = "default_interface")]
     interface: String,
 
+    /// Transport type: socketcan, slcan, or actisense.
     #[serde(default = "default_transport")]
     transport: String,
 
+    /// Preferred NMEA 2000 source address (0-252).
     #[serde(default = "default_source_address")]
     source_address: u8,
 
+    /// PGN send interval in milliseconds.
     #[serde(default = "default_interval")]
     interval_ms: u64,
 }
@@ -260,35 +265,7 @@ impl Plugin for Nmea2000SendPlugin {
     }
 
     fn schema(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({
-            "type": "object",
-            "properties": {
-                "interface": {
-                    "type": "string",
-                    "description": "CAN interface (can0) or serial port (/dev/ttyUSB0)",
-                    "default": "can0"
-                },
-                "transport": {
-                    "type": "string",
-                    "description": "Transport type: socketcan, slcan, or actisense",
-                    "default": "socketcan",
-                    "enum": ["socketcan", "slcan", "actisense"]
-                },
-                "source_address": {
-                    "type": "integer",
-                    "description": "Preferred NMEA 2000 source address (0-252)",
-                    "default": 100,
-                    "minimum": 0,
-                    "maximum": 252
-                },
-                "interval_ms": {
-                    "type": "integer",
-                    "description": "PGN send interval in milliseconds",
-                    "default": 1000,
-                    "minimum": 100
-                }
-            }
-        }))
+        Some(serde_json::to_value(schemars::schema_for!(SendConfig)).unwrap())
     }
 
     async fn start(

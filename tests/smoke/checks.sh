@@ -460,6 +460,21 @@ ALL_FEATURE_COUNT=$(echo "$TRACKS_AFTER_DELETE" | node -e "
 check "all tracks empty after delete" \
   "$ALL_FEATURE_COUNT" "0"
 
+# --- Derived Data ---
+echo "  Derived Data"
+check "derived: headingTrue has value" \
+  "$(fetch "$BASE/signalk/v1/api/vessels/self/navigation/headingTrue")" '"value"'
+check "derived: depthBelowKeel has value" \
+  "$(fetch "$BASE/signalk/v1/api/vessels/self/environment/depth/belowKeel")" '"value"'
+check "derived: dewPointTemperature has value" \
+  "$(fetch "$BASE/signalk/v1/api/vessels/self/environment/outside/dewPointTemperature")" '"value"'
+
+# --- AIS Status ---
+echo "  AIS Status"
+AIS_TARGETS="$(fetch "$BASE/plugins/ais-status/targets")"
+check "ais-status: targets endpoint returns array" \
+  "$AIS_TARGETS" '['
+
 # --- Autopilot API ---
 echo "  Autopilot API"
 check "AP: list autopilots has isDefault" \

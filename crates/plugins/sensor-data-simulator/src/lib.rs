@@ -35,56 +35,74 @@ use generators::SimulatorState;
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[schemars(default)]
 struct SimulatorConfig {
+    /// Delta generation interval in milliseconds.
     #[serde(default = "default_interval")]
     update_interval_ms: u64,
 
+    /// Center position for the simulated orbit.
     #[serde(default = "default_position")]
     position: PositionConfig,
 
+    /// Circular orbit radius in meters.
     #[serde(default = "default_orbit_radius")]
     orbit_radius_m: f64,
 
+    /// Time for one full circle in seconds.
     #[serde(default = "default_orbit_period")]
     orbit_period_s: f64,
 
+    /// Local magnetic variation in degrees.
     #[serde(default = "default_variation")]
     magnetic_variation_deg: f64,
 
+    /// Simulate engine data (RPM, temperatures).
     #[serde(default = "default_true")]
     enable_propulsion: bool,
 
+    /// Simulate environmental data (wind, depth, temperature, pressure).
     #[serde(default = "default_true")]
     enable_environment: bool,
 
+    /// Output configuration.
     #[serde(default)]
     output: OutputConfig,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[schemars(default)]
 struct OutputConfig {
+    /// Emit SignalK deltas directly into the store.
     #[serde(default = "default_true")]
     direct: bool,
 
+    /// NMEA 0183 TCP output configuration.
     #[serde(default)]
     nmea0183: Nmea0183Config,
 
+    /// NMEA 2000 SocketCAN/vcan output configuration.
     #[serde(default)]
     nmea2000: Nmea2000Config,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[schemars(default)]
 struct Nmea0183Config {
+    /// Enable NMEA 0183 TCP output.
     #[serde(default)]
     enabled: bool,
 
+    /// Host of nmea0183-receive TCP listener.
     #[serde(default = "default_nmea0183_host")]
     host: String,
 
+    /// Port of nmea0183-receive TCP listener.
     #[serde(default = "default_nmea0183_port")]
     port: u16,
 
+    /// NMEA talker ID (GP, GN, II, etc.).
     #[serde(default = "default_talker_id")]
     talker_id: String,
 }
@@ -100,14 +118,18 @@ impl Default for Nmea0183Config {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[schemars(default)]
 struct Nmea2000Config {
+    /// Enable NMEA 2000 SocketCAN/vcan output.
     #[serde(default)]
     enabled: bool,
 
+    /// CAN interface (vcan0 for testing).
     #[serde(default = "default_nmea2000_interface")]
     interface: String,
 
+    /// Fixed source address (0-252).
     #[serde(default = "default_nmea2000_source")]
     source_address: u8,
 }
@@ -132,10 +154,12 @@ impl Default for OutputConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 struct PositionConfig {
+    /// Center latitude (degrees).
     #[serde(default = "default_lat")]
     latitude: f64,
+    /// Center longitude (degrees).
     #[serde(default = "default_lon")]
     longitude: f64,
 }
@@ -228,76 +252,7 @@ impl Plugin for SimulatorPlugin {
     }
 
     fn schema(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({
-            "type": "object",
-            "properties": {
-                "update_interval_ms": {
-                    "type": "integer",
-                    "description": "Delta generation interval in milliseconds",
-                    "default": 1000,
-                    "minimum": 100
-                },
-                "position": {
-                    "type": "object",
-                    "properties": {
-                        "latitude": { "type": "number", "description": "Center latitude (degrees)", "default": 54.5 },
-                        "longitude": { "type": "number", "description": "Center longitude (degrees)", "default": 10.0 }
-                    }
-                },
-                "orbit_radius_m": {
-                    "type": "number",
-                    "description": "Circular orbit radius in meters",
-                    "default": 200
-                },
-                "orbit_period_s": {
-                    "type": "number",
-                    "description": "Time for one full circle in seconds",
-                    "default": 300
-                },
-                "magnetic_variation_deg": {
-                    "type": "number",
-                    "description": "Local magnetic variation in degrees",
-                    "default": 2.5
-                },
-                "enable_propulsion": {
-                    "type": "boolean",
-                    "description": "Simulate engine data (RPM, temperatures)",
-                    "default": true
-                },
-                "enable_environment": {
-                    "type": "boolean",
-                    "description": "Simulate environmental data (wind, depth, temperature, pressure)",
-                    "default": true
-                },
-                "output": {
-                    "type": "object",
-                    "properties": {
-                        "direct": {
-                            "type": "boolean",
-                            "description": "Emit SignalK deltas directly into the store",
-                            "default": true
-                        },
-                        "nmea0183": {
-                            "type": "object",
-                            "properties": {
-                                "enabled": { "type": "boolean", "description": "Enable NMEA 0183 TCP output", "default": false },
-                                "host": { "type": "string", "description": "Host of nmea0183-receive TCP listener", "default": "127.0.0.1" },
-                                "port": { "type": "integer", "description": "Port of nmea0183-receive TCP listener", "default": 10110 },
-                                "talker_id": { "type": "string", "description": "NMEA talker ID (GP, GN, II, etc.)", "default": "GP" }
-                            }
-                        },
-                        "nmea2000": {
-                            "type": "object",
-                            "properties": {
-                                "enabled": { "type": "boolean", "description": "Enable NMEA 2000 SocketCAN/vcan output", "default": false },
-                                "interface": { "type": "string", "description": "CAN interface (vcan0 for testing)", "default": "vcan0" },
-                                "source_address": { "type": "integer", "description": "Fixed source address (0-252)", "default": 42, "minimum": 0, "maximum": 252 }
-                            }
-                        }
-                    }
-                }
-            }
-        }))
+        Some(serde_json::to_value(schemars::schema_for!(SimulatorConfig)).unwrap())
     }
 
     async fn start(

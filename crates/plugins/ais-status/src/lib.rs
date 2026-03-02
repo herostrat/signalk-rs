@@ -30,9 +30,10 @@ use crate::tracker::{
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[schemars(default)]
 struct AisConfig {
-    /// Tick interval in seconds for checking lost/stale targets. Default: 30.
+    /// Tick interval in seconds for checking lost/stale targets.
     #[serde(default = "default_tick_interval")]
     tick_interval_secs: u64,
 
@@ -40,39 +41,46 @@ struct AisConfig {
     #[serde(default)]
     thresholds: ThresholdsConfig,
 
-    /// Issue a `warn` notification when CPA < this distance (nautical miles).
-    /// `None` = CPA warnings disabled.
+    /// Issue a `warn` notification when CPA < this distance (nautical miles). None = disabled.
     #[serde(default)]
     cpa_warn_distance_nm: Option<f64>,
 
-    /// Issue an `alarm` notification when CPA < this distance (nautical miles).
-    /// `None` = CPA alarms disabled.
+    /// Issue an `alarm` notification when CPA < this distance (nautical miles). None = disabled.
     #[serde(default)]
     cpa_alarm_distance_nm: Option<f64>,
 
-    /// Ignore targets whose TCPA exceeds this threshold (seconds). Default: 3600.
+    /// Ignore targets whose TCPA exceeds this threshold (seconds).
     #[serde(default = "default_tcpa_max_secs")]
     tcpa_max_secs: u64,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
+#[schemars(default)]
 struct ThresholdsConfig {
+    /// Vessel class threshold overrides.
     #[serde(default)]
     vessel: Option<ThresholdOverride>,
+    /// AtoN class threshold overrides.
     #[serde(default)]
     aton: Option<ThresholdOverride>,
+    /// Base station class threshold overrides.
     #[serde(default)]
     base: Option<ThresholdOverride>,
+    /// SAR class threshold overrides.
     #[serde(default)]
     sar: Option<ThresholdOverride>,
 }
 
 /// Optional overrides for class thresholds. Unset fields use defaults.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 struct ThresholdOverride {
+    /// Messages needed to confirm.
     confirm_count: Option<u32>,
+    /// Window for confirm_count messages.
     confirm_window_secs: Option<u64>,
+    /// Seconds without updates before Lost.
     lost_after_secs: Option<u64>,
+    /// Seconds in Lost before removal.
     remove_after_secs: Option<u64>,
 }
 
@@ -143,35 +151,7 @@ impl Plugin for AisStatusPlugin {
     }
 
     fn schema(&self) -> Option<serde_json::Value> {
-        let threshold_schema = serde_json::json!({
-            "type": "object",
-            "properties": {
-                "confirm_count": { "type": "integer", "description": "Messages needed to confirm" },
-                "confirm_window_secs": { "type": "integer", "description": "Window for confirm_count messages" },
-                "lost_after_secs": { "type": "integer", "description": "Seconds without updates before Lost" },
-                "remove_after_secs": { "type": "integer", "description": "Seconds in Lost before removal" }
-            }
-        });
-        Some(serde_json::json!({
-            "type": "object",
-            "properties": {
-                "tick_interval_secs": {
-                    "type": "integer",
-                    "description": "Tick interval in seconds for checking lost/stale targets",
-                    "default": 30
-                },
-                "thresholds": {
-                    "type": "object",
-                    "description": "Per-class lifecycle thresholds (vessel, aton, base, sar)",
-                    "properties": {
-                        "vessel": threshold_schema,
-                        "aton": threshold_schema,
-                        "base": threshold_schema,
-                        "sar": threshold_schema
-                    }
-                }
-            }
-        }))
+        Some(serde_json::to_value(schemars::schema_for!(AisConfig)).unwrap())
     }
 
     async fn start(

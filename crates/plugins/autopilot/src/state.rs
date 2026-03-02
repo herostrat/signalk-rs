@@ -145,7 +145,8 @@ impl AutopilotState {
 /// Static plugin configuration — parsed from `[[plugins]]` TOML entry.
 ///
 /// All angles in radians, speeds in m/s.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[schemars(default)]
 pub struct AutopilotConfig {
     // ── Identity ─────────────────────────────────────────────────────────────
     /// Device ID used in the V2 autopilot API. Default: `"default"`.

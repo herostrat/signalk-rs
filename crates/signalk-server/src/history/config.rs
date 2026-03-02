@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 /// Configuration for the history subsystem.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[schemars(default)]
 pub struct HistoryConfig {
     /// Whether history recording is enabled.
     #[serde(default = "default_enabled")]

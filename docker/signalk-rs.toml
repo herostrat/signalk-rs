@@ -48,7 +48,7 @@ config = { update_interval_ms = 1000, output = { direct = true, nmea0183 = { ena
 # Tracks: records position history for all vessels
 [[plugins]]
 id = "tracks"
-config = { min_interval_secs = 5, max_points = 50000, max_age_hours = 24 }
+config = { min_interval_secs = 5, max_age_hours = 24 }
 
 # NMEA 0183 TCP receiver: listens on port 10110 for simulator sentences
 [[plugins]]
@@ -59,6 +59,21 @@ config = { addr = "0.0.0.0:10110", source_label = "nmea0183-sim" }
 [[plugins]]
 id = "nmea2000"
 config = { interface = "vcan0", source_label = "nmea2000-sim" }
+
+# Derived data: computes headingTrue, depthBelowKeel, dewPoint, etc.
+[[plugins]]
+id = "derived-data"
+config = {}
+
+# AIS status: target tracking, CPA/TCPA, state machine
+[[plugins]]
+id = "ais-status"
+config = {}
+
+# Autopilot: software autopilot (V2 API provider)
+[[plugins]]
+id = "autopilot"
+config = {}
 
 # Anchor alarm: anchor set at North Pole, 100m radius.
 # Simulator vessel is near Kiel (~54°N 10°E), so alarm triggers immediately.

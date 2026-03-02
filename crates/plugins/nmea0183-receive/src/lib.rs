@@ -13,12 +13,65 @@ pub mod sentences;
 pub mod xdr;
 
 use async_trait::async_trait;
+use serde::Deserialize;
 use signalk_plugin_api::{Plugin, PluginContext, PluginError, PluginMetadata};
 use signalk_types::{Delta, PathValue as SkPathValue, Source, Update};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{debug, error, info, warn};
+
+// ─── Config structs ─────────────────────────────────────────────────────────
+
+/// Configuration for the NMEA 0183 TCP input plugin.
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[schemars(default)]
+pub struct TcpConfig {
+    /// Bind address (host:port).
+    #[serde(default = "default_tcp_addr")]
+    pub addr: String,
+    /// Source label for SignalK deltas.
+    #[serde(default = "default_tcp_source_label")]
+    pub source_label: String,
+}
+
+impl Default for TcpConfig {
+    fn default() -> Self {
+        TcpConfig {
+            addr: default_tcp_addr(),
+            source_label: default_tcp_source_label(),
+        }
+    }
+}
+
+fn default_tcp_addr() -> String {
+    "0.0.0.0:10110".to_string()
+}
+
+fn default_tcp_source_label() -> String {
+    "nmea0183-tcp".to_string()
+}
+
+/// Configuration for the NMEA 0183 serial port input plugin.
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct SerialConfig {
+    /// Serial device path (e.g. /dev/ttyUSB0).
+    pub path: String,
+    /// Baud rate (standard NMEA: 4800, high-speed mux: 38400).
+    #[serde(default = "default_baud_rate")]
+    pub baud_rate: u32,
+    /// Source label for SignalK deltas.
+    #[serde(default = "default_serial_source_label")]
+    pub source_label: String,
+}
+
+fn default_baud_rate() -> u32 {
+    4800
+}
+
+fn default_serial_source_label() -> String {
+    "nmea0183-serial".to_string()
+}
 
 // ─── Shared parsing helper ──────────────────────────────────────────────────
 
@@ -122,22 +175,7 @@ impl Plugin for Nmea0183TcpPlugin {
     }
 
     fn schema(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({
-            "type": "object",
-            "required": ["addr"],
-            "properties": {
-                "addr": {
-                    "type": "string",
-                    "description": "Bind address (host:port)",
-                    "default": "0.0.0.0:10110"
-                },
-                "source_label": {
-                    "type": "string",
-                    "description": "Source label for SignalK deltas",
-                    "default": "nmea0183-tcp"
-                }
-            }
-        }))
+        Some(serde_json::to_value(schemars::schema_for!(TcpConfig)).unwrap())
     }
 
     async fn start(
@@ -145,16 +183,15 @@ impl Plugin for Nmea0183TcpPlugin {
         config: serde_json::Value,
         ctx: Arc<dyn PluginContext>,
     ) -> Result<(), PluginError> {
-        let addr: SocketAddr = config["addr"]
-            .as_str()
-            .ok_or_else(|| PluginError::config("missing 'addr'"))?
+        let cfg: TcpConfig =
+            serde_json::from_value(config).map_err(|e| PluginError::config(format!("{e}")))?;
+
+        let addr: SocketAddr = cfg
+            .addr
             .parse()
             .map_err(|e| PluginError::config(format!("invalid addr: {e}")))?;
 
-        let source_label = config["source_label"]
-            .as_str()
-            .unwrap_or("nmea0183-tcp")
-            .to_string();
+        let source_label = cfg.source_label;
 
         let handle = tokio::spawn(async move {
             if let Err(e) = run_tcp_listener(addr, &source_label, ctx).await {
@@ -283,26 +320,7 @@ impl Plugin for Nmea0183SerialPlugin {
     }
 
     fn schema(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({
-            "type": "object",
-            "required": ["path"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Serial device path (e.g. /dev/ttyUSB0)"
-                },
-                "baud_rate": {
-                    "type": "integer",
-                    "description": "Baud rate (standard NMEA: 4800, high-speed mux: 38400)",
-                    "default": 4800
-                },
-                "source_label": {
-                    "type": "string",
-                    "description": "Source label for SignalK deltas",
-                    "default": "nmea0183-serial"
-                }
-            }
-        }))
+        Some(serde_json::to_value(schemars::schema_for!(SerialConfig)).unwrap())
     }
 
     async fn start(
@@ -310,17 +328,12 @@ impl Plugin for Nmea0183SerialPlugin {
         config: serde_json::Value,
         ctx: Arc<dyn PluginContext>,
     ) -> Result<(), PluginError> {
-        let path = config["path"]
-            .as_str()
-            .ok_or_else(|| PluginError::config("missing 'path'"))?
-            .to_string();
+        let cfg: SerialConfig =
+            serde_json::from_value(config).map_err(|e| PluginError::config(format!("{e}")))?;
 
-        let baud_rate = config["baud_rate"].as_u64().unwrap_or(4800) as u32;
-
-        let source_label = config["source_label"]
-            .as_str()
-            .unwrap_or("nmea0183-serial")
-            .to_string();
+        let path = cfg.path;
+        let baud_rate = cfg.baud_rate;
+        let source_label = cfg.source_label;
 
         let handle = tokio::spawn(async move {
             if let Err(e) = run_serial_reader(&path, baud_rate, &source_label, ctx).await {
@@ -495,12 +508,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tcp_plugin_rejects_missing_addr() {
+    async fn tcp_plugin_rejects_invalid_addr() {
         use signalk_plugin_api::testing::MockPluginContext;
 
         let mut plugin = Nmea0183TcpPlugin::new();
         let ctx = Arc::new(MockPluginContext::new());
-        let result = plugin.start(serde_json::json!({}), ctx).await;
+        let result = plugin
+            .start(serde_json::json!({"addr": "not-a-socket-addr"}), ctx)
+            .await;
         assert!(result.is_err());
     }
 }

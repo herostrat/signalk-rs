@@ -13,6 +13,7 @@ tokio.workspace = true
 tracing.workspace = true
 serde_json.workspace = true
 serde.workspace = true
+schemars.workspace = true
 async-trait.workspace = true
 sun = "0.3.1"
 moon-phase = "0.1.0"

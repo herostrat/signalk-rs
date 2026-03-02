@@ -29,16 +29,20 @@ use tracing::{debug, info, warn};
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 struct AnchorConfig {
+    /// Anchor drop point (lat/lon in degrees).
     position: AnchorPosition,
+    /// Maximum drift radius in meters.
     #[serde(default = "default_radius")]
     radius: f64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 struct AnchorPosition {
+    /// Anchor latitude (degrees).
     latitude: f64,
+    /// Anchor longitude (degrees).
     longitude: f64,
 }
 
@@ -80,25 +84,7 @@ impl Plugin for AnchorAlarmPlugin {
     }
 
     fn schema(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({
-            "type": "object",
-            "required": ["position", "radius"],
-            "properties": {
-                "position": {
-                    "type": "object",
-                    "required": ["latitude", "longitude"],
-                    "properties": {
-                        "latitude": { "type": "number", "description": "Anchor latitude (degrees)" },
-                        "longitude": { "type": "number", "description": "Anchor longitude (degrees)" }
-                    }
-                },
-                "radius": {
-                    "type": "number",
-                    "description": "Maximum drift radius in meters",
-                    "default": 50.0
-                }
-            }
-        }))
+        Some(serde_json::to_value(schemars::schema_for!(AnchorConfig)).unwrap())
     }
 
     async fn start(
