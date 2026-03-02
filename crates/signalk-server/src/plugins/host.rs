@@ -103,6 +103,8 @@ pub struct RustPluginContext {
     autopilot_manager: Option<Arc<AutopilotManager>>,
     /// Shared SQLite database connection.
     database: Option<Arc<Mutex<signalk_sqlite::rusqlite::Connection>>>,
+    /// Resource provider registry (optional — set via PluginManager)
+    resource_providers: Option<Arc<crate::resources::ResourceProviderRegistry>>,
 }
 
 impl RustPluginContext {
@@ -120,6 +122,7 @@ impl RustPluginContext {
         webapp_registry: Arc<RwLock<WebappRegistry>>,
         autopilot_manager: Option<Arc<AutopilotManager>>,
         database: Option<Arc<Mutex<signalk_sqlite::rusqlite::Connection>>>,
+        resource_providers: Option<Arc<crate::resources::ResourceProviderRegistry>>,
     ) -> Self {
         RustPluginContext {
             plugin_id,
@@ -138,6 +141,7 @@ impl RustPluginContext {
             webapp_registry,
             autopilot_manager,
             database,
+            resource_providers,
         }
     }
 
@@ -416,6 +420,25 @@ impl PluginContext for RustPluginContext {
         );
         Ok(())
     }
+
+    async fn register_resource_provider(
+        &self,
+        resource_type: &str,
+        provider: Box<dyn signalk_plugin_api::ResourceProvider>,
+    ) -> Result<(), PluginError> {
+        let registry = self.resource_providers.as_ref().ok_or_else(|| {
+            PluginError::runtime("register_resource_provider: no ResourceProviderRegistry available")
+        })?;
+        registry
+            .register(resource_type, &self.plugin_id, Arc::from(provider))
+            .await;
+        tracing::info!(
+            plugin = %self.plugin_id,
+            resource_type = %resource_type,
+            "Resource provider registered"
+        );
+        Ok(())
+    }
 }
 
 /// Clean up all resources for a plugin (called by PluginManager on stop).
@@ -462,6 +485,7 @@ mod tests {
             webapp_registry,
             None, // no autopilot manager in tests
             None, // no shared database in tests
+            None, // no resource providers in tests
         ));
 
         (ctx, store)

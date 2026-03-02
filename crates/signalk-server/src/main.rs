@@ -234,6 +234,14 @@ async fn main() -> Result<()> {
     plugin_manager.set_autopilot_manager(autopilot_manager.clone());
     plugin_manager.set_database(shared_db.clone());
 
+    // Resource provider registry — created BEFORE start_all so plugins can register providers
+    let resource_providers = Arc::new(signalk_server::resources::ResourceProviderRegistry::new(
+        Arc::new(signalk_server::resources::FileResourceProvider::new(
+            PathBuf::from(&config.data_dir).join("resources"),
+        )),
+    ));
+    plugin_manager.set_resource_providers(resource_providers.clone());
+
     // Register all compiled-in Tier 1 plugins
     plugin_manager.register(Box::new(autopilot::AutopilotPlugin::new()));
     plugin_manager.register(Box::new(nmea0183_receive::Nmea0183TcpPlugin::new()));
@@ -267,11 +275,6 @@ async fn main() -> Result<()> {
     let plugin_manager = Arc::new(tokio::sync::Mutex::new(plugin_manager));
 
     // ── Public HTTP + WebSocket server ────────────────────────────────────────
-    let resource_providers = Arc::new(signalk_server::resources::ResourceProviderRegistry::new(
-        Arc::new(signalk_server::resources::FileResourceProvider::new(
-            PathBuf::from(&config.data_dir).join("resources"),
-        )),
-    ));
 
     // ── History manager ────────────────────────────────────────────────────
     let history_manager = HistoryManager::new(config.history.clone(), shared_db.clone());

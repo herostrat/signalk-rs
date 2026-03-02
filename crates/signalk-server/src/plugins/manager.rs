@@ -49,6 +49,8 @@ pub struct PluginManager {
     autopilot_manager: Option<Arc<AutopilotManager>>,
     /// Shared SQLite database connection (set after construction).
     database: Option<Arc<std::sync::Mutex<signalk_sqlite::rusqlite::Connection>>>,
+    /// Resource provider registry (optional — set after construction).
+    resource_providers: Option<Arc<crate::resources::ResourceProviderRegistry>>,
 }
 
 impl PluginManager {
@@ -77,6 +79,7 @@ impl PluginManager {
             data_dir,
             autopilot_manager: None,
             database: None,
+            resource_providers: None,
         }
     }
 
@@ -91,6 +94,14 @@ impl PluginManager {
         db: Arc<std::sync::Mutex<signalk_sqlite::rusqlite::Connection>>,
     ) {
         self.database = Some(db);
+    }
+
+    /// Set the resource provider registry so plugins can register via `register_resource_provider()`.
+    pub fn set_resource_providers(
+        &mut self,
+        providers: Arc<crate::resources::ResourceProviderRegistry>,
+    ) {
+        self.resource_providers = Some(providers);
     }
 
     /// Register a plugin instance. Must be called before `start_all`.
@@ -153,6 +164,7 @@ impl PluginManager {
             self.webapp_registry.clone(),
             self.autopilot_manager.clone(),
             self.database.clone(),
+            self.resource_providers.clone(),
         ));
 
         entry.context = Some(ctx.clone());
@@ -223,6 +235,11 @@ impl PluginManager {
         self.route_table.remove(plugin_id).await;
         self.put_handler_registry.remove_plugin(plugin_id).await;
         self.delta_filter.remove_plugin(plugin_id);
+
+        // Unregister any resource providers the plugin registered
+        if let Some(ref registry) = self.resource_providers {
+            registry.unregister(plugin_id).await;
+        }
 
         // Remove from shared maps
         self.put_handlers

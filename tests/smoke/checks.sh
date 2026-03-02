@@ -184,8 +184,29 @@ check "waypoints/_providers/_default has id field" \
   "$(fetch "$BASE/signalk/v2/api/resources/waypoints/_providers/_default")" '"id"'
 check "waypoints/_providers/_default is file-provider" \
   "$(fetch "$BASE/signalk/v2/api/resources/waypoints/_providers/_default")" '"file-provider"'
-check "POST waypoints/_providers/_default returns 501" \
-  "$(http_status POST "$BASE/signalk/v2/api/resources/waypoints/_providers/_default/test-plugin")" "501"
+check "POST set_default_provider file-provider returns 200" \
+  "$(http_status POST "$BASE/signalk/v2/api/resources/waypoints/_providers/_default/file-provider")" "200"
+check "POST set_default_provider unknown returns 404" \
+  "$(http_status POST "$BASE/signalk/v2/api/resources/waypoints/_providers/_default/no-such-plugin")" "404"
+
+# --- Custom resource types ---
+echo "  Custom Resource Types"
+FISH_RESPONSE=$(wget -qO- --post-data='{"name":"Reef A","depth":12}' \
+  --header='Content-Type: application/json' "$BASE/signalk/v2/api/resources/fishingZones" 2>/dev/null || echo "FAIL")
+check "POST custom type fishingZones returns COMPLETED" \
+  "$FISH_RESPONSE" '"COMPLETED"'
+FISH_ID=$(echo "$FISH_RESPONSE" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+if [ -n "$FISH_ID" ]; then
+  check "GET custom fishingZone by ID" \
+    "$(fetch "$BASE/signalk/v2/api/resources/fishingZones/$FISH_ID")" '"Reef A"'
+  check "DELETE custom fishingZone returns 200" \
+    "$(http_status DELETE "$BASE/signalk/v2/api/resources/fishingZones/$FISH_ID")" "200"
+fi
+
+# --- ?provider= query parameter ---
+echo "  Provider Targeting"
+check "GET waypoints?provider=file-provider returns 200" \
+  "$(status "$BASE/signalk/v2/api/resources/waypoints?provider=file-provider")" "200"
 
 # --- v2 History API ---
 echo "  History API v2"

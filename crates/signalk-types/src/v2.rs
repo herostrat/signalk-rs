@@ -45,6 +45,8 @@ pub struct ResourceQueryParams {
     pub limit: Option<usize>,
     /// Bounding box as `west,south,east,north`.
     pub bbox: Option<String>,
+    /// Target a specific provider plugin by ID.
+    pub provider: Option<String>,
 }
 
 // ─── Course API ────────────────────────────────────────────────────────────────

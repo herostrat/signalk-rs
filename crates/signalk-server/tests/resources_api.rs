@@ -15,6 +15,26 @@ fn test_app_with_resources() -> (axum::Router, tempfile::TempDir) {
     (router, tmp)
 }
 
+/// Build a test app AND return the broadcast receiver for delta verification.
+async fn test_app_with_delta_rx() -> (
+    axum::Router,
+    tempfile::TempDir,
+    tokio::sync::broadcast::Receiver<signalk_types::Delta>,
+) {
+    let tmp = tempfile::tempdir().unwrap();
+    let config = signalk_server::config::ServerConfig {
+        data_dir: tmp.path().to_string_lossy().to_string(),
+        ..signalk_server::config::ServerConfig::default()
+    };
+    let (store, _rx) = signalk_store::store::SignalKStore::new(config.vessel.uuid.clone());
+    // Subscribe before building the app so we get all deltas.
+    let rx = store.read().await.subscribe();
+    let state = signalk_server::ServerState::new(config, store);
+    let router = signalk_server::build_router(state, &[]);
+    (router, tmp, rx)
+}
+
+
 /// Helper: create a resource and return (router, id, tmp_dir).
 /// The router is cloned from a shared state so it can be reused.
 async fn create_waypoint(app: axum::Router) -> (u16, serde_json::Value) {
@@ -127,10 +147,11 @@ async fn get_nonexistent_returns_404() {
 }
 
 #[tokio::test]
-async fn unknown_resource_type_returns_404() {
+async fn custom_resource_type_returns_empty_list() {
     let (app, _tmp) = test_app_with_resources();
-    let (status, _) = get(app, "/signalk/v2/api/resources/foobar").await;
-    assert_eq!(status, 404);
+    let (status, body) = get(app, "/signalk/v2/api/resources/fishingZones").await;
+    assert_eq!(status, 200);
+    assert_eq!(body, serde_json::json!({}));
 }
 
 #[tokio::test]
@@ -233,5 +254,228 @@ async fn path_traversal_in_type_rejected() {
     let (app, _tmp) = test_app_with_resources();
     // axum will decode this, but our handler validates
     let (status, _) = get(app, "/signalk/v2/api/resources/..%2Fetc").await;
-    assert_eq!(status, 404, "Path traversal in type should be rejected");
+    assert_eq!(status, 400, "Path traversal in type should be rejected");
+}
+
+// ─── Custom resource types CRUD ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn custom_resource_type_full_crud() {
+    let (app, _tmp) = test_app_with_resources();
+
+    // Create
+    let (status, body) = post_json(
+        app.clone(),
+        "/signalk/v2/api/resources/fishingZones",
+        serde_json::json!({"name": "Reef A", "depth": 12}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let id = body["id"].as_str().unwrap();
+
+    // Get
+    let (status, body) = get(
+        app.clone(),
+        &format!("/signalk/v2/api/resources/fishingZones/{id}"),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(body["name"], "Reef A");
+
+    // List
+    let (status, body) = get(app.clone(), "/signalk/v2/api/resources/fishingZones").await;
+    assert_eq!(status, 200);
+    assert!(body.get(id).is_some());
+
+    // Update
+    let (status, _) = put_json(
+        app.clone(),
+        &format!("/signalk/v2/api/resources/fishingZones/{id}"),
+        serde_json::json!({"name": "Reef B", "depth": 15}),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    // Delete
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+    let response = app
+        .oneshot(
+            Request::delete(format!("/signalk/v2/api/resources/fishingZones/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+}
+
+// ─── Provider API ───────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn set_default_provider_file_provider_returns_200() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    let (app, _tmp) = test_app_with_resources();
+    let response = app
+        .oneshot(
+            Request::post("/signalk/v2/api/resources/waypoints/_providers/_default/file-provider")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+}
+
+#[tokio::test]
+async fn set_default_provider_unknown_returns_404() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    let (app, _tmp) = test_app_with_resources();
+    let response = app
+        .oneshot(
+            Request::post(
+                "/signalk/v2/api/resources/waypoints/_providers/_default/no-such-plugin",
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 404);
+}
+
+#[tokio::test]
+async fn provider_query_on_list() {
+    let (app, _tmp) = test_app_with_resources();
+
+    // Create a waypoint (goes into file-provider)
+    let (_, body) = create_waypoint(app.clone()).await;
+    let id = body["id"].as_str().unwrap();
+
+    // ?provider=file-provider → includes it
+    let (status, body) = get(
+        app.clone(),
+        "/signalk/v2/api/resources/waypoints?provider=file-provider",
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert!(body.get(id).is_some());
+
+    // ?provider=nonexistent → 404 (no such provider)
+    let (status, _) = get(
+        app,
+        "/signalk/v2/api/resources/waypoints?provider=nonexistent",
+    )
+    .await;
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn provider_query_on_get_by_id() {
+    let (app, _tmp) = test_app_with_resources();
+    let (_, body) = create_waypoint(app.clone()).await;
+    let id = body["id"].as_str().unwrap();
+
+    // Target file-provider → found
+    let (status, _) = get(
+        app.clone(),
+        &format!("/signalk/v2/api/resources/waypoints/{id}?provider=file-provider"),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    // Target nonexistent provider → 404
+    let (status, _) = get(
+        app,
+        &format!("/signalk/v2/api/resources/waypoints/{id}?provider=nonexistent"),
+    )
+    .await;
+    assert_eq!(status, 404);
+}
+
+// ─── Delta emission on CRUD ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn create_resource_emits_delta() {
+    let (app, _tmp, mut rx) = test_app_with_delta_rx().await;
+
+    let (status, body) = post_json(
+        app,
+        "/signalk/v2/api/resources/waypoints",
+        serde_json::json!({"name": "Delta WP", "position": {"latitude": 1.0, "longitude": 2.0}}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let id = body["id"].as_str().unwrap();
+
+    // Receive the delta
+    let delta: signalk_types::Delta = rx.recv().await.expect("Expected a delta broadcast");
+    assert_eq!(delta.context.as_deref(), Some("resources"));
+    let update = &delta.updates[0];
+    let pv = &update.values[0];
+    assert_eq!(pv.path, format!("waypoints.{id}"));
+    assert_eq!(pv.value["name"], "Delta WP");
+}
+
+#[tokio::test]
+async fn update_resource_emits_delta() {
+    let (app, _tmp, mut rx) = test_app_with_delta_rx().await;
+
+    // Create
+    let (_, body) = create_waypoint(app.clone()).await;
+    let id = body["id"].as_str().unwrap();
+    // Drain create delta
+    let _: signalk_types::Delta = rx.recv().await.unwrap();
+
+    // Update
+    let (status, _) = put_json(
+        app,
+        &format!("/signalk/v2/api/resources/waypoints/{id}"),
+        serde_json::json!({"name": "Updated"}),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    let delta: signalk_types::Delta = rx.recv().await.expect("Expected update delta");
+    assert_eq!(delta.context.as_deref(), Some("resources"));
+    assert_eq!(delta.updates[0].values[0].path, format!("waypoints.{id}"));
+    assert_eq!(delta.updates[0].values[0].value["name"], "Updated");
+}
+
+#[tokio::test]
+async fn delete_resource_emits_null_delta() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    let (app, _tmp, mut rx) = test_app_with_delta_rx().await;
+
+    // Create
+    let (_, body) = create_waypoint(app.clone()).await;
+    let id = body["id"].as_str().unwrap();
+    // Drain create delta
+    let _: signalk_types::Delta = rx.recv().await.unwrap();
+
+    // Delete
+    let response: axum::response::Response = app
+        .oneshot(
+            Request::delete(format!("/signalk/v2/api/resources/waypoints/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+
+    let delta: signalk_types::Delta = rx.recv().await.expect("Expected delete delta");
+    assert_eq!(delta.context.as_deref(), Some("resources"));
+    assert_eq!(delta.updates[0].values[0].path, format!("waypoints.{id}"));
+    assert!(delta.updates[0].values[0].value.is_null());
 }

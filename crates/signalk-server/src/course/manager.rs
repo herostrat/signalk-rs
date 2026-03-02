@@ -794,7 +794,7 @@ impl CourseManager {
         let (resource_type, id) = parse_resource_href(href)?;
         let value = self
             .resource_providers
-            .get(&resource_type, &id)
+            .get(&resource_type, &id, None)
             .await?
             .ok_or_else(|| PluginError::runtime(format!("Waypoint not found: {href}")))?;
 
@@ -809,7 +809,7 @@ impl CourseManager {
         let (resource_type, id) = parse_resource_href(href)?;
         let value = self
             .resource_providers
-            .get(&resource_type, &id)
+            .get(&resource_type, &id, None)
             .await?
             .ok_or_else(|| PluginError::runtime(format!("Route not found: {href}")))?;
 
