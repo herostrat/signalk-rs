@@ -45,6 +45,7 @@ impl AutopilotProvider for ProviderHandle {
                     let modes = vec![
                         "compass".to_string(),
                         "wind".to_string(),
+                        "wind_true".to_string(),
                         "route".to_string(),
                     ];
                     modes
@@ -125,7 +126,10 @@ impl AutopilotProvider for ProviderHandle {
 
     async fn tack(&self, direction: TackDirection) -> Result<(), PluginError> {
         let mut st = self.state.write().await;
-        if st.mode != AutopilotMode::Wind {
+        let is_wind_mode = st.mode == AutopilotMode::Wind;
+        #[cfg(feature = "experimental")]
+        let is_wind_mode = is_wind_mode || st.mode == AutopilotMode::WindTrue;
+        if !is_wind_mode {
             return Err(PluginError::not_found("tack requires wind mode"));
         }
         let current = st.target_rad.unwrap_or(0.0);
@@ -144,7 +148,10 @@ impl AutopilotProvider for ProviderHandle {
 
     async fn gybe(&self, direction: TackDirection) -> Result<(), PluginError> {
         let mut st = self.state.write().await;
-        if st.mode != AutopilotMode::Wind {
+        let is_wind_mode = st.mode == AutopilotMode::Wind;
+        #[cfg(feature = "experimental")]
+        let is_wind_mode = is_wind_mode || st.mode == AutopilotMode::WindTrue;
+        if !is_wind_mode {
             return Err(PluginError::not_found("gybe requires wind mode"));
         }
         // Gybe: rotate target through dead downwind (±180°)

@@ -1,42 +1,38 @@
 //! Software autopilot plugin for signalk-rs.
 //!
-//! Registers as a SignalK V2 `AutopilotProvider` and implements a PD heading
-//! controller. All sensor input and control output travels through the SK store —
-//! no direct hardware access.
+//! Registers as a SignalK V2 `AutopilotProvider` and implements a PID heading
+//! controller with gain scheduling, heel compensation, gust response, recovery
+//! mode, and rudder rate limiting.
 //!
 //! # Data flow
 //! ```text
-//! SK navigation.headingMagnetic  ──► [subscription callback]
-//! SK environment.wind.angleApparent                         │
-//! SK navigation.rateOfTurn (optional)                       ▼
-//!                                              AutopilotState (Arc<RwLock<>>)
-//!                                                           │
-//!                                              [control loop, 1 Hz]
-//!                                                           │
-//!                            ┌──────────────────────────────┴──────────────┐
-//!                        Compass                          Wind           Route
-//!                   heading::compute()            LowPassFilter +    LOS guidance +
-//!                   (yaw_rate D-term)              PD controller     heading::compute()
-//!                            └──────────────────────────────┬──────────────┘
-//!                                                           │
-//!                                                           ▼
-//!                                      SK steering.rudderAngle  ──► hardware driver
-//!                                      SK steering.autopilot.{state,mode}
-//! ```
-//!
-//! # Modes
-//! - **compass** — heading hold using `navigation.headingMagnetic`
-//! - **wind**    — wind angle hold using `environment.wind.angleApparent`,
-//!   with configurable low-pass filtering to smooth gusts
-//! - **route**   — bearing hold using Line-of-Sight (LOS) guidance:
-//!   `desired_heading = BTW + xte_gain × XTE`, then heading PD
-//!
-//! # Configuration example (signalk-rs.toml)
-//! ```toml
-//! [[plugins]]
-//! id = "autopilot"
-//! enabled = true
-//! config = { device_id = "default", gain_p = 1.0, gain_d = 0.3, xte_gain = 0.01 }
+//! SK navigation.headingMagnetic ──► [subscription callback]
+//! SK environment.wind.angle*                               │
+//! SK environment.wind.speedApparent                        │
+//! SK navigation.rateOfTurn                                 │
+//! SK navigation.speedThroughWater                          │
+//! SK navigation.attitude.roll                              ▼
+//!                                            AutopilotState (Arc<RwLock<>>)
+//!                                                         │
+//!                                            [control loop, 10 Hz]
+//!                                                         │
+//!                  ┌──────────────────────────────────────-┤
+//!              Compass          Wind / WindTrue       Route (cascaded)
+//!         heading::compute()    CircularFilter +    route::compute()
+//!         (PID + yaw_rate)        PID controller   outer: XTE→heading
+//!                  └──────────────────────────────────────-┤
+//!                                                         │
+//!                                            ┌────────────┴────────────┐
+//!                                            │ + recovery mode (2×P,D)│
+//!                                            │ + heel feedforward     │
+//!                                            │ + gust feedforward     │
+//!                                            │ + gain scheduling      │
+//!                                            │ + rate limiting        │
+//!                                            └────────────┬────────────┘
+//!                                                         │
+//!                                                         ▼
+//!                                    SK steering.rudderAngle  ──► hardware driver
+//!                                    SK steering.autopilot.{state,mode}
 //! ```
 pub mod filter;
 pub mod modes;
@@ -45,7 +41,10 @@ pub(crate) mod provider;
 pub mod state;
 
 use async_trait::async_trait;
-use filter::LowPassFilter;
+use filter::{CircularFilter, RateDetector};
+use pd::{
+    HeadingPlausibility, PidController, PlausibilityResult, RecoveryState, RudderFeedbackMonitor,
+};
 use provider::ProviderHandle;
 use signalk_plugin_api::{
     Plugin, PluginContext, PluginError, PluginMetadata, SubscriptionHandle, SubscriptionSpec,
@@ -100,8 +99,8 @@ impl Plugin for AutopilotPlugin {
         PluginMetadata::new(
             "autopilot",
             "Autopilot",
-            "Software autopilot — PD controller, compass/wind/route modes",
-            "0.2.0",
+            "Software autopilot — PID controller, compass/wind/route modes",
+            "0.3.0",
         )
     }
 
@@ -133,18 +132,34 @@ impl Plugin for AutopilotPlugin {
                     Subscription::path("navigation.headingMagnetic"),
                     Subscription::path("navigation.headingTrue"),
                     Subscription::path("navigation.rateOfTurn"),
+                    Subscription::path("navigation.speedThroughWater"),
+                    Subscription::path("navigation.speedOverGround"),
+                    Subscription::path("navigation.attitude.roll"),
                     Subscription::path("environment.wind.angleApparent"),
                     Subscription::path("environment.wind.angleTrue"),
+                    Subscription::path("environment.wind.speedApparent"),
                     Subscription::path("navigation.course.nextPoint.bearing"),
                     Subscription::path("navigation.crossTrackError"),
+                    Subscription::path("steering.rudderAngle"),
                 ]),
                 delta_callback(move |delta: Delta| {
                     let state = Arc::clone(&state_cb);
                     tokio::spawn(async move {
                         let mut st = state.write().await;
                         for update in &delta.updates {
+                            let is_autopilot_source = update.source.type_ == "Plugin"
+                                && update.source.label == "autopilot";
                             for pv in &update.values {
                                 if let Some(v) = pv.value.as_f64() {
+                                    // Rudder feedback: only store from hardware sensors
+                                    if pv.path == "steering.rudderAngle" {
+                                        if !is_autopilot_source {
+                                            st.actual_rudder_rad = Some(v);
+                                            st.actual_rudder_last_seen =
+                                                Some(std::time::Instant::now());
+                                        }
+                                        continue;
+                                    }
                                     st.update_sensor(&pv.path, v);
                                 }
                             }
@@ -155,47 +170,104 @@ impl Plugin for AutopilotPlugin {
             .await?;
         self.subscription_handle = Some(handle);
 
+        // ── Snapshot helper (avoids 15-element tuple) ───────────────────────────
+        struct Snapshot {
+            enabled: bool,
+            mode: AutopilotMode,
+            target: Option<f64>,
+            dodge: Option<f64>,
+            primary_sensor: Option<f64>,
+            timed_out: bool,
+            prev_error: f64,
+            last_tick: Option<Instant>,
+            last_rudder: f64,
+            heading: Option<f64>,
+            xte: Option<f64>,
+            yaw_rate: Option<f64>,
+            speed: Option<f64>,
+            heel: Option<f64>,
+            wind_speed: Option<f64>,
+            actual_rudder: Option<f64>,
+            heading_age_secs: f64,
+        }
+
         // ── Control loop ───────────────────────────────────────────────────────
         let state_tick = Arc::clone(&self.state);
         let ctx_tick = Arc::clone(&ctx);
         let cfg = self.config.clone();
-        let interval = std::time::Duration::from_millis(cfg.loop_interval_ms);
+        let control_interval =
+            std::time::Duration::from_secs_f64(1.0 / cfg.control_rate_hz.max(0.1));
+        let output_every_n = (cfg.control_rate_hz / cfg.output_rate_hz.max(0.1))
+            .round()
+            .max(1.0) as u64;
 
+        #[allow(unused_variables)] // `xte` only used by cfg(experimental) Route mode
         let tick_abort = tokio::spawn(async move {
-            // Wind angle low-pass filter — smooths gusts while tracking genuine shifts.
-            // Reset on mode change (see below) so filter doesn't carry stale state.
-            let mut wind_filter = LowPassFilter::new(cfg.wind_filter_alpha);
+            // PID controller — maintains integral state across ticks
+            let mut pid = PidController::new(cfg.integral_limit);
+            // Circular low-pass filter for wind angle — wrap-safe at ±π
+            let mut wind_filter = CircularFilter::new(cfg.wind_filter_alpha);
+            // Recovery mode — temporary aggressive gains for large deviations
+            let mut recovery = RecoveryState::new();
+            // Gust detector — d(AWS)/dt for wind speed feedforward
+            let mut gust_detector = RateDetector::new(0.5);
+            // Rudder feedback monitor — detects hardware steering failure
+            let mut rudder_feedback = RudderFeedbackMonitor::new();
+            // Heading plausibility — detects sensor spikes / EMI glitches
+            let mut heading_plausibility = HeadingPlausibility::new(cfg.heading_glitch_max_count);
             let mut prev_mode: Option<AutopilotMode> = None;
+            let mut tick_counter: u64 = 0;
 
             loop {
-                tokio::time::sleep(interval).await;
+                tokio::time::sleep(control_interval).await;
+                tick_counter += 1;
+                let should_emit = tick_counter.is_multiple_of(output_every_n);
 
                 // ── Read snapshot from shared state ────────────────────────────
                 let snapshot = {
                     let st = state_tick.read().await;
-
-                    // Heading: prefer magnetic, fall back to true
                     let heading = st
                         .sensor_values
                         .get("navigation.headingMagnetic")
                         .or_else(|| st.sensor_values.get("navigation.headingTrue"))
                         .copied();
+                    let speed = st
+                        .sensor_values
+                        .get("navigation.speedThroughWater")
+                        .or_else(|| st.sensor_values.get("navigation.speedOverGround"))
+                        .copied();
 
-                    (
-                        st.enabled,
-                        st.mode.clone(),
-                        st.target_rad,
-                        st.dodge_offset_rad,
-                        st.current_sensor(),
-                        st.sensor_timed_out(cfg.sensor_timeout_secs),
-                        st.last_error_rad,
-                        st.last_tick_at,
+                    let heading_age_secs = st
+                        .sensor_last_seen
+                        .get("navigation.headingMagnetic")
+                        .or_else(|| st.sensor_last_seen.get("navigation.headingTrue"))
+                        .map(|t| t.elapsed().as_secs_f64())
+                        .unwrap_or(f64::INFINITY);
+
+                    Snapshot {
+                        enabled: st.enabled,
+                        mode: st.mode.clone(),
+                        target: st.target_rad,
+                        dodge: st.dodge_offset_rad,
+                        primary_sensor: st.current_sensor(),
+                        timed_out: st.sensor_timed_out(cfg.sensor_timeout_secs),
+                        prev_error: st.last_error_rad,
+                        last_tick: st.last_tick_at,
+                        last_rudder: st.last_rudder_rad,
                         heading,
-                        st.sensor_values.get("navigation.crossTrackError").copied(), // _xte: used only in experimental Route mode
-                        st.sensor_values.get("navigation.rateOfTurn").copied(),
-                    )
+                        xte: st.sensor_values.get("navigation.crossTrackError").copied(),
+                        yaw_rate: st.sensor_values.get("navigation.rateOfTurn").copied(),
+                        speed,
+                        heel: st.sensor_values.get("navigation.attitude.roll").copied(),
+                        wind_speed: st
+                            .sensor_values
+                            .get("environment.wind.speedApparent")
+                            .copied(),
+                        actual_rudder: st.actual_rudder_rad,
+                        heading_age_secs,
+                    }
                 };
-                let (
+                let Snapshot {
                     enabled,
                     mode,
                     target,
@@ -204,32 +276,45 @@ impl Plugin for AutopilotPlugin {
                     timed_out,
                     prev_error,
                     last_tick,
+                    last_rudder,
                     heading,
-                    _xte, // used only in experimental Route mode
+                    xte,
                     yaw_rate,
-                ) = snapshot;
+                    speed,
+                    heel,
+                    wind_speed,
+                    actual_rudder,
+                    heading_age_secs,
+                } = snapshot;
 
-                // ── Emit autopilot state for WS clients every tick ─────────────
-                emit_autopilot_state(
-                    &ctx_tick,
-                    if enabled { "enabled" } else { "disabled" },
-                    mode.as_str(),
-                    target,
-                    &mode,
-                )
-                .await;
+                // ── Emit autopilot state at output rate ──────────────────────
+                if should_emit {
+                    emit_autopilot_state(
+                        &ctx_tick,
+                        if enabled { "enabled" } else { "disabled" },
+                        mode.as_str(),
+                        target,
+                        &mode,
+                    )
+                    .await;
+                }
 
                 if !enabled {
                     continue;
                 }
 
-                // ── Detect mode change → reset filters ─────────────────────────
+                // ── Detect mode change → reset PID + filters ─────────────────
                 if prev_mode.as_ref() != Some(&mode) {
+                    pid.reset();
                     wind_filter.reset();
+                    recovery.reset();
+                    gust_detector.reset();
+                    rudder_feedback.reset();
+                    heading_plausibility.reset();
                     prev_mode = Some(mode.clone());
                 }
 
-                // ── Sensor timeout → alarm and disengage ───────────────────────
+                // ── Sensor timeout → alarm and disengage ─────────────────────
                 if timed_out {
                     warn!(mode = %mode.as_str(), "Autopilot: sensor timeout");
                     {
@@ -238,6 +323,10 @@ impl Plugin for AutopilotPlugin {
                         st.last_rudder_rad = 0.0;
                         st.last_tick_at = None;
                     }
+                    pid.reset();
+                    recovery.reset();
+                    rudder_feedback.reset();
+                    heading_plausibility.reset();
                     emit_rudder(&ctx_tick, 0.0).await;
                     emit_notification(
                         &ctx_tick,
@@ -252,24 +341,103 @@ impl Plugin for AutopilotPlugin {
 
                 let target_rad = match target {
                     Some(t) => t,
-                    None => continue, // no target set
+                    None => continue,
                 };
                 let effective_target = target_rad + dodge.unwrap_or(0.0);
 
-                // ── Compute dt from last tick ──────────────────────────────────
+                // ── Compute dt from last tick ────────────────────────────────
                 let now = Instant::now();
                 let dt = match last_tick {
                     Some(t) => now.duration_since(t).as_secs_f64().max(0.001),
-                    None => cfg.loop_interval_ms as f64 / 1000.0,
+                    None => 1.0 / cfg.control_rate_hz,
                 };
 
-                // ── Mode-specific control dispatch ─────────────────────────────
-                let (rudder, new_error) = match mode {
-                    // ── Compass: heading hold with optional yaw-rate D-term ────
+                // ── Heading plausibility check ────────────────────────────────
+                // Reject sensor spikes (EMI, compass glitch). Single glitch →
+                // discard + use prev heading. N consecutive → disengage.
+                let heading = if let Some(h) = heading {
+                    match heading_plausibility.check(h, cfg.max_heading_rate_rad_per_sec, dt) {
+                        PlausibilityResult::Ok(v) => Some(v),
+                        PlausibilityResult::Glitch(prev) => {
+                            warn!(
+                                raw = %h.to_degrees(),
+                                prev = %prev.to_degrees(),
+                                "Autopilot: heading glitch discarded"
+                            );
+                            Some(prev)
+                        }
+                        PlausibilityResult::SensorFailure => {
+                            warn!("Autopilot: heading sensor failure — disengaging");
+                            {
+                                let mut st = state_tick.write().await;
+                                st.enabled = false;
+                                st.last_rudder_rad = 0.0;
+                                st.last_tick_at = None;
+                            }
+                            pid.reset();
+                            recovery.reset();
+                            rudder_feedback.reset();
+                            heading_plausibility.reset();
+                            emit_rudder(&ctx_tick, 0.0).await;
+                            emit_notification(
+                                &ctx_tick,
+                                "steering.autopilot.headingSensorFailure",
+                                NotificationState::Alarm,
+                                "Heading sensor glitch — autopilot disengaged",
+                            )
+                            .await;
+                            ctx_tick.set_status("Heading sensor failure — disengaged");
+                            continue;
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                // ── Yaw-rate validation ───────────────────────────────────────
+                // Reject implausible ROT readings → fallback to finite-diff.
+                let yaw_rate = pd::validate_yaw_rate(yaw_rate, cfg.max_yaw_rate_rad_per_sec);
+
+                // ── Speed-dependent gain scheduling ──────────────────────────
+                let base_pid_cfg = cfg.pid_config();
+                let pid_cfg = match speed {
+                    Some(s) => pd::scale_gains(&base_pid_cfg, s, cfg.speed_nominal_mps),
+                    None => base_pid_cfg,
+                };
+
+                // ── D-term quality scaling ────────────────────────────────────
+                // Attenuate D-gain when heading sensor data is stale.
+                let pid_cfg = if cfg.dterm_quality_half_life_secs > 0.0 {
+                    let quality =
+                        pd::sensor_quality(heading_age_secs, cfg.dterm_quality_half_life_secs);
+                    pd::PidConfig {
+                        gain_d: pid_cfg.gain_d * quality,
+                        ..pid_cfg
+                    }
+                } else {
+                    pid_cfg
+                };
+
+                // ── Recovery mode check ─────────────────────────────────────
+                // (must happen before mode dispatch so recovery can modify gains)
+                let pre_recovery_error = match mode {
+                    AutopilotMode::Compass => {
+                        heading.map(|h| pd::normalize_angle(effective_target - h))
+                    }
+                    _ => primary_sensor.map(|s| pd::normalize_angle(effective_target - s)),
+                };
+                if let Some(err) = pre_recovery_error {
+                    recovery.update(err, cfg.recovery_threshold_rad, cfg.recovery_max_ticks);
+                }
+                let active_pid_cfg = recovery.apply(&pid_cfg, cfg.recovery_gain_factor);
+
+                // ── Mode-specific control dispatch ───────────────────────────
+                let (raw_rudder, new_error) = match mode {
+                    // ── Compass: heading hold with PID + yaw-rate D-term ─────
                     AutopilotMode::Compass => {
                         let current = match heading {
                             Some(h) => h,
-                            None => continue, // no heading available
+                            None => continue,
                         };
                         modes::heading::compute(
                             current,
@@ -277,15 +445,16 @@ impl Plugin for AutopilotPlugin {
                             prev_error,
                             dt,
                             yaw_rate,
-                            &cfg,
+                            &mut pid,
+                            &active_pid_cfg,
                         )
                     }
 
-                    // ── Wind: low-pass filtered apparent wind angle hold ───────
+                    // ── Wind (AWA): circular-filtered hold with PID ──────────
                     AutopilotMode::Wind => {
                         let raw = match primary_sensor {
                             Some(v) => v,
-                            None => continue, // no wind angle available
+                            None => continue,
                         };
                         let current = wind_filter.update(raw);
                         let error = pd::normalize_angle(effective_target - current);
@@ -293,45 +462,84 @@ impl Plugin for AutopilotPlugin {
                             Some(rate) => -rate,
                             None => pd::normalize_angle(error - prev_error) / dt,
                         };
-                        let rudder = pd::compute_rudder(
-                            error,
-                            d_error,
-                            cfg.gain_p,
-                            cfg.gain_d,
-                            cfg.dead_zone_rad,
-                            cfg.max_rudder_rad,
-                        );
+                        let rudder = pid.compute(error, d_error, dt, &active_pid_cfg);
                         (rudder, error)
                     }
 
-                    // ── Route: LOS guidance (BTW + XTE correction → desired heading)
+                    // ── Wind True (TWA): same as AWA but reads angleTrue ─────
+                    #[cfg(feature = "experimental")]
+                    AutopilotMode::WindTrue => {
+                        let raw = match primary_sensor {
+                            Some(v) => v,
+                            None => continue,
+                        };
+                        let current = wind_filter.update(raw);
+                        let error = pd::normalize_angle(effective_target - current);
+                        let d_error = match yaw_rate {
+                            Some(rate) => -rate,
+                            None => pd::normalize_angle(error - prev_error) / dt,
+                        };
+                        let rudder = pid.compute(error, d_error, dt, &active_pid_cfg);
+                        (rudder, error)
+                    }
+
+                    // ── Route: cascaded LOS guidance ─────────────────────────
                     #[cfg(feature = "experimental")]
                     AutopilotMode::Route => {
-                        // For LOS we need both heading and BTW
                         let current_heading = match heading {
                             Some(h) => h,
                             None => continue,
                         };
                         let btw = match primary_sensor {
                             Some(v) => v,
-                            None => continue, // no bearing-to-waypoint
+                            None => continue,
                         };
-                        // LOS correction: positive XTE (to the right) → steer left
-                        let xte_m = _xte.unwrap_or(0.0);
-                        let correction =
-                            (cfg.xte_gain * xte_m).clamp(-cfg.max_rudder_rad, cfg.max_rudder_rad);
-                        let desired_heading =
-                            pd::normalize_angle(effective_target + btw + correction);
-                        modes::heading::compute(
-                            current_heading,
-                            desired_heading,
-                            prev_error,
-                            dt,
-                            yaw_rate,
-                            &cfg,
+                        let xte_m = xte.unwrap_or(0.0);
+                        modes::route::compute(
+                            &modes::route::RouteInput {
+                                current_heading,
+                                btw,
+                                xte_m,
+                                lookahead_m: cfg.route_lookahead_m,
+                                prev_error,
+                                dt,
+                                yaw_rate,
+                            },
+                            &mut pid,
+                            &active_pid_cfg,
                         )
                     }
                 };
+
+                // ── Heel compensation (feedforward) ──────────────────────────
+                let heel_compensation = match heel {
+                    Some(roll) if cfg.heel_gain != 0.0 => cfg.heel_gain * roll,
+                    _ => 0.0,
+                };
+
+                // ── Gust response (wind speed feedforward) ─────────────────
+                let gust_compensation = match wind_speed {
+                    Some(ws) if cfg.gust_gain != 0.0 => {
+                        let rate = gust_detector.update(ws, dt);
+                        if rate.abs() > cfg.gust_threshold_mps_per_sec {
+                            cfg.gust_gain * rate
+                        } else {
+                            0.0
+                        }
+                    }
+                    _ => 0.0,
+                };
+
+                let rudder_with_ff = (raw_rudder + heel_compensation + gust_compensation)
+                    .clamp(-cfg.max_rudder_rad, cfg.max_rudder_rad);
+
+                // ── Rudder rate limiting ─────────────────────────────────────
+                let rudder = pd::rate_limit(
+                    last_rudder,
+                    rudder_with_ff,
+                    cfg.max_rudder_rate_rad_per_sec,
+                    dt,
+                );
 
                 {
                     let mut st = state_tick.write().await;
@@ -340,7 +548,54 @@ impl Plugin for AutopilotPlugin {
                     st.last_tick_at = Some(now);
                 }
 
-                emit_rudder(&ctx_tick, rudder).await;
+                if should_emit {
+                    emit_rudder(&ctx_tick, rudder).await;
+                }
+
+                // ── Rudder feedback monitoring ─────────────────────────────
+                // Compare commanded vs actual rudder angle from hardware sensor.
+                // If no feedback sensor exists, actual_rudder is None → skip.
+                match rudder_feedback.update(
+                    rudder,
+                    actual_rudder,
+                    cfg.rudder_feedback_threshold_rad,
+                    cfg.rudder_feedback_timeout_ticks,
+                ) {
+                    Some(true) => {
+                        // Alarm just fired
+                        let actual = actual_rudder.unwrap_or(0.0);
+                        warn!(
+                            commanded = %rudder,
+                            actual = %actual,
+                            mismatch_deg = %((rudder - actual).abs().to_degrees()),
+                            "Autopilot: rudder feedback mismatch"
+                        );
+                        emit_notification(
+                            &ctx_tick,
+                            "steering.autopilot.rudderFeedbackFailure",
+                            NotificationState::Alarm,
+                            &format!(
+                                "Rudder not responding: commanded {:.1}°, actual {:.1}°",
+                                rudder.to_degrees(),
+                                actual.to_degrees()
+                            ),
+                        )
+                        .await;
+                        ctx_tick.set_status("Rudder feedback failure — check steering");
+                    }
+                    Some(false) => {
+                        // Alarm just cleared
+                        emit_notification(
+                            &ctx_tick,
+                            "steering.autopilot.rudderFeedbackFailure",
+                            NotificationState::Normal,
+                            "Rudder feedback restored",
+                        )
+                        .await;
+                        ctx_tick.set_status("Active");
+                    }
+                    None => {} // no change
+                }
             }
         })
         .abort_handle();
@@ -357,6 +612,8 @@ impl Plugin for AutopilotPlugin {
         info!(
             device_id = %self.config.device_id,
             mode = %self.config.initial_mode,
+            control_hz = %self.config.control_rate_hz,
+            output_hz = %self.config.output_rate_hz,
             "Autopilot ready"
         );
         Ok(())
@@ -384,8 +641,6 @@ pub(crate) async fn emit_rudder(ctx: &Arc<dyn PluginContext>, rudder_rad: f64) {
     let _ = ctx.handle_message(delta).await;
 }
 
-/// Emit autopilot state to the SK store so WS clients subscribed to
-/// `steering.autopilot.*` paths see the current autopilot status.
 pub(crate) async fn emit_autopilot_state(
     ctx: &Arc<dyn PluginContext>,
     state_str: &str,
@@ -450,24 +705,83 @@ mod tests {
     }
 
     #[test]
-    fn default_config_has_d_term() {
+    fn default_config_pid_gains() {
         let cfg = AutopilotConfig::default();
-        assert!(cfg.gain_d > 0.0);
         assert_eq!(cfg.gain_p, 1.0);
+        assert_eq!(cfg.gain_i, 0.05);
         assert_eq!(cfg.gain_d, 0.3);
+        assert_eq!(cfg.integral_limit, 0.5);
     }
 
     #[test]
-    fn default_config_has_xte_gain() {
+    fn default_config_gain_scheduling() {
         let cfg = AutopilotConfig::default();
-        assert!(cfg.xte_gain > 0.0);
-        assert_eq!(cfg.xte_gain, 0.01);
+        assert_eq!(cfg.speed_nominal_mps, 2.5);
     }
 
     #[test]
-    fn default_config_has_wind_filter() {
+    fn default_config_heel_compensation() {
         let cfg = AutopilotConfig::default();
-        assert!(cfg.wind_filter_alpha > 0.0 && cfg.wind_filter_alpha <= 1.0);
+        assert_eq!(cfg.heel_gain, -0.5);
+    }
+
+    #[test]
+    fn default_config_rate_limiting() {
+        let cfg = AutopilotConfig::default();
+        assert!((cfg.max_rudder_rate_rad_per_sec - 0.09).abs() < 1e-10);
+    }
+
+    #[test]
+    fn default_config_tick_rates() {
+        let cfg = AutopilotConfig::default();
+        assert_eq!(cfg.control_rate_hz, 10.0);
+        assert_eq!(cfg.output_rate_hz, 1.0);
+    }
+
+    #[test]
+    fn default_config_recovery() {
+        let cfg = AutopilotConfig::default();
+        assert!((cfg.recovery_threshold_rad - 0.35).abs() < 1e-10);
+        assert_eq!(cfg.recovery_max_ticks, 15);
+        assert!((cfg.recovery_gain_factor - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn default_config_gust() {
+        let cfg = AutopilotConfig::default();
+        assert!((cfg.gust_gain - (-0.02)).abs() < 1e-10);
+        assert!((cfg.gust_threshold_mps_per_sec - 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn default_config_route_lookahead() {
+        let cfg = AutopilotConfig::default();
+        assert!((cfg.route_lookahead_m - 100.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn default_config_rudder_feedback() {
+        let cfg = AutopilotConfig::default();
+        assert!((cfg.rudder_feedback_threshold_rad - 0.087).abs() < 1e-10);
+        assert_eq!(cfg.rudder_feedback_timeout_ticks, 30);
+    }
+
+    #[test]
+    fn default_config_heading_plausibility() {
+        let cfg = AutopilotConfig::default();
+        assert!((cfg.max_heading_rate_rad_per_sec - 1.5).abs() < 1e-10);
+        assert!((cfg.max_yaw_rate_rad_per_sec - 0.8).abs() < 1e-10);
+        assert_eq!(cfg.heading_glitch_max_count, 3);
+        assert!((cfg.dterm_quality_half_life_secs - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn pid_config_from_autopilot_config() {
+        let cfg = AutopilotConfig::default();
+        let pid_cfg = cfg.pid_config();
+        assert_eq!(pid_cfg.gain_p, cfg.gain_p);
+        assert_eq!(pid_cfg.gain_i, cfg.gain_i);
+        assert_eq!(pid_cfg.gain_d, cfg.gain_d);
     }
 
     #[tokio::test]
@@ -478,7 +792,6 @@ mod tests {
             .start(serde_json::json!({}), ctx.clone())
             .await
             .unwrap();
-        // Provider was registered (start returned Ok) and status was set
         let msgs = ctx.status_messages.lock().unwrap();
         assert!(msgs.iter().any(|s| s == "Standby"));
     }
