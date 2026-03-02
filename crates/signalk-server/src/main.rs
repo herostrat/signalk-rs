@@ -8,6 +8,7 @@ use signalk_server::{
     autopilot::AutopilotManager,
     build_router,
     config::ServerConfig,
+    history::HistoryManager,
     plugins::{
         delta_filter::DeltaFilterChain, host::PutHandlerRegistry, manager::PluginManager,
         routes::PluginRouteTable,
@@ -263,6 +264,11 @@ async fn main() -> Result<()> {
         )),
     ));
 
+    // ── History manager ────────────────────────────────────────────────────
+    let history_manager =
+        HistoryManager::new(config.history.clone(), &PathBuf::from(&config.data_dir))
+            .expect("Failed to initialize history manager");
+
     let state = ServerState::new_shared(
         config.clone(),
         store,
@@ -275,6 +281,7 @@ async fn main() -> Result<()> {
         webapp_registry.clone(),
         resource_providers,
         autopilot_manager,
+        history_manager,
     );
 
     // Populate plugin registry with initial Tier 1 statuses
@@ -299,6 +306,9 @@ async fn main() -> Result<()> {
             }
         });
     }
+
+    // ── History subsystem: ingestion + maintenance ─────────────────────────
+    state.history_manager.start(state.store.clone()).await;
 
     // Discover webapps from node_modules + collect plugin-registered webapps
     let discovered =

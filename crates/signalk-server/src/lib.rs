@@ -3,6 +3,7 @@ pub mod auth;
 pub mod autopilot;
 pub mod config;
 pub mod course;
+pub mod history;
 pub mod plugins;
 pub mod resources;
 pub mod webapps;
@@ -18,6 +19,7 @@ use tokio::sync::RwLock;
 use crate::autopilot::AutopilotManager;
 use crate::config::ServerConfig;
 use crate::course::CourseManager;
+use crate::history::HistoryManager;
 use crate::plugins::host::PutHandlerRegistry;
 use crate::plugins::manager::PluginManager;
 use crate::plugins::registry::PluginRegistry;
@@ -51,6 +53,8 @@ pub struct ServerState {
     pub course_manager: Arc<CourseManager>,
     /// Autopilot provider registry — V2 autopilot API delegates here
     pub autopilot_manager: Arc<AutopilotManager>,
+    /// History subsystem — time-series storage and query
+    pub history_manager: Arc<HistoryManager>,
 }
 
 impl ServerState {
@@ -81,6 +85,9 @@ impl ServerState {
             resource_providers.clone(),
         ));
         let autopilot_manager = AutopilotManager::new();
+        let history_config = history::HistoryConfig::default();
+        let history_manager =
+            HistoryManager::new_in_memory(history_config).expect("History manager init");
         Arc::new(ServerState {
             config,
             store,
@@ -95,6 +102,7 @@ impl ServerState {
             resource_providers,
             course_manager,
             autopilot_manager,
+            history_manager,
         })
     }
 
@@ -112,6 +120,7 @@ impl ServerState {
         webapp_registry: Arc<RwLock<WebappRegistry>>,
         resource_providers: Arc<ResourceProviderRegistry>,
         autopilot_manager: Arc<AutopilotManager>,
+        history_manager: Arc<HistoryManager>,
     ) -> Arc<Self> {
         let data_dir = PathBuf::from(&config.data_dir);
         let course_manager = Arc::new(CourseManager::new(
@@ -133,6 +142,7 @@ impl ServerState {
             resource_providers,
             course_manager,
             autopilot_manager,
+            history_manager,
         })
     }
 }
@@ -332,14 +342,20 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
             "/signalk/v2/api/notifications/{notification_id}/acknowledge",
             post(api::v2::notifications::acknowledge),
         )
-        // -- History API (spec-defined, requires persistent store → 501) ------
-        // TODO: Implement when we have SQLite or another persistent time-series store.
-        .route("/signalk/v2/api/history/values", get(api::not_implemented))
+        // -- History API -------------------------------------------------------
+        // SignalK v2 History API — backed by SQLite (HistoryManager).
+        .route(
+            "/signalk/v2/api/history/values",
+            get(api::v2::history::get_values),
+        )
         .route(
             "/signalk/v2/api/history/contexts",
-            get(api::not_implemented),
+            get(api::v2::history::get_contexts),
         )
-        .route("/signalk/v2/api/history/paths", get(api::not_implemented))
+        .route(
+            "/signalk/v2/api/history/paths",
+            get(api::v2::history::get_paths),
+        )
         // ════════════════════════════════════════════════════════════════════
         // De-facto Standard  —  not in the spec, but expected by all clients
         // ════════════════════════════════════════════════════════════════════

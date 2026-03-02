@@ -187,14 +187,18 @@ check "waypoints/_providers/_default is file-provider" \
 check "POST waypoints/_providers/_default returns 501" \
   "$(http_status POST "$BASE/signalk/v2/api/resources/waypoints/_providers/_default/test-plugin")" "501"
 
-# --- v2 History API Stubs ---
-echo "  History API Stubs (501)"
-check "GET /history/values returns 501" \
-  "$(status "$BASE/signalk/v2/api/history/values")" "501"
-check "GET /history/contexts returns 501" \
-  "$(status "$BASE/signalk/v2/api/history/contexts")" "501"
-check "GET /history/paths returns 501" \
-  "$(status "$BASE/signalk/v2/api/history/paths")" "501"
+# --- v2 History API ---
+echo "  History API v2"
+check "GET /history/values without paths returns 400" \
+  "$(status "$BASE/signalk/v2/api/history/values")" "400"
+check "GET /history/values with paths returns 200" \
+  "$(status "$BASE/signalk/v2/api/history/values?paths=navigation.speedOverGround&duration=PT1H")" "200"
+check "GET /history/contexts returns 200" \
+  "$(status "$BASE/signalk/v2/api/history/contexts?duration=PT1H")" "200"
+check "GET /history/paths returns 200" \
+  "$(status "$BASE/signalk/v2/api/history/paths?duration=PT1H")" "200"
+check "history/values returns JSON with data field" \
+  "$(fetch "$BASE/signalk/v2/api/history/values?paths=navigation.speedOverGround&duration=PT1H")" '"data"'
 
 # --- v2 Notifications API ---
 echo "  Notifications API"

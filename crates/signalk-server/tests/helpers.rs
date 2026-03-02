@@ -143,6 +143,10 @@ pub fn test_app_with_handler(handler_path: &str, plugin_id: &str, bridge_socket:
             std::path::PathBuf::from("/tmp/signalk-test/resources"),
         )),
     ));
+    let history_manager = signalk_server::history::HistoryManager::new_in_memory(
+        signalk_server::history::HistoryConfig::default(),
+    )
+    .expect("History manager init");
     let state = signalk_server::ServerState::new_shared(
         config,
         store,
@@ -157,6 +161,7 @@ pub fn test_app_with_handler(handler_path: &str, plugin_id: &str, bridge_socket:
         Arc::new(RwLock::new(signalk_server::webapps::WebappRegistry::new())),
         resource_providers,
         signalk_server::autopilot::AutopilotManager::new(),
+        history_manager,
     );
     build_router(state, &[])
 }

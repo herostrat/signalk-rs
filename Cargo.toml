@@ -17,6 +17,7 @@ members = [
     "crates/plugins/nmea0183-send",
     "crates/plugins/nmea2000-send",
     "crates/signalk-plugin-client",
+    "crates/signalk-sqlite",
 ]
 resolver = "2"
 
@@ -99,6 +100,7 @@ nmea2000-receive = { path = "crates/plugins/nmea2000-receive" }
 nmea0183-send = { path = "crates/plugins/nmea0183-send" }
 nmea2000-send = { path = "crates/plugins/nmea2000-send" }
 signalk-plugin-client = { path = "crates/signalk-plugin-client" }
+signalk-sqlite = { path = "crates/signalk-sqlite" }
 
 # Testing & Benchmarking (dev only)
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }

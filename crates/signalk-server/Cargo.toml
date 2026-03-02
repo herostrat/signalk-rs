@@ -25,6 +25,7 @@ ais-status.workspace = true
 tracks.workspace = true
 system-info.workspace = true
 autopilot.workspace = true
+signalk-sqlite.workspace = true
 sensor-data-simulator = { workspace = true, optional = true }
 nmea2000-receive = { workspace = true, optional = true }
 nmea0183-send = { workspace = true, optional = true }

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::history::HistoryConfig;
+
 /// Server configuration loaded from TOML file or environment.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
@@ -7,6 +9,9 @@ pub struct ServerConfig {
     pub vessel: VesselSettings,
     pub auth: AuthSettings,
     pub internal: InternalSettings,
+    /// History subsystem configuration (time-series recording + retention).
+    #[serde(default)]
+    pub history: HistoryConfig,
     /// Data directory for persistent storage (applicationData, plugin data, etc.)
     #[serde(default = "default_data_dir")]
     pub data_dir: String,
@@ -180,6 +185,7 @@ impl Default for ServerConfig {
             source_priorities: std::collections::HashMap::new(),
             source_ttls: std::collections::HashMap::new(),
             plugins: Vec::new(),
+            history: HistoryConfig::default(),
         }
     }
 }

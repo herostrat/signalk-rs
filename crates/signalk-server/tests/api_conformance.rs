@@ -12,7 +12,7 @@
 mod helpers;
 use helpers::{
     assert_valid_schema, get, post_json, put_json, test_app, test_app_with_data_dir,
-    test_app_with_handler,
+    test_app_with_handler, test_app_with_state,
 };
 use serde_json::json;
 
@@ -466,4 +466,116 @@ async fn app_data_different_versions() {
     let (_, v2) = get(app, "/signalk/v1/applicationData/global/my-app/2.0.0").await;
     assert_eq!(v1["version"], "one");
     assert_eq!(v2["version"], "two");
+}
+
+// ─── History API v2 ─────────────────────────────────────────────────────
+
+/// Helper: inject history data into the provider and return (router, state).
+async fn history_app() -> (axum::Router, std::sync::Arc<signalk_server::ServerState>) {
+    let (router, state) = test_app_with_state();
+    let provider = state.history_manager.provider().await;
+    provider
+        .record_batch(&[
+            (
+                "vessels.self".into(),
+                "navigation.speedOverGround".into(),
+                5.0,
+                Some("2026-03-02T12:00:00Z".into()),
+            ),
+            (
+                "vessels.self".into(),
+                "navigation.speedOverGround".into(),
+                6.0,
+                Some("2026-03-02T12:00:01Z".into()),
+            ),
+            (
+                "vessels.self".into(),
+                "navigation.courseOverGroundTrue".into(),
+                1.5,
+                Some("2026-03-02T12:00:00Z".into()),
+            ),
+        ])
+        .unwrap();
+    (router, state)
+}
+
+#[tokio::test]
+async fn history_values_returns_200() {
+    let (app, _) = history_app().await;
+    let (status, _) = get(
+        app,
+        "/signalk/v2/api/history/values?paths=navigation.speedOverGround&from=2026-03-02T12:00:00Z&to=2026-03-02T12:00:02Z",
+    ).await;
+    assert_eq!(status, 200);
+}
+
+#[tokio::test]
+async fn history_values_has_data_field() {
+    let (app, _) = history_app().await;
+    let (_, body) = get(
+        app,
+        "/signalk/v2/api/history/values?paths=navigation.speedOverGround&from=2026-03-02T12:00:00Z&to=2026-03-02T12:00:02Z",
+    ).await;
+    assert!(body["context"].is_string(), "response must have 'context'");
+    assert!(body["range"].is_object(), "response must have 'range'");
+    assert!(body["values"].is_array(), "response must have 'values'");
+    assert!(body["data"].is_array(), "response must have 'data'");
+    assert_eq!(body["data"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn history_values_without_paths_returns_400() {
+    let (app, _) = history_app().await;
+    let (status, _) = get(app, "/signalk/v2/api/history/values").await;
+    assert_eq!(status, 400);
+}
+
+#[tokio::test]
+async fn history_contexts_returns_200() {
+    let (app, _) = history_app().await;
+    let (status, body) = get(
+        app,
+        "/signalk/v2/api/history/contexts?from=2026-03-02T00:00:00Z&to=2026-03-02T23:59:59Z",
+    )
+    .await;
+    assert_eq!(status, 200);
+    let contexts = body.as_array().expect("contexts must be an array");
+    assert!(
+        contexts.iter().any(|c| c == "vessels.self"),
+        "contexts must include vessels.self"
+    );
+}
+
+#[tokio::test]
+async fn history_paths_returns_200() {
+    let (app, _) = history_app().await;
+    let (status, body) = get(
+        app,
+        "/signalk/v2/api/history/paths?from=2026-03-02T00:00:00Z&to=2026-03-02T23:59:59Z",
+    )
+    .await;
+    assert_eq!(status, 200);
+    let paths = body.as_array().expect("paths must be an array");
+    assert!(
+        paths.iter().any(|p| p == "navigation.speedOverGround"),
+        "paths must include navigation.speedOverGround"
+    );
+}
+
+#[tokio::test]
+async fn history_values_with_resolution() {
+    let (app, _) = history_app().await;
+    // Both data points are in the same minute, so 1m resolution should give 1 bucket
+    let (status, body) = get(
+        app,
+        "/signalk/v2/api/history/values?paths=navigation.speedOverGround&from=2026-03-02T12:00:00Z&to=2026-03-02T12:00:59Z&resolution=1m",
+    ).await;
+    assert_eq!(status, 200);
+    let data = body["data"].as_array().expect("data must be an array");
+    assert_eq!(
+        data.len(),
+        1,
+        "expected 1 minute bucket, got {}",
+        data.len()
+    );
 }

@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 signalk-plugin-api.workspace = true
 signalk-types.workspace = true
+signalk-sqlite = { workspace = true, optional = true }
 tokio.workspace = true
 tracing.workspace = true
 serde_json.workspace = true
@@ -16,5 +17,10 @@ serde.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 
+[features]
+default = []
+sqlite = ["signalk-sqlite"]
+
 [dev-dependencies]
 signalk-plugin-api = { workspace = true, features = ["testing"] }
+signalk-sqlite.workspace = true

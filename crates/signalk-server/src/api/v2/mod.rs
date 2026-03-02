@@ -13,5 +13,6 @@
 pub mod autopilot;
 pub mod course;
 pub mod features;
+pub mod history;
 pub mod notifications;
 pub mod resources;

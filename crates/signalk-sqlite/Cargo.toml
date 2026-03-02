@@ -1,0 +1,14 @@
+[package]
+name = "signalk-sqlite"
+description = "Shared SQLite database for signalk-rs persistence (tracks, history, AIS)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+rusqlite = { version = "0.33", features = ["bundled"] }
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
