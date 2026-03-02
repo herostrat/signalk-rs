@@ -98,6 +98,7 @@ pub fn try_decode_dsc(raw: &str, source_label: &str) -> Option<Vec<Delta>> {
         let message = format!("DSC Distress: {nature_label} from MMSI {mmsi:09}{position_str}");
 
         let notification = Notification {
+            id: None,
             state: NotificationState::Emergency,
             method: vec![NotificationMethod::Visual, NotificationMethod::Sound],
             message,
@@ -183,6 +184,7 @@ mod tests {
     #[test]
     fn notification_has_required_fields() {
         let notification = Notification {
+            id: None,
             state: NotificationState::Emergency,
             method: vec![NotificationMethod::Visual, NotificationMethod::Sound],
             message: "DSC Distress: Fire/Explosion from MMSI 211457160".to_string(),

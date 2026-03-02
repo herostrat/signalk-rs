@@ -423,14 +423,16 @@ mod tests {
 
     #[tokio::test]
     async fn list_merges_from_all_providers() {
-        let file = Arc::new(MemProvider::with_entries(vec![
-            ("f1", serde_json::json!({"name": "file-one"})),
-        ]));
+        let file = Arc::new(MemProvider::with_entries(vec![(
+            "f1",
+            serde_json::json!({"name": "file-one"}),
+        )]));
         let registry = ResourceProviderRegistry::new(file);
 
-        let plugin = Arc::new(MemProvider::with_entries(vec![
-            ("p1", serde_json::json!({"name": "plugin-one"})),
-        ]));
+        let plugin = Arc::new(MemProvider::with_entries(vec![(
+            "p1",
+            serde_json::json!({"name": "plugin-one"}),
+        )]));
         registry.register("waypoints", "my-plugin", plugin).await;
 
         let result = registry.list("waypoints", &default_query()).await.unwrap();
@@ -442,14 +444,16 @@ mod tests {
 
     #[tokio::test]
     async fn list_first_found_wins_on_duplicate_id() {
-        let file = Arc::new(MemProvider::with_entries(vec![
-            ("shared", serde_json::json!({"source": "file"})),
-        ]));
+        let file = Arc::new(MemProvider::with_entries(vec![(
+            "shared",
+            serde_json::json!({"source": "file"}),
+        )]));
         let registry = ResourceProviderRegistry::new(file);
 
-        let plugin = Arc::new(MemProvider::with_entries(vec![
-            ("shared", serde_json::json!({"source": "plugin"})),
-        ]));
+        let plugin = Arc::new(MemProvider::with_entries(vec![(
+            "shared",
+            serde_json::json!({"source": "plugin"}),
+        )]));
         registry.register("waypoints", "my-plugin", plugin).await;
 
         let result = registry.list("waypoints", &default_query()).await.unwrap();
@@ -462,9 +466,10 @@ mod tests {
         let file = Arc::new(MemProvider::new());
         let registry = ResourceProviderRegistry::new(file);
 
-        let plugin = Arc::new(MemProvider::with_entries(vec![
-            ("p1", serde_json::json!({"name": "from-plugin"})),
-        ]));
+        let plugin = Arc::new(MemProvider::with_entries(vec![(
+            "p1",
+            serde_json::json!({"name": "from-plugin"}),
+        )]));
         registry.register("routes", "charts-plugin", plugin).await;
 
         // Found in plugin provider
@@ -516,14 +521,16 @@ mod tests {
 
     #[tokio::test]
     async fn provider_query_targets_specific_provider() {
-        let file = Arc::new(MemProvider::with_entries(vec![
-            ("f1", serde_json::json!({"name": "file-one"})),
-        ]));
+        let file = Arc::new(MemProvider::with_entries(vec![(
+            "f1",
+            serde_json::json!({"name": "file-one"}),
+        )]));
         let registry = ResourceProviderRegistry::new(file);
 
-        let plugin = Arc::new(MemProvider::with_entries(vec![
-            ("p1", serde_json::json!({"name": "plugin-one"})),
-        ]));
+        let plugin = Arc::new(MemProvider::with_entries(vec![(
+            "p1",
+            serde_json::json!({"name": "plugin-one"}),
+        )]));
         registry.register("waypoints", "my-plugin", plugin).await;
 
         // Target only file provider
@@ -605,9 +612,7 @@ mod tests {
         );
 
         let plugin = Arc::new(MemProvider::new());
-        registry
-            .register("waypoints", "my-plugin", plugin)
-            .await;
+        registry.register("waypoints", "my-plugin", plugin).await;
         registry
             .set_default_provider("waypoints", "my-plugin")
             .await
@@ -628,9 +633,7 @@ mod tests {
         registry
             .register("routes", "my-plugin", plugin.clone())
             .await;
-        registry
-            .register("waypoints", "my-plugin", plugin)
-            .await;
+        registry.register("waypoints", "my-plugin", plugin).await;
         registry
             .set_default_provider("routes", "my-plugin")
             .await
@@ -650,15 +653,19 @@ mod tests {
 
     #[tokio::test]
     async fn update_polls_providers() {
-        let file = Arc::new(MemProvider::with_entries(vec![
-            ("f1", serde_json::json!({"name": "old"})),
-        ]));
+        let file = Arc::new(MemProvider::with_entries(vec![(
+            "f1",
+            serde_json::json!({"name": "old"}),
+        )]));
         let registry = ResourceProviderRegistry::new(file.clone());
 
-        let plugin = Arc::new(MemProvider::with_entries(vec![
-            ("p1", serde_json::json!({"name": "old"})),
-        ]));
-        registry.register("waypoints", "my-plugin", plugin.clone()).await;
+        let plugin = Arc::new(MemProvider::with_entries(vec![(
+            "p1",
+            serde_json::json!({"name": "old"}),
+        )]));
+        registry
+            .register("waypoints", "my-plugin", plugin.clone())
+            .await;
 
         // Update plugin-owned resource
         registry
@@ -676,40 +683,33 @@ mod tests {
 
         // Update nonexistent
         let result = registry
-            .update(
-                "waypoints",
-                "nope",
-                serde_json::json!({"name": "x"}),
-                None,
-            )
+            .update("waypoints", "nope", serde_json::json!({"name": "x"}), None)
             .await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn delete_polls_providers() {
-        let file = Arc::new(MemProvider::with_entries(vec![
-            ("f1", serde_json::json!({"name": "file"})),
-        ]));
+        let file = Arc::new(MemProvider::with_entries(vec![(
+            "f1",
+            serde_json::json!({"name": "file"}),
+        )]));
         let registry = ResourceProviderRegistry::new(file);
 
-        let plugin = Arc::new(MemProvider::with_entries(vec![
-            ("p1", serde_json::json!({"name": "plugin"})),
-        ]));
-        registry.register("waypoints", "my-plugin", plugin.clone()).await;
+        let plugin = Arc::new(MemProvider::with_entries(vec![(
+            "p1",
+            serde_json::json!({"name": "plugin"}),
+        )]));
+        registry
+            .register("waypoints", "my-plugin", plugin.clone())
+            .await;
 
         // Delete plugin-owned
-        registry
-            .delete("waypoints", "p1", None)
-            .await
-            .unwrap();
+        registry.delete("waypoints", "p1", None).await.unwrap();
         assert!(plugin.data.lock().await.is_empty());
 
         // Delete file-owned
-        registry
-            .delete("waypoints", "f1", None)
-            .await
-            .unwrap();
+        registry.delete("waypoints", "f1", None).await.unwrap();
 
         // Delete nonexistent
         let result = registry.delete("waypoints", "nope", None).await;
@@ -738,9 +738,10 @@ mod tests {
         ]));
         let registry = ResourceProviderRegistry::new(file);
 
-        let plugin = Arc::new(MemProvider::with_entries(vec![
-            ("p1", serde_json::json!(3)),
-        ]));
+        let plugin = Arc::new(MemProvider::with_entries(vec![(
+            "p1",
+            serde_json::json!(3),
+        )]));
         registry.register("waypoints", "my-plugin", plugin).await;
 
         let query = ResourceQueryParams {
@@ -760,21 +761,24 @@ mod tests {
         Arc<MemProvider>,
         Arc<MemProvider>,
     ) {
-        let file = Arc::new(MemProvider::with_entries(vec![
-            ("f1", serde_json::json!({"src": "file"})),
-        ]));
+        let file = Arc::new(MemProvider::with_entries(vec![(
+            "f1",
+            serde_json::json!({"src": "file"}),
+        )]));
         let registry = ResourceProviderRegistry::new(file.clone());
 
-        let alpha = Arc::new(MemProvider::with_entries(vec![
-            ("a1", serde_json::json!({"src": "alpha"})),
-        ]));
+        let alpha = Arc::new(MemProvider::with_entries(vec![(
+            "a1",
+            serde_json::json!({"src": "alpha"}),
+        )]));
         registry
             .register("waypoints", "alpha-plugin", alpha.clone())
             .await;
 
-        let beta = Arc::new(MemProvider::with_entries(vec![
-            ("b1", serde_json::json!({"src": "beta"})),
-        ]));
+        let beta = Arc::new(MemProvider::with_entries(vec![(
+            "b1",
+            serde_json::json!({"src": "beta"}),
+        )]));
         registry
             .register("waypoints", "beta-plugin", beta.clone())
             .await;
@@ -799,18 +803,36 @@ mod tests {
 
         // Each provider's item is findable
         assert_eq!(
-            registry.get("waypoints", "a1", None).await.unwrap().unwrap()["src"],
+            registry
+                .get("waypoints", "a1", None)
+                .await
+                .unwrap()
+                .unwrap()["src"],
             "alpha"
         );
         assert_eq!(
-            registry.get("waypoints", "b1", None).await.unwrap().unwrap()["src"],
+            registry
+                .get("waypoints", "b1", None)
+                .await
+                .unwrap()
+                .unwrap()["src"],
             "beta"
         );
         assert_eq!(
-            registry.get("waypoints", "f1", None).await.unwrap().unwrap()["src"],
+            registry
+                .get("waypoints", "f1", None)
+                .await
+                .unwrap()
+                .unwrap()["src"],
             "file"
         );
-        assert!(registry.get("waypoints", "nope", None).await.unwrap().is_none());
+        assert!(
+            registry
+                .get("waypoints", "nope", None)
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -818,19 +840,34 @@ mod tests {
         let (registry, file, alpha, beta) = registry_with_three_providers().await;
 
         registry
-            .update("waypoints", "a1", serde_json::json!({"src": "alpha-v2"}), None)
+            .update(
+                "waypoints",
+                "a1",
+                serde_json::json!({"src": "alpha-v2"}),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(alpha.data.lock().await["a1"]["src"], "alpha-v2");
 
         registry
-            .update("waypoints", "b1", serde_json::json!({"src": "beta-v2"}), None)
+            .update(
+                "waypoints",
+                "b1",
+                serde_json::json!({"src": "beta-v2"}),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(beta.data.lock().await["b1"]["src"], "beta-v2");
 
         registry
-            .update("waypoints", "f1", serde_json::json!({"src": "file-v2"}), None)
+            .update(
+                "waypoints",
+                "f1",
+                serde_json::json!({"src": "file-v2"}),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(file.data.lock().await["f1"]["src"], "file-v2");
@@ -851,19 +888,22 @@ mod tests {
 
     #[tokio::test]
     async fn three_providers_list_duplicate_id_first_registered_wins() {
-        let file = Arc::new(MemProvider::with_entries(vec![
-            ("dup", serde_json::json!({"src": "file"})),
-        ]));
+        let file = Arc::new(MemProvider::with_entries(vec![(
+            "dup",
+            serde_json::json!({"src": "file"}),
+        )]));
         let registry = ResourceProviderRegistry::new(file);
 
-        let alpha = Arc::new(MemProvider::with_entries(vec![
-            ("dup", serde_json::json!({"src": "alpha"})),
-        ]));
+        let alpha = Arc::new(MemProvider::with_entries(vec![(
+            "dup",
+            serde_json::json!({"src": "alpha"}),
+        )]));
         registry.register("waypoints", "alpha-plugin", alpha).await;
 
-        let beta = Arc::new(MemProvider::with_entries(vec![
-            ("dup", serde_json::json!({"src": "beta"})),
-        ]));
+        let beta = Arc::new(MemProvider::with_entries(vec![(
+            "dup",
+            serde_json::json!({"src": "beta"}),
+        )]));
         registry.register("waypoints", "beta-plugin", beta).await;
 
         let result = registry.list("waypoints", &default_query()).await.unwrap();

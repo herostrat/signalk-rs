@@ -427,7 +427,9 @@ impl PluginContext for RustPluginContext {
         provider: Box<dyn signalk_plugin_api::ResourceProvider>,
     ) -> Result<(), PluginError> {
         let registry = self.resource_providers.as_ref().ok_or_else(|| {
-            PluginError::runtime("register_resource_provider: no ResourceProviderRegistry available")
+            PluginError::runtime(
+                "register_resource_provider: no ResourceProviderRegistry available",
+            )
         })?;
         registry
             .register(resource_type, &self.plugin_id, Arc::from(provider))

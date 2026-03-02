@@ -499,6 +499,7 @@ pub trait PluginContext: Send + Sync {
         self.raise_notification(
             path,
             signalk_types::Notification {
+                id: None,
                 state: signalk_types::NotificationState::Normal,
                 method: vec![],
                 message: String::new(),

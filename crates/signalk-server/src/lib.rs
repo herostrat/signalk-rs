@@ -5,6 +5,7 @@ pub mod config;
 pub mod config_reference;
 pub mod course;
 pub mod history;
+pub mod notifications;
 pub mod plugins;
 pub mod resources;
 pub mod webapps;
@@ -21,6 +22,7 @@ use crate::autopilot::AutopilotManager;
 use crate::config::ServerConfig;
 use crate::course::CourseManager;
 use crate::history::HistoryManager;
+use crate::notifications::NotificationManager;
 use crate::plugins::host::PutHandlerRegistry;
 use crate::plugins::manager::PluginManager;
 use crate::plugins::registry::PluginRegistry;
@@ -56,6 +58,8 @@ pub struct ServerState {
     pub autopilot_manager: Arc<AutopilotManager>,
     /// History subsystem — time-series storage and query
     pub history_manager: Arc<HistoryManager>,
+    /// Notification manager — enriches deltas with UUID + capability flags
+    pub notification_manager: Arc<NotificationManager>,
 }
 
 impl ServerState {
@@ -88,6 +92,7 @@ impl ServerState {
         let autopilot_manager = AutopilotManager::new();
         let history_config = history::HistoryConfig::default();
         let history_manager = HistoryManager::new_in_memory(history_config);
+        let notification_manager = Arc::new(NotificationManager::new());
         Arc::new(ServerState {
             config,
             store,
@@ -103,6 +108,7 @@ impl ServerState {
             course_manager,
             autopilot_manager,
             history_manager,
+            notification_manager,
         })
     }
 
@@ -121,6 +127,7 @@ impl ServerState {
         resource_providers: Arc<ResourceProviderRegistry>,
         autopilot_manager: Arc<AutopilotManager>,
         history_manager: Arc<HistoryManager>,
+        notification_manager: Arc<NotificationManager>,
     ) -> Arc<Self> {
         let data_dir = PathBuf::from(&config.data_dir);
         let course_manager = Arc::new(CourseManager::new(
@@ -143,6 +150,7 @@ impl ServerState {
             course_manager,
             autopilot_manager,
             history_manager,
+            notification_manager,
         })
     }
 }
@@ -345,6 +353,11 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
             post(api::v2::autopilot::course_next_point),
         )
         // -- Notifications API ------------------------------------------------
+        // List all active notifications (enriched with id + status).
+        .route(
+            "/signalk/v2/api/notifications",
+            get(api::v2::notifications::list_notifications),
+        )
         // Alarm interaction: silence and acknowledge active notifications.
         .route(
             "/signalk/v2/api/notifications/{notification_id}/silence",
@@ -385,7 +398,10 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
         // Admin API  —  our own, not part of the SignalK spec
         // Plugin lifecycle management, used by the Admin UI at /admin/.
         // ════════════════════════════════════════════════════════════════════
-        .route("/admin/api/config-reference", get(api::admin::config_reference))
+        .route(
+            "/admin/api/config-reference",
+            get(api::admin::config_reference),
+        )
         .route("/admin/api/plugins", get(api::admin::list_plugins))
         .route(
             "/admin/api/plugins/{plugin_id}",

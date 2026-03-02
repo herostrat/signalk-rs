@@ -121,6 +121,16 @@ async fn main() -> Result<()> {
     // ── Delta filter chain (shared between plugins and Internal API) ─────────
     let delta_filter = Arc::new(DeltaFilterChain::new());
 
+    // ── Notification manager: enriches notification deltas with UUID + status ──
+    let notification_manager = Arc::new(signalk_server::notifications::NotificationManager::new());
+    {
+        let nm = notification_manager.clone();
+        delta_filter.register(
+            "notification-manager",
+            Box::new(move |delta| Some(nm.enrich_delta(delta))),
+        );
+    }
+
     let store_for_delta = store.clone();
     let store_for_query = store.clone();
     let store_for_metadata = store.clone();
@@ -292,6 +302,7 @@ async fn main() -> Result<()> {
         resource_providers,
         autopilot_manager,
         history_manager,
+        notification_manager,
     );
 
     // Populate plugin registry with initial Tier 1 statuses

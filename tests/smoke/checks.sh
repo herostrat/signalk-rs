@@ -37,7 +37,7 @@ check() {
   name="$1"; shift
   result="$1"; shift
   expected="$1"
-  if echo "$result" | grep -q "$expected"; then
+  if echo "$result" | grep -qF "$expected"; then
     echo "  PASS  $name"
     PASS=$((PASS + 1))
   else
@@ -124,6 +124,13 @@ if [ -n "$WP_ID" ]; then
   # List waypoints contains it
   check "List waypoints contains created" \
     "$(fetch "$BASE/signalk/v2/api/resources/waypoints")" "$WP_ID"
+
+  # Update waypoint
+  check "PUT waypoint update returns 200" \
+    "$(http_status PUT "$BASE/signalk/v2/api/resources/waypoints/$WP_ID" \
+      '{"name":"Updated WP","position":{"latitude":50.0,"longitude":-124.0}}')" "200"
+  check "GET updated waypoint has new name" \
+    "$(fetch "$BASE/signalk/v2/api/resources/waypoints/$WP_ID")" '"Updated WP"'
 
   # Delete waypoint
   check "DELETE waypoint returns 200" \
@@ -236,17 +243,39 @@ check "anchor alarm is active (alarm state)" "$NOTIF" '"state":"alarm"'
 check "alarm has message field" "$NOTIF" '"message"'
 check "alarm has method array" "$NOTIF" '"method"'
 
+# Enrichment: NotificationManager should have injected id + status with capability flags
+check "notification has id field" "$NOTIF" '"id"'
+check "notification has canSilence" "$NOTIF" '"canSilence"'
+check "notification has canAcknowledge" "$NOTIF" '"canAcknowledge"'
+check "notification canClear is false (plugin-originated)" "$NOTIF" '"canClear":false'
+check "notification silenced is false (initial)" "$NOTIF" '"silenced":false'
+check "notification acknowledged is false (initial)" "$NOTIF" '"acknowledged":false'
+
+# GET /signalk/v2/api/notifications — list all active notifications
+check "GET notifications list returns 200" \
+  "$(status "$BASE/signalk/v2/api/notifications")" "200"
+NOTIF_LIST=$(fetch "$BASE/signalk/v2/api/notifications")
+check "notifications list contains anchor alarm" "$NOTIF_LIST" '"navigation.anchor"'
+
+# Verify stable UUID: re-fetch should have same id
+NOTIF2=$(fetch "$BASE/signalk/v1/api/vessels/self/notifications/navigation/anchor")
+NOTIF_ID1=$(echo "$NOTIF" | node -e "const d=require('fs').readFileSync('/dev/stdin','utf8');console.log(JSON.parse(d).id||'NONE')")
+NOTIF_ID2=$(echo "$NOTIF2" | node -e "const d=require('fs').readFileSync('/dev/stdin','utf8');console.log(JSON.parse(d).id||'NONE')")
+check "notification id is stable across fetches" "$NOTIF_ID1" "$NOTIF_ID2"
+
 # Silence the alarm
 check "POST silence alarm returns 200" \
   "$(http_status POST "$BASE/signalk/v2/api/notifications/navigation.anchor/silence")" "200"
 AFTER_SILENCE=$(fetch "$BASE/signalk/v1/api/vessels/self/notifications/navigation/anchor")
 check "alarm silenced flag is true" "$AFTER_SILENCE" '"silenced":true'
+check "canSilence is false after silencing" "$AFTER_SILENCE" '"canSilence":false'
 
 # Acknowledge the alarm
 check "POST acknowledge alarm returns 200" \
   "$(http_status POST "$BASE/signalk/v2/api/notifications/navigation.anchor/acknowledge")" "200"
 AFTER_ACK=$(fetch "$BASE/signalk/v1/api/vessels/self/notifications/navigation/anchor")
 check "alarm acknowledged flag is true" "$AFTER_ACK" '"acknowledged":true'
+check "canAcknowledge is false after ack" "$AFTER_ACK" '"canAcknowledge":false'
 
 # --- Admin UI ---
 echo "  Admin UI"

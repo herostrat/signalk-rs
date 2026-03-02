@@ -689,6 +689,7 @@ pub(crate) async fn emit_notification(
     message: &str,
 ) {
     let notif = Notification {
+        id: None,
         state,
         message: message.to_string(),
         method: vec![NotificationMethod::Visual],

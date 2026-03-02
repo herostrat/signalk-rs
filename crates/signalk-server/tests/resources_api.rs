@@ -34,7 +34,6 @@ async fn test_app_with_delta_rx() -> (
     (router, tmp, rx)
 }
 
-
 /// Helper: create a resource and return (router, id, tmp_dir).
 /// The router is cloned from a shared state so it can be reused.
 async fn create_waypoint(app: axum::Router) -> (u16, serde_json::Value) {
@@ -340,11 +339,9 @@ async fn set_default_provider_unknown_returns_404() {
     let (app, _tmp) = test_app_with_resources();
     let response = app
         .oneshot(
-            Request::post(
-                "/signalk/v2/api/resources/waypoints/_providers/_default/no-such-plugin",
-            )
-            .body(Body::empty())
-            .unwrap(),
+            Request::post("/signalk/v2/api/resources/waypoints/_providers/_default/no-such-plugin")
+                .body(Body::empty())
+                .unwrap(),
         )
         .await
         .unwrap();

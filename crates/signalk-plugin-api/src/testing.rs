@@ -342,6 +342,7 @@ mod tests {
         mock.raise_notification(
             "navigation.anchor",
             Notification {
+                id: None,
                 state: NotificationState::Alarm,
                 method: vec![NotificationMethod::Visual, NotificationMethod::Sound],
                 message: "Anchor dragging!".to_string(),

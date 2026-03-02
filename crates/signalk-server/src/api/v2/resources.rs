@@ -16,8 +16,8 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
-use signalk_types::{Delta, PathValue, Source, Update};
 use signalk_types::v2::{ResourceQueryParams, ResourceResponse};
+use signalk_types::{Delta, PathValue, Source, Update};
 use std::sync::Arc;
 
 use crate::ServerState;

@@ -191,6 +191,7 @@ fn emit_notification(ctx: &Arc<dyn PluginContext>, distance: f64, radius: f64, a
     };
 
     let notification = Notification {
+        id: None,
         state,
         method,
         message,

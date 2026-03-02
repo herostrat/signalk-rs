@@ -91,9 +91,7 @@ pub fn generate_full_reference(
                         let inner_required = prop
                             .get("required")
                             .and_then(|r| r.as_array())
-                            .map(|arr| {
-                                arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>()
-                            })
+                            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
                             .unwrap_or_default();
                         for (k, v) in inner_props {
                             emit_property(&mut out, k, v, 0, inner_required.contains(&k.as_str()));
@@ -366,11 +364,7 @@ mod tests {
     #[test]
     fn empty_schema_plugin() {
         let server = json!({"type": "object", "properties": {}});
-        let plugins = vec![(
-            "derived-data".to_string(),
-            "Derived Data".to_string(),
-            None,
-        )];
+        let plugins = vec![("derived-data".to_string(), "Derived Data".to_string(), None)];
 
         let out = generate_full_reference(&server, &plugins);
         assert!(out.contains("config = {}"));
