@@ -1,7 +1,7 @@
 [server]
 port = 3000
 host = "0.0.0.0"
-name = "signalk-rs-test"
+name = "signalk-rs-v2-test"
 
 [vessel]
 uuid = "urn:mrn:signalk:uuid:00000000-0000-4000-8000-000000000001"
@@ -9,7 +9,7 @@ name = "Test Vessel"
 mmsi = "123456789"
 
 [auth]
-jwt_secret = "test-secret-for-conformance-testing"
+jwt_secret = "test-secret-for-v2-conformance"
 token_ttl_secs = 3600
 admin_user = "admin"
 admin_password_hash = ""
@@ -19,10 +19,20 @@ transport = "uds"
 uds_rs_socket = "/run/signalk/rs.sock"
 uds_bridge_socket = "/run/signalk/bridge.sock"
 
-# Only start derived-data and tracks; simulator is NOT started so injected test
-# data is not overwritten by generated values.
+# Enable all plugins relevant for v2 API testing.
+# Simulator feature is enabled at build time for /test/inject endpoint.
+
 [[plugins]]
 id = "derived-data"
 
 [[plugins]]
+id = "autopilot"
+
+[[plugins]]
+id = "anchor-alarm"
+
+[[plugins]]
 id = "tracks"
+
+[[plugins]]
+id = "ais-status"

@@ -93,6 +93,23 @@ impl SignalKStore {
         self.source_priorities = priorities;
     }
 
+    /// Set vessel identity fields (name, mmsi) on an existing vessel.
+    pub fn set_vessel_identity(
+        &mut self,
+        vessel_uri: &str,
+        name: Option<String>,
+        mmsi: Option<String>,
+    ) {
+        if let Some(vessel) = self.vessels.get_mut(vessel_uri) {
+            if let Some(n) = name {
+                vessel.name = Some(n);
+            }
+            if let Some(m) = mmsi {
+                vessel.mmsi = Some(m);
+            }
+        }
+    }
+
     /// Set source TTL configuration. A source whose active value age exceeds its TTL
     /// is treated as "not present" during priority checks (lazy eviction).
     /// Sources not in the map have no TTL (values persist indefinitely).

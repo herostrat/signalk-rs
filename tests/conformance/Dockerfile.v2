@@ -1,5 +1,5 @@
 FROM node:20-alpine
 WORKDIR /runner
 COPY lib/ lib/
-COPY compare.js .
-CMD ["node", "compare.js"]
+COPY v2_verify.js .
+CMD ["node", "v2_verify.js"]

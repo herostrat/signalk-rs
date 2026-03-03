@@ -78,6 +78,17 @@ async fn main() -> Result<()> {
 
     let (store, _rx) = SignalKStore::new(&config.vessel.uuid);
 
+    // ── Vessel identity (name, mmsi) ────────────────────────────────────────
+    {
+        let mut s = store.write().await;
+        if let Some(ref name) = config.vessel.name {
+            s.set_vessel_identity(&config.vessel.uuid, Some(name.clone()), None);
+        }
+        if let Some(ref mmsi) = config.vessel.mmsi {
+            s.set_vessel_identity(&config.vessel.uuid, None, Some(mmsi.clone()));
+        }
+    }
+
     // ── Source priorities ─────────────────────────────────────────────────────
     if !config.source_priorities.is_empty() {
         store

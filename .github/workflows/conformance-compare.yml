@@ -34,7 +34,7 @@ jobs:
         run: docker compose -f tests/plugin-compat/docker-compose.yml down
 
   compare:
-    name: API conformance vs. original
+    name: Full conformance vs. original
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +42,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Run API comparison
+      - name: Run conformance comparison
         run: |
           docker compose -f docker-compose.test.yml up \
             --build \
@@ -60,8 +60,8 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.test.yml down
 
-  data-compare:
-    name: Data conformance vs. original
+  v2-verify:
+    name: v2 API spec conformance
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,19 +69,18 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Run data comparison
+      - name: Run v2 API verification
         run: |
           docker compose -f docker-compose.test.yml up \
             --build \
             --abort-on-container-exit \
-            --exit-code-from data-compare-runner \
-            signalk-original signalk-rs data-compare-runner
+            --exit-code-from v2-verify-runner \
+            signalk-rs-v2 v2-verify-runner
 
       - name: Print logs on failure
         if: failure()
         run: |
-          docker compose -f docker-compose.test.yml logs signalk-original
-          docker compose -f docker-compose.test.yml logs signalk-rs
+          docker compose -f docker-compose.test.yml logs signalk-rs-v2
 
       - name: Tear down
         if: always()

@@ -23,6 +23,9 @@ COPY crates/plugins/tracks/Cargo.toml                 crates/plugins/tracks/
 COPY crates/plugins/nmea2000-receive/Cargo.toml       crates/plugins/nmea2000-receive/
 COPY crates/plugins/nmea0183-send/Cargo.toml          crates/plugins/nmea0183-send/
 COPY crates/plugins/nmea2000-send/Cargo.toml          crates/plugins/nmea2000-send/
+COPY crates/plugins/autopilot/Cargo.toml              crates/plugins/autopilot/
+COPY crates/plugins/system-info/Cargo.toml            crates/plugins/system-info/
+COPY crates/signalk-sqlite/Cargo.toml                 crates/signalk-sqlite/
 
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev libudev-dev && \
     rm -rf /var/lib/apt/lists/*
@@ -33,6 +36,7 @@ RUN mkdir -p crates/signalk-types/src \
              crates/signalk-internal/src \
              crates/signalk-plugin-api/src \
              crates/signalk-plugin-client/src \
+             crates/signalk-sqlite/src \
              crates/signalk-server/src \
              crates/plugins/nmea0183-receive/src \
              crates/plugins/anchor-alarm/src \
@@ -42,11 +46,13 @@ RUN mkdir -p crates/signalk-types/src \
              crates/plugins/tracks/src \
              crates/plugins/nmea2000-receive/src \
              crates/plugins/nmea0183-send/src \
-             crates/plugins/nmea2000-send/src && \
-    for d in signalk-types signalk-store signalk-internal signalk-plugin-api signalk-plugin-client; do \
+             crates/plugins/nmea2000-send/src \
+             crates/plugins/autopilot/src \
+             crates/plugins/system-info/src && \
+    for d in signalk-types signalk-store signalk-internal signalk-plugin-api signalk-plugin-client signalk-sqlite; do \
         echo "// stub" > crates/$d/src/lib.rs; \
     done && \
-    for d in nmea0183-receive anchor-alarm sensor-data-simulator derived-data ais-status tracks nmea2000-receive nmea0183-send nmea2000-send; do \
+    for d in nmea0183-receive anchor-alarm sensor-data-simulator derived-data ais-status tracks nmea2000-receive nmea0183-send nmea2000-send autopilot system-info; do \
         echo "// stub" > crates/plugins/$d/src/lib.rs; \
     done && \
     echo "// stub" > crates/signalk-server/src/lib.rs && \
@@ -68,7 +74,8 @@ RUN apt-get update && \
 
 COPY --from=builder /app/target/release/signalk-server /usr/local/bin/signalk-server
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh && \
+    mkdir -p /var/lib/signalk-rs
 
 EXPOSE 3000
 

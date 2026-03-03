@@ -1,19 +1,20 @@
 # Side-by-side conformance comparison:
 #   signalk-original  (port 3000)  <- official signalk-server (Node.js)
 #   signalk-rs        (port 3001)  <- this project
-#   conformance-runner              <- sends identical requests to both, diffs responses
-#   data-compare-runner             <- injects identical deltas, compares REST output
+#   conformance-runner              <- API structure + data injection + derived data comparison
+#   signalk-rs-v2     (port 3002)  <- signalk-rs with all plugins for v2 API tests
+#   v2-verify-runner                <- v2 API spec conformance (signalk-rs only)
 #
 # Usage:
-#   # API conformance:
+#   # Full conformance (API + data + derived):
 #   docker compose -f docker-compose.test.yml up --build \
 #     --abort-on-container-exit --exit-code-from conformance-runner \
 #     signalk-original signalk-rs conformance-runner
 #
-#   # Data conformance:
+#   # v2 API conformance (signalk-rs only):
 #   docker compose -f docker-compose.test.yml up --build \
-#     --abort-on-container-exit --exit-code-from data-compare-runner \
-#     signalk-original signalk-rs data-compare-runner
+#     --abort-on-container-exit --exit-code-from v2-verify-runner \
+#     signalk-rs-v2 v2-verify-runner
 #
 # The runners exit 0 if all comparisons pass, non-zero on divergence.
 
@@ -67,16 +68,32 @@ services:
       - ORIGINAL_URL=http://signalk-original:3000
       - RS_URL=http://signalk-rs:3000
 
-  # -- Data conformance runner -------------------------------------------------
-  data-compare-runner:
+  # -- signalk-rs with all plugins (for v2 API tests) ---------------------------
+  signalk-rs-v2:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.rs
+      args:
+        FEATURES: "simulator"
+    ports:
+      - "3002:3000"
+    volumes:
+      - ./tests/conformance/config:/etc/signalk-rs:ro
+    environment:
+      - SIGNALK_CONFIG_FILE=/etc/signalk-rs/signalk-rs-v2.toml
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/signalk"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # -- v2 API conformance runner (signalk-rs only) ------------------------------
+  v2-verify-runner:
     build:
       context: ./tests/conformance
-      dockerfile: Dockerfile.data
+      dockerfile: Dockerfile.v2
     depends_on:
-      signalk-original:
-        condition: service_healthy
-      signalk-rs:
+      signalk-rs-v2:
         condition: service_healthy
     environment:
-      - ORIGINAL_URL=http://signalk-original:3000
-      - RS_URL=http://signalk-rs:3000
+      - RS_URL=http://signalk-rs-v2:3000

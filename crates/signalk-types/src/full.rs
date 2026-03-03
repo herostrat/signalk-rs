@@ -193,12 +193,9 @@ pub struct FullModel {
 
     /// Sources registry — hierarchical structure per spec.
     /// `sources.{label}.{suffix}` for NMEA, `sources.{label}` for plugins.
-    #[serde(skip_serializing_if = "is_empty_object", default = "empty_object")]
+    /// Always serialized (even when empty) so `/signalk/v1/api/sources` returns `{}`.
+    #[serde(default = "empty_object")]
     pub sources: serde_json::Value,
-}
-
-fn is_empty_object(v: &serde_json::Value) -> bool {
-    v.as_object().is_none_or(|m| m.is_empty())
 }
 
 fn empty_object() -> serde_json::Value {

@@ -52,7 +52,7 @@ pub async fn discovery(
         .get(axum::http::header::HOST)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("localhost:3000");
-    let base = format!("http://{host}/signalk/v1");
+    let base = format!("http://{host}/signalk/v1/api/");
     let ws_base = format!("ws://{host}/signalk/v1");
 
     let mut endpoints = HashMap::new();
@@ -720,11 +720,15 @@ fn traverse_json<'a>(value: &'a Value, parts: &[&str]) -> Option<&'a Value> {
 ///
 /// Only available when the `simulator` feature is enabled (development/testing builds).
 /// Used by the conformance test runner to inject identical data into both servers.
+///
+/// Applies the notification enrichment filter (so injected notifications get
+/// UUID + status fields) before writing to the store.
 #[cfg(feature = "simulator")]
 pub async fn test_inject_delta(
     State(state): State<Arc<ServerState>>,
     Json(delta): Json<signalk_types::Delta>,
 ) -> Response {
+    let delta = state.notification_manager.enrich_delta(delta);
     let mut store = state.store.write().await;
     store.apply_delta(delta);
     Json(serde_json::json!({"success": true})).into_response()

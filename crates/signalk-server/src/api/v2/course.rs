@@ -27,10 +27,7 @@ use crate::ServerState;
 
 /// `GET /signalk/v2/api/vessels/self/navigation/course`
 pub async fn get_course(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
-    match state.course_manager.get_state().await {
-        Some(course_state) => Json(course_state).into_response(),
-        None => Json(serde_json::json!({})).into_response(),
-    }
+    Json(state.course_manager.get_state().await).into_response()
 }
 
 /// `DELETE /signalk/v2/api/vessels/self/navigation/course`

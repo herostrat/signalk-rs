@@ -27,8 +27,9 @@ async fn get_course_empty_returns_200() {
     let (app, _tmp) = test_app_with_course();
     let (status, body) = get(app, COURSE_BASE).await;
     assert_eq!(status, 200);
-    // Empty course should be an empty object
-    assert_eq!(body, serde_json::json!({}));
+    // Empty course returns default CourseState with arrivalCircle=0
+    assert_eq!(body["arrivalCircle"], 0.0);
+    assert!(body.get("nextPoint").is_none());
 }
 
 #[tokio::test]
@@ -88,9 +89,10 @@ async fn clear_course() {
         .unwrap();
     assert_eq!(response.status().as_u16(), 200);
 
-    // Verify cleared
+    // Verify cleared — back to default CourseState
     let (_, body) = get(app, COURSE_BASE).await;
-    assert_eq!(body, serde_json::json!({}));
+    assert_eq!(body["arrivalCircle"], 0.0);
+    assert!(body.get("nextPoint").is_none());
 }
 
 // ─── Active route operations ─────────────────────────────────────────────────
@@ -382,10 +384,11 @@ async fn api_only_true_nmea_ignored() {
 
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    // Course should still be empty
+    // Course should still be default (no nextPoint from NMEA)
     let (status, body) = get(app, COURSE_BASE).await;
     assert_eq!(status, 200);
-    assert_eq!(body, serde_json::json!({}));
+    assert_eq!(body["arrivalCircle"], 0.0);
+    assert!(body.get("nextPoint").is_none());
 }
 
 #[tokio::test]
@@ -409,7 +412,8 @@ async fn enable_api_only_clears_nmea_course() {
 
     let (status, body) = get(app, COURSE_BASE).await;
     assert_eq!(status, 200);
-    assert_eq!(body, serde_json::json!({}));
+    assert_eq!(body["arrivalCircle"], 0.0);
+    assert!(body.get("nextPoint").is_none());
 }
 
 #[tokio::test]

@@ -91,8 +91,19 @@ impl CourseManager {
     }
 
     /// Get the current course state (with resolved waypoints for active routes).
-    pub async fn get_state(&self) -> Option<CourseState> {
-        let mut state = self.state.read().await.clone()?;
+    ///
+    /// Always returns a state — defaults to empty course with `arrivalCircle = 0`
+    /// per the spec (arrivalCircle is non-optional in `CourseInfo`).
+    pub async fn get_state(&self) -> CourseState {
+        let config_circle = self.config.read().await.arrival_circle;
+        let mut state = self.state.read().await.clone().unwrap_or(CourseState {
+            start_time: None,
+            target_arrival_time: None,
+            arrival_circle: config_circle,
+            active_route: None,
+            next_point: None,
+            previous_point: None,
+        });
 
         // Populate waypoints array for REST response (not persisted)
         if let Some(ref mut route) = state.active_route
@@ -109,7 +120,7 @@ impl CourseManager {
             route.waypoints = Some(wps);
         }
 
-        Some(state)
+        state
     }
 
     /// Set a direct destination (position or waypoint href).
@@ -972,7 +983,10 @@ mod tests {
 
         let mgr = CourseManager::new(store, tmp.path().to_path_buf(), resource_providers);
 
-        assert!(mgr.get_state().await.is_none());
+        // Initial state: no active navigation, but arrivalCircle is always present
+        let initial = mgr.get_state().await;
+        assert!(initial.next_point.is_none());
+        assert!(initial.active_route.is_none());
 
         mgr.set_destination(DestinationRequest {
             position: Some(Position {
@@ -985,7 +999,7 @@ mod tests {
         .await
         .unwrap();
 
-        let state = mgr.get_state().await.unwrap();
+        let state = mgr.get_state().await;
         assert!(state.start_time.is_some());
         let next = state.next_point.unwrap();
         assert_eq!(next.type_, PointType::Location);
@@ -1013,10 +1027,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(mgr.get_state().await.is_some());
+        assert!(mgr.get_state().await.next_point.is_some());
 
         mgr.clear().await.unwrap();
-        assert!(mgr.get_state().await.is_none());
+        assert!(mgr.get_state().await.next_point.is_none());
     }
 
     #[tokio::test]
@@ -1046,10 +1060,10 @@ mod tests {
 
         // Create a new manager and load from disk
         let mgr2 = CourseManager::new(store, tmp.path().to_path_buf(), resource_providers);
-        assert!(mgr2.get_state().await.is_none());
+        assert!(mgr2.get_state().await.next_point.is_none());
 
         mgr2.load().await;
-        let state = mgr2.get_state().await.unwrap();
+        let state = mgr2.get_state().await;
         assert_eq!(state.next_point.unwrap().position.latitude, 50.0);
     }
 
