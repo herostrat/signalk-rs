@@ -123,11 +123,14 @@ impl Plugin for DerivedDataPlugin {
             .subscribe(
                 SubscriptionSpec::self_vessel(subscriptions),
                 delta_callback(move |delta: Delta| {
-                    // Update snapshot with incoming values
+                    // 1. Update snapshot with incoming values (skip own deltas)
                     let mut changed_paths = Vec::new();
                     {
                         let mut snap = snapshot_clone.lock().unwrap();
                         for update in &delta.updates {
+                            if update.source.label == "derived-data" {
+                                continue;
+                            }
                             for pv in &update.values {
                                 snap.insert(pv.path.clone(), pv.value.clone());
                                 changed_paths.push(pv.path.clone());
@@ -135,33 +138,58 @@ impl Plugin for DerivedDataPlugin {
                         }
                     }
 
-                    // Run calculators whose inputs changed
-                    let snap = snapshot_clone.lock().unwrap();
-                    let mut derived_values: Vec<PathValue> = Vec::new();
-
-                    for calc in &enabled {
-                        // Check if any of this calculator's inputs changed.
-                        // Uses prefix matching for dynamic-instance calculators
-                        // (e.g. input "propulsion" matches "propulsion.main.revolutions").
-                        let affected = calc.inputs().iter().any(|input| {
-                            changed_paths.iter().any(|cp| path_matches_input(cp, input))
-                        });
-
-                        if !affected {
-                            continue;
-                        }
-
-                        if let Some(outputs) = calc.calculate(&snap) {
-                            derived_values.extend(outputs);
-                        }
+                    if changed_paths.is_empty() {
+                        return;
                     }
-                    drop(snap);
 
-                    // Emit derived values
-                    if !derived_values.is_empty() {
+                    // 2. Fixpoint: run calculators until convergence
+                    let mut all_derived: Vec<PathValue> = Vec::new();
+                    let max_iterations = 5;
+
+                    for _ in 0..max_iterations {
+                        let snap = snapshot_clone.lock().unwrap();
+                        let mut new_values: Vec<PathValue> = Vec::new();
+
+                        for calc in &enabled {
+                            let affected = calc.inputs().iter().any(|input| {
+                                changed_paths.iter().any(|cp| path_matches_input(cp, input))
+                            });
+                            if !affected {
+                                continue;
+                            }
+                            if let Some(outputs) = calc.calculate(&snap) {
+                                new_values.extend(outputs);
+                            }
+                        }
+                        drop(snap);
+
+                        if new_values.is_empty() {
+                            break;
+                        }
+
+                        // Feed new values back into snapshot for next iteration
+                        changed_paths.clear();
+                        {
+                            let mut snap = snapshot_clone.lock().unwrap();
+                            for pv in &new_values {
+                                snap.insert(pv.path.clone(), pv.value.clone());
+                                changed_paths.push(pv.path.clone());
+                            }
+                        }
+                        all_derived.extend(new_values);
+                    }
+
+                    // 3. Emit ONE delta with all derived values (deduplicated)
+                    if !all_derived.is_empty() {
+                        let mut deduped: HashMap<String, PathValue> = HashMap::new();
+                        for pv in all_derived {
+                            deduped.insert(pv.path.clone(), pv);
+                        }
+                        let final_values: Vec<PathValue> = deduped.into_values().collect();
+
                         let delta = Delta::self_vessel(vec![Update::new(
                             Source::plugin("derived-data"),
-                            derived_values,
+                            final_values,
                         )]);
                         let ctx = ctx_clone.clone();
                         tokio::spawn(async move {

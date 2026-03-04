@@ -61,14 +61,14 @@ fn load_config() -> ServerConfig {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("signalk_server=debug".parse()?)
-                .add_directive("signalk_store=debug".parse()?)
-                .add_directive("signalk_internal=debug".parse()?),
+    let env_filter = if std::env::var("RUST_LOG").is_ok() {
+        tracing_subscriber::EnvFilter::from_default_env()
+    } else {
+        tracing_subscriber::EnvFilter::new(
+            "signalk_server=debug,signalk_store=debug,signalk_internal=debug",
         )
-        .init();
+    };
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
     let config = load_config();
     info!(config_vessel_uuid = %config.vessel.uuid, "config loaded");
@@ -300,6 +300,31 @@ async fn main() -> Result<()> {
     // ── History manager ────────────────────────────────────────────────────
     let history_manager = HistoryManager::new(config.history.clone(), shared_db.clone());
 
+    // ── Unit preferences ──────────────────────────────────────────────────
+    let unit_preferences = {
+        let static_dir = std::path::Path::new("/usr/share/signalk-rs/unitpreferences");
+        let local_dir = std::path::Path::new("unitpreferences");
+        let up_static = if static_dir.exists() {
+            static_dir
+        } else {
+            local_dir
+        };
+        let up_data = PathBuf::from(&config.data_dir).join("unitpreferences");
+        match signalk_server::unitpreferences::UnitPreferencesManager::new(up_static, &up_data) {
+            Ok(mgr) => {
+                info!(
+                    "Unit preferences loaded (preset: {})",
+                    mgr.config().active_preset
+                );
+                Some(Arc::new(mgr))
+            }
+            Err(e) => {
+                tracing::warn!("Unit preferences not available: {e}");
+                None
+            }
+        }
+    };
+
     let state = ServerState::new_shared(
         config.clone(),
         store,
@@ -314,6 +339,7 @@ async fn main() -> Result<()> {
         autopilot_manager,
         history_manager,
         notification_manager,
+        unit_preferences,
     );
 
     // Populate plugin registry with initial Tier 1 statuses

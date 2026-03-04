@@ -35,6 +35,31 @@ pub struct Metadata {
     /// Alarm zones — trigger notifications when value falls within a zone
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub zones: Vec<Zone>,
+
+    /// Unit conversion info injected by server based on active preset
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_units: Option<DisplayUnits>,
+}
+
+/// Unit conversion info for a SignalK value, based on the active unit preset.
+///
+/// Clients use this to display values in user-preferred units (e.g. knots instead of m/s).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisplayUnits {
+    /// Category name (e.g. "speed", "temperature")
+    pub category: String,
+    /// Target unit key (e.g. "kn", "C")
+    pub target_unit: String,
+    /// Conversion formula from SI (e.g. "value * 1.94384")
+    pub formula: String,
+    /// Inverse formula back to SI (e.g. "value * 0.514444")
+    pub inverse_formula: String,
+    /// Display symbol (e.g. "kn", "°C")
+    pub symbol: String,
+    /// Optional display format hint (e.g. "0.0")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_format: Option<String>,
 }
 
 /// An alarm zone with lower/upper bounds and severity state.

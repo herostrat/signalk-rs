@@ -162,6 +162,7 @@ pub fn test_app_with_handler(handler_path: &str, plugin_id: &str, bridge_socket:
         signalk_server::autopilot::AutopilotManager::new(),
         history_manager,
         Arc::new(signalk_server::notifications::NotificationManager::new()),
+        None,
     );
     build_router(state, &[])
 }

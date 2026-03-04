@@ -1,6 +1,6 @@
 use chrono::Utc;
 use signalk_types::{
-    Delta, FullModel, Metadata, SignalKValue, Source, SourceRef, SourceValue, VesselData,
+    Delta, FullModel, Metadata, SignalKValue, Source, SourceRef, SourceValue, Update, VesselData,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,7 +8,7 @@ use tokio::sync::{RwLock, broadcast};
 use tracing::debug;
 
 /// Capacity of the broadcast channel for delta fanout
-const BROADCAST_CAPACITY: usize = 1024;
+const BROADCAST_CAPACITY: usize = 8192;
 
 /// Default priority for sources without an explicit priority configuration.
 /// Sources at the same priority level use last-write-wins semantics.
@@ -150,12 +150,16 @@ impl SignalKStore {
         let is_self = vessel_uri == self.self_uri;
         let vessel = self.vessels.entry(vessel_uri).or_default();
 
+        let mut applied_updates: Vec<Update> = Vec::new();
+
         for update in &delta.updates {
             // Register source
             let source_ref = make_source_ref(&update.source);
             self.sources
                 .entry(source_ref.0.clone())
                 .or_insert_with(|| update.source.clone());
+
+            let mut applied_values: Vec<signalk_types::PathValue> = Vec::new();
 
             // Apply each value to the vessel's flat path map
             for pv in &update.values {
@@ -217,12 +221,27 @@ impl SignalKStore {
                         source_map.remove(&evicted);
                     }
                     vessel.values.insert(pv.path.clone(), value);
+                    applied_values.push(pv.clone());
                 }
+            }
+
+            if !applied_values.is_empty() {
+                applied_updates.push(Update {
+                    source: update.source.clone(),
+                    timestamp: update.timestamp,
+                    values: applied_values,
+                });
             }
         }
 
-        // Fan out to all WebSocket subscribers (ignore send errors — no receivers is fine)
-        let _ = self.tx.send(delta);
+        // Fan out only applied values to subscribers (ignore send errors — no receivers is fine)
+        if !applied_updates.is_empty() {
+            let applied_delta = Delta {
+                context: delta.context,
+                updates: applied_updates,
+            };
+            let _ = self.tx.send(applied_delta);
+        }
     }
 
     /// Get the current value at a dot-path for the self vessel.

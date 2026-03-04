@@ -20,7 +20,7 @@ pub use full::{
     DiscoveryResponse, EndpointInfo, FullModel, LoginRequest, LoginResponse, ServerInfo,
     SignalKValue, SourceValue, VesselData,
 };
-pub use meta::{Metadata, Zone, ZoneState};
+pub use meta::{DisplayUnits, Metadata, Zone, ZoneState};
 pub use notification::{Notification, NotificationMethod, NotificationState};
 pub use path::{matches_pattern, normalize_context, resolve_self, split};
 pub use resources::{ActiveRoute, CoursePoint, CourseState, PointType, Position, ResourceType};

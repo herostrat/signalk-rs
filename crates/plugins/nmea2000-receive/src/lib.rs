@@ -197,8 +197,17 @@ async fn run_n2k_reader(
                         }
                     }
                     Err(e) => {
-                        debug!("N2k read error: {e:?}");
-                        break;
+                        warn!("N2k read error: {e:?}");
+                        // Transient errors (e.g. error frames) — continue reading.
+                        // Fatal errors (interface gone) will fail again immediately.
+                        if e.kind() == std::io::ErrorKind::NotFound
+                            || e.kind() == std::io::ErrorKind::PermissionDenied
+                            || e.raw_os_error() == Some(19) // ENODEV
+                            || e.raw_os_error() == Some(6)
+                        // ENXIO
+                        {
+                            break;
+                        }
                     }
                 }
             }

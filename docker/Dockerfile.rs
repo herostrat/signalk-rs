@@ -73,6 +73,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/signalk-server /usr/local/bin/signalk-server
+COPY unitpreferences/ /usr/share/signalk-rs/unitpreferences/
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh && \
     mkdir -p /var/lib/signalk-rs

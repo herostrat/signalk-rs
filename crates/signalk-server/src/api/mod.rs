@@ -80,8 +80,27 @@ pub async fn discovery(
 /// GET /signalk/v1/api/ — full data model snapshot.
 pub async fn full_model(State(state): State<Arc<ServerState>>) -> Response {
     let store = state.store.read().await;
-    let model = store.full_model();
+    let mut model = store.full_model();
+    enrich_display_units(&mut model, &state);
     Json(model).into_response()
+}
+
+/// Inject displayUnits into metadata for all paths in the full model.
+fn enrich_display_units(model: &mut signalk_types::FullModel, state: &ServerState) {
+    let unit_prefs = match &state.unit_preferences {
+        Some(up) => up,
+        None => return,
+    };
+
+    for vessel in model.vessels.values_mut() {
+        for (path, sv) in vessel.values.iter_mut() {
+            if let Some(ref mut meta) = sv.meta
+                && let Some(du) = unit_prefs.resolve_display_units(path)
+            {
+                meta.display_units = Some(du);
+            }
+        }
+    }
 }
 
 /// Query parameters for GET /signalk/v1/api/{*path}.
@@ -109,7 +128,9 @@ pub async fn get_path(
     let raw_parts: Vec<&str> = url_path.split('/').filter(|s| !s.is_empty()).collect();
 
     if raw_parts.is_empty() {
-        return Json(store.full_model()).into_response();
+        let mut model = store.full_model();
+        enrich_display_units(&mut model, &state);
+        return Json(model).into_response();
     }
 
     // Source-specific query: return the value from a named source
@@ -149,7 +170,9 @@ pub async fn get_path(
         .collect();
 
     // Build JSON response by traversing the full model
-    let model_value = match serde_json::to_value(store.full_model()) {
+    let mut fm = store.full_model();
+    enrich_display_units(&mut fm, &state);
+    let model_value = match serde_json::to_value(fm) {
         Ok(v) => v,
         Err(e) => {
             return (

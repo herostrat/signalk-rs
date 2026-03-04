@@ -8,6 +8,7 @@ pub mod history;
 pub mod notifications;
 pub mod plugins;
 pub mod resources;
+pub mod unitpreferences;
 pub mod webapps;
 pub mod ws;
 
@@ -28,6 +29,7 @@ use crate::plugins::manager::PluginManager;
 use crate::plugins::registry::PluginRegistry;
 use crate::plugins::routes::PluginRouteTable;
 use crate::resources::ResourceProviderRegistry;
+use crate::unitpreferences::UnitPreferencesManager;
 use crate::webapps::{WebAppInfo, WebappRegistry};
 
 /// Shared application state — passed as axum State to all handlers.
@@ -60,6 +62,8 @@ pub struct ServerState {
     pub history_manager: Arc<HistoryManager>,
     /// Notification manager — enriches deltas with UUID + capability flags
     pub notification_manager: Arc<NotificationManager>,
+    /// Unit preferences manager — resolves display units for metadata enrichment
+    pub unit_preferences: Option<Arc<UnitPreferencesManager>>,
 }
 
 impl ServerState {
@@ -109,6 +113,7 @@ impl ServerState {
             autopilot_manager,
             history_manager,
             notification_manager,
+            unit_preferences: None,
         })
     }
 
@@ -128,6 +133,7 @@ impl ServerState {
         autopilot_manager: Arc<AutopilotManager>,
         history_manager: Arc<HistoryManager>,
         notification_manager: Arc<NotificationManager>,
+        unit_preferences: Option<Arc<UnitPreferencesManager>>,
     ) -> Arc<Self> {
         let data_dir = PathBuf::from(&config.data_dir);
         let course_manager = Arc::new(CourseManager::new(
@@ -151,6 +157,7 @@ impl ServerState {
             autopilot_manager,
             history_manager,
             notification_manager,
+            unit_preferences,
         })
     }
 }
@@ -380,6 +387,48 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
         .route(
             "/signalk/v2/api/history/paths",
             get(api::v2::history::get_paths),
+        )
+        // -- Unit Preferences API -----------------------------------------------
+        // Manages display unit conversion preferences (presets, definitions, categories).
+        .route(
+            "/signalk/v1/unitpreferences/config",
+            get(unitpreferences::api::get_config).put(unitpreferences::api::set_config),
+        )
+        .route(
+            "/signalk/v1/unitpreferences/presets",
+            get(unitpreferences::api::list_presets),
+        )
+        .route(
+            "/signalk/v1/unitpreferences/presets/{name}",
+            get(unitpreferences::api::get_preset)
+                .put(unitpreferences::api::save_preset)
+                .delete(unitpreferences::api::delete_preset),
+        )
+        .route(
+            "/signalk/v1/unitpreferences/active",
+            get(unitpreferences::api::get_active),
+        )
+        .route(
+            "/signalk/v1/unitpreferences/definitions",
+            get(unitpreferences::api::get_definitions),
+        )
+        .route(
+            "/signalk/v1/unitpreferences/definitions/custom",
+            get(unitpreferences::api::get_custom_definitions)
+                .put(unitpreferences::api::set_custom_definitions),
+        )
+        .route(
+            "/signalk/v1/unitpreferences/categories",
+            get(unitpreferences::api::get_categories),
+        )
+        .route(
+            "/signalk/v1/unitpreferences/categories/default",
+            get(unitpreferences::api::get_default_categories),
+        )
+        .route(
+            "/signalk/v1/unitpreferences/categories/custom",
+            get(unitpreferences::api::get_custom_categories)
+                .put(unitpreferences::api::set_custom_categories),
         )
         // ════════════════════════════════════════════════════════════════════
         // De-facto Standard  —  not in the spec, but expected by all clients
