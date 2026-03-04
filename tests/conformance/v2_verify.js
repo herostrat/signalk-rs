@@ -925,6 +925,35 @@ async function testHistory() {
     'history/paths returns an array',
     `body type=${typeof pathsResp.body}, value=${JSON.stringify(pathsResp.body)}`
   );
+
+  // 8.6: GET /history/_providers — validate body is object with keys
+  const histProvResp = await request(RS, 'GET', '/signalk/v2/api/history/_providers');
+  assertStatus(histProvResp, 200, 'GET history/_providers — 200');
+  assert(
+    histProvResp.body != null && typeof histProvResp.body === 'object',
+    'history providers body is an object',
+    `body type=${typeof histProvResp.body}`
+  );
+  assert(
+    Object.keys(histProvResp.body).length > 0,
+    'history providers has at least one entry',
+    `keys=${JSON.stringify(Object.keys(histProvResp.body))}`
+  );
+
+  // 8.7: GET /history/_providers/_default — validate body has id field
+  const histDefResp = await request(RS, 'GET', '/signalk/v2/api/history/_providers/_default');
+  assertStatus(histDefResp, 200, 'GET history/_providers/_default — 200');
+  assert(
+    histDefResp.body != null && histDefResp.body.id,
+    'history default provider has id field',
+    `body=${JSON.stringify(histDefResp.body)}`
+  );
+
+  // 8.8: POST set default history provider — use current default id
+  if (histDefResp.body && histDefResp.body.id) {
+    const setHistDefResp = await request(RS, 'POST', `/signalk/v2/api/history/_providers/_default/${histDefResp.body.id}`);
+    assertStatus(setHistDefResp, 200, 'POST history set default provider — 200');
+  }
 }
 
 // ── Cleanup ─────────────────────────────────────────────────────────────────

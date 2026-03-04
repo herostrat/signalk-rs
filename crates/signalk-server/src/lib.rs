@@ -16,6 +16,7 @@ use signalk_store::store::SignalKStore;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 use std::task::{Context, Poll};
 use tokio::sync::RwLock;
 
@@ -64,6 +65,10 @@ pub struct ServerState {
     pub notification_manager: Arc<NotificationManager>,
     /// Unit preferences manager — resolves display units for metadata enrichment
     pub unit_preferences: Option<Arc<UnitPreferencesManager>>,
+    /// Server start time for uptime calculation
+    pub start_time: std::time::Instant,
+    /// Active WebSocket client count
+    pub ws_client_count: Arc<AtomicUsize>,
 }
 
 impl ServerState {
@@ -114,6 +119,8 @@ impl ServerState {
             history_manager,
             notification_manager,
             unit_preferences: None,
+            start_time: std::time::Instant::now(),
+            ws_client_count: Arc::new(AtomicUsize::new(0)),
         })
     }
 
@@ -158,6 +165,8 @@ impl ServerState {
             history_manager,
             notification_manager,
             unit_preferences,
+            start_time: std::time::Instant::now(),
+            ws_client_count: Arc::new(AtomicUsize::new(0)),
         })
     }
 }
@@ -168,6 +177,7 @@ impl ServerState {
 /// They must be passed in separately because router construction is sync,
 /// but the webapp registry uses an async RwLock.
 pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Router {
+    use axum::response::Redirect;
     use axum::routing::{any, get, post, put};
     use tower_http::cors::CorsLayer;
 
@@ -388,6 +398,18 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
             "/signalk/v2/api/history/paths",
             get(api::v2::history::get_paths),
         )
+        .route(
+            "/signalk/v2/api/history/_providers",
+            get(api::v2::history::list_providers),
+        )
+        .route(
+            "/signalk/v2/api/history/_providers/_default",
+            get(api::v2::history::get_default_provider),
+        )
+        .route(
+            "/signalk/v2/api/history/_providers/_default/{id}",
+            post(api::v2::history::set_default_provider),
+        )
         // -- Unit Preferences API -----------------------------------------------
         // Manages display unit conversion preferences (presets, definitions, categories).
         .route(
@@ -559,7 +581,9 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
             index_html,
             serve_dir,
         };
-        router = router.nest_service("/admin", admin_service);
+        // Redirect /admin → /admin/ so relative asset paths resolve correctly
+        router = router.route("/admin", get(|| async { Redirect::permanent("/admin/") }));
+        router = router.nest_service("/admin/", admin_service);
     }
 
     // Test-only delta injection endpoint (simulator feature)

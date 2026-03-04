@@ -19,6 +19,12 @@ async fn features_includes_apis() {
     let api_ids: Vec<&str> = apis.iter().map(|a| a["id"].as_str().unwrap()).collect();
     assert!(api_ids.contains(&"resources"), "Should list resources API");
     assert!(api_ids.contains(&"course"), "Should list course API");
+    assert!(api_ids.contains(&"autopilot"), "Should list autopilot API");
+    assert!(
+        api_ids.contains(&"notifications"),
+        "Should list notifications API"
+    );
+    assert!(api_ids.contains(&"history"), "Should list history API");
 }
 
 #[tokio::test]

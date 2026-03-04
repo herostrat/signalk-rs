@@ -24,6 +24,8 @@ pub async fn get_features(State(state): State<Arc<ServerState>>) -> impl IntoRes
         })
         .collect();
 
+    let has_autopilot = !state.autopilot_manager.list().await.is_empty();
+
     Json(FeaturesResponse {
         apis: vec![
             FeatureInfo {
@@ -34,6 +36,21 @@ pub async fn get_features(State(state): State<Arc<ServerState>>) -> impl IntoRes
             FeatureInfo {
                 id: "course".into(),
                 name: "Course API".into(),
+                enabled: true,
+            },
+            FeatureInfo {
+                id: "autopilot".into(),
+                name: "Autopilot API".into(),
+                enabled: has_autopilot,
+            },
+            FeatureInfo {
+                id: "notifications".into(),
+                name: "Notifications API".into(),
+                enabled: true,
+            },
+            FeatureInfo {
+                id: "history".into(),
+                name: "History API".into(),
                 enabled: true,
             },
         ],

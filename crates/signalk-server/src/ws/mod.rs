@@ -1,3 +1,5 @@
+mod admin_messages;
+
 /// WebSocket streaming handler — /signalk/v1/stream
 ///
 /// Connection lifecycle:
@@ -34,6 +36,8 @@ pub struct StreamParams {
     /// InstrumentPanel sends sendMeta=all; accepted but not yet implemented.
     #[serde(rename = "sendMeta")]
     pub send_meta: Option<String>,
+    /// Admin UI sends serverevents=all to receive SERVERSTATISTICS + PROVIDERSTATUS.
+    pub serverevents: Option<String>,
 }
 
 /// Axum route handler — upgrades HTTP to WebSocket.
@@ -49,8 +53,11 @@ pub async fn handler(
         .parse()
         .unwrap_or_default();
     let send_cached = params.send_cached_values.unwrap_or(true);
+    let serverevents = params.serverevents.as_deref() == Some("all");
 
-    ws.on_upgrade(move |socket| handle_socket(socket, state, subscribe_mode, send_cached))
+    ws.on_upgrade(move |socket| {
+        handle_socket(socket, state, subscribe_mode, send_cached, serverevents)
+    })
 }
 
 async fn handle_socket(
@@ -58,11 +65,17 @@ async fn handle_socket(
     state: Arc<ServerState>,
     subscribe_mode: SubscribeMode,
     send_cached_values: bool,
+    serverevents: bool,
 ) {
+    use std::sync::atomic::Ordering::Relaxed;
+
     info!(
         ?subscribe_mode,
-        send_cached_values, "WebSocket client connected"
+        send_cached_values, serverevents, "WebSocket client connected"
     );
+
+    // Track active WS clients
+    state.ws_client_count.fetch_add(1, Relaxed);
 
     // 1. Send Hello message
     let store = state.store.read().await;
@@ -74,10 +87,12 @@ async fn handle_socket(
         Ok(j) => j,
         Err(e) => {
             warn!("Failed to serialize hello: {}", e);
+            state.ws_client_count.fetch_sub(1, Relaxed);
             return;
         }
     };
     if socket.send(Message::Text(hello_json.into())).await.is_err() {
+        state.ws_client_count.fetch_sub(1, Relaxed);
         return;
     }
 
@@ -131,6 +146,15 @@ async fn handle_socket(
     let mut rx = store.subscribe();
     drop(store);
 
+    // Admin message intervals (only active when serverevents=all)
+    let mut stats_interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
+    let mut provider_interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+    // Don't send immediately — first tick fires right away
+    stats_interval.tick().await;
+    provider_interval.tick().await;
+    // Track previous delta count for rate calculation
+    let mut prev_delta_count: u64 = state.store.read().await.delta_count();
+
     // 4. Main event loop
     loop {
         tokio::select! {
@@ -177,9 +201,46 @@ async fn handle_socket(
                     _ => {}
                 }
             }
+
+            // SERVERSTATISTICS (every 1s, only for admin clients)
+            _ = stats_interval.tick(), if serverevents => {
+                let store = state.store.read().await;
+                let current_delta_count = store.delta_count();
+                let delta_rate = (current_delta_count - prev_delta_count) as f64;
+                prev_delta_count = current_delta_count;
+
+                let msg = admin_messages::ServerStatisticsMessage::new(
+                    admin_messages::ServerStatisticsData {
+                        delta_rate,
+                        number_of_available_paths: store.self_path_count(),
+                        ws_clients: state.ws_client_count.load(Relaxed),
+                        uptime: state.start_time.elapsed().as_secs(),
+                        provider_statistics: HashMap::new(),
+                    },
+                );
+                drop(store);
+
+                if let Ok(json) = serde_json::to_string(&msg)
+                    && socket.send(Message::Text(json.into())).await.is_err()
+                {
+                    break;
+                }
+            }
+
+            // PROVIDERSTATUS (every 5s, only for admin clients)
+            _ = provider_interval.tick(), if serverevents => {
+                let plugins = state.plugin_registry.read().await.all();
+                let msg = admin_messages::build_provider_status(&plugins);
+                if let Ok(json) = serde_json::to_string(&msg)
+                    && socket.send(Message::Text(json.into())).await.is_err()
+                {
+                    break;
+                }
+            }
         }
     }
 
+    state.ws_client_count.fetch_sub(1, Relaxed);
     info!("WebSocket client disconnected");
 }
 

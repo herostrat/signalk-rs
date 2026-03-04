@@ -106,6 +106,12 @@ check "Features has plugins" \
   "$(fetch "$BASE/signalk/v2/features")" '"plugins"'
 check "Features lists resources API" \
   "$(fetch "$BASE/signalk/v2/features")" '"resources"'
+check "Features lists autopilot" \
+  "$(fetch "$BASE/signalk/v2/features")" '"autopilot"'
+check "Features lists notifications" \
+  "$(fetch "$BASE/signalk/v2/features")" '"notifications"'
+check "Features lists history" \
+  "$(fetch "$BASE/signalk/v2/features")" '"history"'
 
 # --- v2 Resources API (CRUD) ---
 echo "  v2 Resources API"
@@ -227,6 +233,12 @@ check "GET /history/paths returns 200" \
   "$(status "$BASE/signalk/v2/api/history/paths?duration=PT1H")" "200"
 check "history/values returns JSON with data field" \
   "$(fetch "$BASE/signalk/v2/api/history/values?paths=navigation.speedOverGround&duration=PT1H")" '"data"'
+check "GET /history/_providers returns 200" \
+  "$(status "$BASE/signalk/v2/api/history/_providers")" "200"
+check "GET /history/_providers/_default returns 200" \
+  "$(status "$BASE/signalk/v2/api/history/_providers/_default")" "200"
+check "history/_default has id field" \
+  "$(fetch "$BASE/signalk/v2/api/history/_providers/_default")" '"id"'
 
 # --- v2 Notifications API ---
 echo "  Notifications API"

@@ -3,14 +3,18 @@
 //! - `GET /signalk/v2/api/history/values`
 //! - `GET /signalk/v2/api/history/contexts`
 //! - `GET /signalk/v2/api/history/paths`
+//! - `GET /signalk/v2/api/history/_providers`
+//! - `GET /signalk/v2/api/history/_providers/_default`
+//! - `POST /signalk/v2/api/history/_providers/_default/{id}`
 
 use axum::{
     Json,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
+use serde_json::json;
 use std::sync::Arc;
 
 use crate::ServerState;
@@ -209,6 +213,33 @@ pub async fn get_paths(
             Json(serde_json::json!({"message": e})),
         )
             .into_response(),
+    }
+}
+
+const PROVIDER_ID: &str = "signalk-rs";
+
+/// `GET /signalk/v2/api/history/_providers`
+pub async fn list_providers() -> impl IntoResponse {
+    Json(json!({
+        PROVIDER_ID: { "isDefault": true }
+    }))
+}
+
+/// `GET /signalk/v2/api/history/_providers/_default`
+pub async fn get_default_provider() -> impl IntoResponse {
+    Json(json!({ "id": PROVIDER_ID }))
+}
+
+/// `POST /signalk/v2/api/history/_providers/_default/{id}`
+pub async fn set_default_provider(Path(id): Path<String>) -> Response {
+    if id == PROVIDER_ID {
+        StatusCode::OK.into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"message": format!("Unknown history provider: {id}")})),
+        )
+            .into_response()
     }
 }
 

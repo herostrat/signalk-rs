@@ -4,6 +4,7 @@ use signalk_types::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::{RwLock, broadcast};
 use tracing::debug;
 
@@ -58,6 +59,9 @@ pub struct SignalKStore {
 
     /// Broadcast sender — all delta updates are sent here
     tx: broadcast::Sender<Delta>,
+
+    /// Total number of deltas applied (monotonic counter for rate calculation)
+    delta_count: Arc<AtomicU64>,
 }
 
 impl SignalKStore {
@@ -83,6 +87,7 @@ impl SignalKStore {
             source_priorities: HashMap::new(),
             source_ttls: HashMap::new(),
             tx,
+            delta_count: Arc::new(AtomicU64::new(0)),
         };
         (Arc::new(RwLock::new(store)), rx)
     }
@@ -241,6 +246,7 @@ impl SignalKStore {
                 updates: applied_updates,
             };
             let _ = self.tx.send(applied_delta);
+            self.delta_count.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -400,6 +406,19 @@ impl SignalKStore {
     /// List all known vessel URIs.
     pub fn vessel_uris(&self) -> Vec<&str> {
         self.vessels.keys().map(String::as_str).collect()
+    }
+
+    /// Total number of deltas applied since server start.
+    pub fn delta_count(&self) -> u64 {
+        self.delta_count.load(Ordering::Relaxed)
+    }
+
+    /// Number of unique paths stored for the self vessel.
+    pub fn self_path_count(&self) -> usize {
+        self.vessels
+            .get(&self.self_uri)
+            .map(|v| v.values.len())
+            .unwrap_or(0)
     }
 
     /// Directly set a value in the self vessel (e.g. from internal PUT handler).
