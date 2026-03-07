@@ -3,7 +3,11 @@
 /// The admin UI sets `window.serverRoutesPrefix = '/skServer'` and calls all
 /// API endpoints under this prefix. These handlers bridge to our existing
 /// admin API or return static/stub responses.
-use axum::{Json, extract::State, response::IntoResponse};
+///
+/// **Thin API layer** — handlers only extract state, call data-layer methods,
+/// and serialize the result. No business logic lives here.
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::ServerState;
@@ -49,14 +53,66 @@ pub async fn get_settings(State(state): State<Arc<ServerState>>) -> impl IntoRes
     }))
 }
 
-/// `GET /skServer/vessel` — vessel configuration.
+/// `GET /skServer/vessel` — vessel configuration (reads from config store).
 pub async fn get_vessel(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
-    let vessel = &state.config.vessel;
     Json(serde_json::json!({
-        "name": vessel.name,
-        "uuid": vessel.uuid,
-        "mmsi": vessel.mmsi,
+        "name": state.config_store.vessel_name(),
+        "uuid": state.config_store.vessel_uuid(),
+        "mmsi": state.config_store.vessel_mmsi(),
     }))
+}
+
+/// `PUT /skServer/vessel` — update vessel configuration and persist.
+pub async fn put_vessel(
+    State(state): State<Arc<ServerState>>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let name = body.get("name").and_then(|v| v.as_str()).map(String::from);
+    let mmsi = body.get("mmsi").and_then(|v| v.as_str()).map(String::from);
+
+    state.config_store.set_vessel(name.clone(), mmsi.clone());
+
+    // Also update the in-memory store so /signalk/v1/api reflects changes
+    let uuid = state.config_store.vessel_uuid();
+    let mut store = state.store.write().await;
+    store.set_vessel_identity(&uuid, name, mmsi);
+    drop(store);
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// `GET /skServer/providers` — data provider list from the plugin registry.
+pub async fn list_providers(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
+    let registry = state.plugin_registry.read().await;
+    Json(registry.providers())
+}
+
+/// `GET /skServer/availablePaths` — all data paths in the self vessel's store.
+pub async fn list_available_paths(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
+    let store = state.store.read().await;
+    Json(store.self_paths())
+}
+
+/// `GET /skServer/sourcePriorities` — configured source priority map.
+pub async fn get_source_priorities(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
+    Json(state.config_store.source_priorities())
+}
+
+/// `PUT /skServer/sourcePriorities` — update source priorities and persist.
+pub async fn put_source_priorities(
+    State(state): State<Arc<ServerState>>,
+    Json(priorities): Json<HashMap<String, u16>>,
+) -> impl IntoResponse {
+    state.config_store.set_source_priorities(priorities.clone());
+
+    // Apply to the live store immediately
+    state
+        .store
+        .write()
+        .await
+        .set_source_priorities(priorities);
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// Stub handler returning `[]` for unimplemented list endpoints.

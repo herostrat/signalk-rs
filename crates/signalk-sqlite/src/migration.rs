@@ -84,6 +84,15 @@ fn migrate_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE INDEX IF NOT EXISTS idx_track_ctx_ts
             ON track_points(context, timestamp);
 
+        -- Runtime-mutable configuration (vessel, plugins, priorities, TTLs)
+        CREATE TABLE IF NOT EXISTS config (
+            namespace  TEXT NOT NULL,
+            key        TEXT NOT NULL,
+            value      TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (namespace, key)
+        );
+
         -- Record migration
         INSERT INTO schema_version (version) VALUES (1);
         ",

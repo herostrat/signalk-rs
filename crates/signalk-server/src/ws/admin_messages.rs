@@ -30,8 +30,6 @@ pub struct ServerStatisticsData {
 pub struct ProviderStats {
     pub delta_rate: f64,
     pub delta_count: u64,
-    pub write_rate: f64,
-    pub write_count: u64,
 }
 
 impl ServerStatisticsMessage {
@@ -91,13 +89,18 @@ pub fn build_provider_status(plugins: &[PluginInfo]) -> ProviderStatusMessage {
                 String::new()
             };
 
+            let last_error_time_stamp = p
+                .last_error_time
+                .map(|t| t.to_rfc3339())
+                .unwrap_or_default();
+
             ProviderStatusEntry {
                 id: p.id.clone(),
                 status_type: "plugin",
                 r#type: msg_type,
                 message,
                 last_error,
-                last_error_time_stamp: String::new(),
+                last_error_time_stamp,
             }
         })
         .collect();

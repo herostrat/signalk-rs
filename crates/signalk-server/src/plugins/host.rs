@@ -21,6 +21,7 @@ use tracing::warn;
 use super::delta_filter::DeltaFilterChain;
 use super::routes::PluginRouteTable;
 use crate::autopilot::AutopilotManager;
+use crate::config_store::ConfigStore;
 use crate::webapps::{WebAppInfo, WebappRegistry, WebappSource};
 
 /// Shared PUT handler function — Arc-wrapped for cloning across threads.
@@ -88,7 +89,6 @@ pub struct RustPluginContext {
     put_handlers_map: Arc<RwLock<HashMap<String, String>>>,
     /// Shared map for plugin route discovery
     plugin_routes_map: Arc<RwLock<HashMap<String, String>>>,
-    config_dir: PathBuf,
     data_dir: PathBuf,
     status: Arc<Mutex<String>>,
     error_msg: Arc<Mutex<Option<String>>>,
@@ -105,6 +105,8 @@ pub struct RustPluginContext {
     database: Option<Arc<Mutex<signalk_sqlite::rusqlite::Connection>>>,
     /// Resource provider registry (optional — set via PluginManager)
     resource_providers: Option<Arc<crate::resources::ResourceProviderRegistry>>,
+    /// Unified config store (optional — None in tests)
+    config_store: Option<Arc<ConfigStore>>,
 }
 
 impl RustPluginContext {
@@ -116,13 +118,13 @@ impl RustPluginContext {
         put_handler_registry: Arc<PutHandlerRegistry>,
         put_handlers_map: Arc<RwLock<HashMap<String, String>>>,
         plugin_routes_map: Arc<RwLock<HashMap<String, String>>>,
-        config_dir: PathBuf,
         data_dir: PathBuf,
         delta_filter: Arc<DeltaFilterChain>,
         webapp_registry: Arc<RwLock<WebappRegistry>>,
         autopilot_manager: Option<Arc<AutopilotManager>>,
         database: Option<Arc<Mutex<signalk_sqlite::rusqlite::Connection>>>,
         resource_providers: Option<Arc<crate::resources::ResourceProviderRegistry>>,
+        config_store: Option<Arc<ConfigStore>>,
     ) -> Self {
         RustPluginContext {
             plugin_id,
@@ -131,7 +133,6 @@ impl RustPluginContext {
             put_handler_registry,
             put_handlers_map,
             plugin_routes_map,
-            config_dir,
             data_dir,
             status: Arc::new(Mutex::new(String::new())),
             error_msg: Arc::new(Mutex::new(None)),
@@ -142,6 +143,7 @@ impl RustPluginContext {
             autopilot_manager,
             database,
             resource_providers,
+            config_store,
         }
     }
 
@@ -336,22 +338,23 @@ impl PluginContext for RustPluginContext {
     }
 
     async fn save_options(&self, opts: serde_json::Value) -> Result<(), PluginError> {
-        let path = self.config_dir.join(format!("{}.json", self.plugin_id));
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+        if let Some(ref cs) = self.config_store {
+            cs.set_plugin_config(&self.plugin_id, &opts);
+        } else {
+            warn!(plugin = %self.plugin_id, "save_options: no config store available");
         }
-        let content = serde_json::to_string_pretty(&opts)?;
-        std::fs::write(&path, content)?;
         Ok(())
     }
 
     async fn read_options(&self) -> Result<serde_json::Value, PluginError> {
-        let path = self.config_dir.join(format!("{}.json", self.plugin_id));
-        if !path.exists() {
-            return Ok(serde_json::Value::Object(serde_json::Map::new()));
+        if let Some(ref cs) = self.config_store {
+            Ok(cs
+                .plugin_config(&self.plugin_id)
+                .map(|e| e.config)
+                .unwrap_or(serde_json::json!({})))
+        } else {
+            Ok(serde_json::json!({}))
         }
-        let content = std::fs::read_to_string(&path)?;
-        Ok(serde_json::from_str(&content)?)
     }
 
     fn data_dir(&self) -> PathBuf {
@@ -481,13 +484,13 @@ mod tests {
             put_registry,
             put_handlers,
             plugin_routes,
-            PathBuf::from("/tmp/signalk-test/config"),
             PathBuf::from("/tmp/signalk-test/data"),
             delta_filter,
             webapp_registry,
             None, // no autopilot manager in tests
             None, // no shared database in tests
             None, // no resource providers in tests
+            None, // no config store in tests
         ));
 
         (ctx, store)

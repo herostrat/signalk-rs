@@ -5,18 +5,17 @@
 use axum::{body::Body, http::Request};
 use criterion::{Criterion, criterion_group, criterion_main};
 use signalk_server::{ServerState, build_router, config::ServerConfig};
-use signalk_store::store::SignalKStore;
 use signalk_types::{Delta, PathValue, Source, Update};
 use tower::ServiceExt;
 
 fn make_app() -> (axum::Router, String) {
     let config = ServerConfig::default();
-    let self_uri = config.vessel.uuid.clone();
-    let (store, _rx) = SignalKStore::new(&self_uri);
+    let state = ServerState::new(config);
+    let self_uri = state.config_store.vessel_uuid();
 
     // Pre-populate the store
     {
-        let mut s = store.blocking_write();
+        let mut s = state.store.blocking_write();
         s.apply_delta(Delta::self_vessel(vec![Update::new(
             Source::nmea0183("ttyUSB0", "GP"),
             vec![
@@ -28,7 +27,6 @@ fn make_app() -> (axum::Router, String) {
         )]));
     }
 
-    let state = ServerState::new(config, store);
     (build_router(state, &[]), self_uri)
 }
 

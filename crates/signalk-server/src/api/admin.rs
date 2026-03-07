@@ -218,6 +218,7 @@ pub async fn enable_plugin(
 
     match info.tier {
         PluginTier::Rust => {
+            state.config_store.set_plugin_enabled(&plugin_id, true);
             let mut mgr = state.plugin_manager.lock().await;
             let config = mgr
                 .read_plugin_config(&plugin_id)
@@ -279,6 +280,7 @@ pub async fn disable_plugin(
 
     match info.tier {
         PluginTier::Rust => {
+            state.config_store.set_plugin_enabled(&plugin_id, false);
             let mut mgr = state.plugin_manager.lock().await;
             if let Err(e) = mgr.stop_plugin(&plugin_id).await {
                 sync_tier1_status(&state, &mgr).await;
@@ -362,7 +364,7 @@ async fn sync_tier1_status(state: &ServerState, mgr: &crate::plugins::manager::P
 /// future plugin tier that provides a JSON Schema.
 pub async fn config_reference(State(state): State<Arc<ServerState>>) -> Response {
     let server_schema =
-        serde_json::to_value(schemars::schema_for!(crate::config::ServerConfig)).unwrap();
+        serde_json::to_value(schemars::schema_for!(crate::config::RawConfig)).unwrap();
 
     let registry = state.plugin_registry.read().await;
     let mut plugin_schemas: Vec<(String, String, Option<serde_json::Value>)> = registry

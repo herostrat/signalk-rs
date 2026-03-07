@@ -15,8 +15,7 @@ use tower::ServiceExt;
 /// Build a test app with default config and empty store.
 pub fn test_app() -> Router {
     let config = ServerConfig::default();
-    let (store, _rx) = SignalKStore::new(config.vessel.uuid.clone());
-    let state = ServerState::new(config, store);
+    let state = ServerState::new(config);
     build_router(state, &[])
 }
 
@@ -27,8 +26,8 @@ pub fn test_app() -> Router {
 #[allow(dead_code)]
 pub fn test_app_with_store() -> (Router, Arc<RwLock<SignalKStore>>) {
     let config = ServerConfig::default();
-    let (store, _rx) = SignalKStore::new(config.vessel.uuid.clone());
-    let state = ServerState::new(config, store.clone());
+    let state = ServerState::new(config);
+    let store = state.store.clone();
     (build_router(state, &[]), store)
 }
 
@@ -36,9 +35,8 @@ pub fn test_app_with_store() -> (Router, Arc<RwLock<SignalKStore>>) {
 #[allow(dead_code)]
 pub fn test_app_with_uri() -> (Router, String) {
     let config = ServerConfig::default();
-    let self_uri = config.vessel.uuid.clone();
-    let (store, _rx) = SignalKStore::new(&self_uri);
-    let state = ServerState::new(config, store);
+    let state = ServerState::new(config);
+    let self_uri = state.config_store.vessel_uuid();
     (build_router(state, &[]), self_uri)
 }
 
@@ -91,8 +89,7 @@ pub fn test_app_with_data_dir(data_dir: &std::path::Path) -> Router {
         data_dir: data_dir.to_string_lossy().to_string(),
         ..ServerConfig::default()
     };
-    let (store, _rx) = SignalKStore::new(config.vessel.uuid.clone());
-    let state = ServerState::new(config, store);
+    let state = ServerState::new(config);
     build_router(state, &[])
 }
 
@@ -119,7 +116,13 @@ pub fn test_app_with_handler(handler_path: &str, plugin_id: &str, bridge_socket:
         },
         ..ServerConfig::default()
     };
-    let (store, _rx) = SignalKStore::new(config.vessel.uuid.clone());
+    let test_db = signalk_sqlite::Database::open_in_memory().unwrap();
+    let test_conn = Arc::new(std::sync::Mutex::new(test_db.into_conn()));
+    let config_store = Arc::new(signalk_server::config_store::ConfigStore::new(
+        test_conn,
+        &signalk_server::config::SeedConfig::default(),
+    ));
+    let (store, _rx) = SignalKStore::new(&config_store.vessel_uuid());
     let put_handlers = Arc::new(RwLock::new(HashMap::from([(
         handler_path.to_string(),
         plugin_id.to_string(),
@@ -135,7 +138,6 @@ pub fn test_app_with_handler(handler_path: &str, plugin_id: &str, bridge_socket:
         plugin_routes.clone(),
         Arc::new(signalk_server::plugins::delta_filter::DeltaFilterChain::new()),
         Arc::new(RwLock::new(signalk_server::webapps::WebappRegistry::new())),
-        std::path::PathBuf::from("/tmp/signalk-test/config"),
         std::path::PathBuf::from("/tmp/signalk-test/data"),
     );
     let resource_providers = Arc::new(signalk_server::resources::ResourceProviderRegistry::new(
@@ -163,6 +165,7 @@ pub fn test_app_with_handler(handler_path: &str, plugin_id: &str, bridge_socket:
         history_manager,
         Arc::new(signalk_server::notifications::NotificationManager::new()),
         None,
+        config_store,
     );
     build_router(state, &[])
 }
@@ -174,8 +177,7 @@ pub fn test_app_with_handler(handler_path: &str, plugin_id: &str, bridge_socket:
 #[allow(dead_code)]
 pub fn test_app_with_state() -> (Router, Arc<ServerState>) {
     let config = ServerConfig::default();
-    let (store, _rx) = SignalKStore::new(config.vessel.uuid.clone());
-    let state = ServerState::new(config, store);
+    let state = ServerState::new(config);
     let router = build_router(state.clone(), &[]);
     (router, state)
 }

@@ -154,6 +154,9 @@ async fn handle_socket(
     provider_interval.tick().await;
     // Track previous delta count for rate calculation
     let mut prev_delta_count: u64 = state.store.read().await.delta_count();
+    // Track previous per-source delta counts for rate calculation
+    let mut prev_source_counts: HashMap<String, u64> =
+        state.store.read().await.source_delta_counts().clone();
 
     // 4. Main event loop
     loop {
@@ -209,13 +212,28 @@ async fn handle_socket(
                 let delta_rate = (current_delta_count - prev_delta_count) as f64;
                 prev_delta_count = current_delta_count;
 
+                // Build per-provider statistics from source delta counts
+                let current_source_counts = store.source_delta_counts().clone();
+                let mut provider_statistics = HashMap::new();
+                for (source, &count) in &current_source_counts {
+                    let prev = prev_source_counts.get(source).copied().unwrap_or(0);
+                    provider_statistics.insert(
+                        source.clone(),
+                        admin_messages::ProviderStats {
+                            delta_rate: (count - prev) as f64,
+                            delta_count: count,
+                        },
+                    );
+                }
+                prev_source_counts = current_source_counts;
+
                 let msg = admin_messages::ServerStatisticsMessage::new(
                     admin_messages::ServerStatisticsData {
                         delta_rate,
                         number_of_available_paths: store.self_path_count(),
                         ws_clients: state.ws_client_count.load(Relaxed),
                         uptime: state.start_time.elapsed().as_secs(),
-                        provider_statistics: HashMap::new(),
+                        provider_statistics,
                     },
                 );
                 drop(store);

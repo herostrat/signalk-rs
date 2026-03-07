@@ -6,6 +6,7 @@
 /// - **Tier 3 (Standalone):** Populated via registration endpoint (future)
 ///
 /// The admin API reads from this registry to present a unified view.
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -40,6 +41,9 @@ pub struct PluginInfo {
     pub webapp_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema: Option<serde_json::Value>,
+    /// Timestamp of the last error status (ISO 8601), if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error_time: Option<DateTime<Utc>>,
 }
 
 /// Plugin info reported by the bridge for Tier 2 plugins.
@@ -55,6 +59,16 @@ pub struct BridgePluginInfo {
     pub description: String,
     #[serde(default)]
     pub has_webapp: bool,
+}
+
+/// Lightweight provider info for the admin UI provider list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderInfo {
+    pub id: String,
+    /// Type label: "signalk-rs", "node-bridge", or "standalone"
+    pub type_label: String,
+    pub enabled: bool,
 }
 
 /// Central registry that aggregates plugin info across all tiers.
@@ -78,6 +92,14 @@ impl PluginRegistry {
         status: &str,
         enabled: bool,
     ) {
+        let last_error_time = if status.starts_with("error") {
+            Some(Utc::now())
+        } else {
+            // Preserve existing error timestamp when transitioning away from error
+            self.plugins
+                .get(id)
+                .and_then(|p| p.last_error_time)
+        };
         self.plugins.insert(
             id.to_string(),
             PluginInfo {
@@ -92,6 +114,7 @@ impl PluginRegistry {
                 has_webapp: false,
                 webapp_url: None,
                 schema: None,
+                last_error_time,
             },
         );
     }
@@ -112,6 +135,7 @@ impl PluginRegistry {
                 has_webapp: info.has_webapp,
                 webapp_url: None,
                 schema: None,
+                last_error_time: None,
             },
         );
     }
@@ -119,6 +143,9 @@ impl PluginRegistry {
     /// Update the status of a plugin by ID.
     pub fn update_status(&mut self, id: &str, status: &str) {
         if let Some(info) = self.plugins.get_mut(id) {
+            if status.starts_with("error") {
+                info.last_error_time = Some(Utc::now());
+            }
             info.status = status.to_string();
             info.enabled = !status.starts_with("stopped") && !status.starts_with("error");
         }
@@ -145,6 +172,25 @@ impl PluginRegistry {
     /// Get a mutable reference to a single plugin by ID.
     pub fn get_mut(&mut self, id: &str) -> Option<&mut PluginInfo> {
         self.plugins.get_mut(id)
+    }
+
+    /// Provider info for the admin UI — plugin ID, type label, and enabled flag.
+    pub fn providers(&self) -> Vec<ProviderInfo> {
+        let mut providers: Vec<ProviderInfo> = self
+            .plugins
+            .values()
+            .map(|p| ProviderInfo {
+                id: p.id.clone(),
+                type_label: match p.tier {
+                    PluginTier::Rust => "signalk-rs".to_string(),
+                    PluginTier::Bridge => "node-bridge".to_string(),
+                    PluginTier::Standalone => "standalone".to_string(),
+                },
+                enabled: p.enabled,
+            })
+            .collect();
+        providers.sort_by(|a, b| a.id.cmp(&b.id));
+        providers
     }
 }
 
@@ -208,5 +254,42 @@ mod tests {
         let info = reg.get("freeboard-sk").unwrap();
         assert!(info.has_webapp);
         assert_eq!(info.webapp_url.as_deref(), Some("/@signalk/freeboard-sk"));
+    }
+
+    #[test]
+    fn last_error_time_tracked() {
+        let mut reg = PluginRegistry::new();
+        reg.register_tier1("test", "Test", "desc", "0.1.0", "running", true);
+        assert!(reg.get("test").unwrap().last_error_time.is_none());
+
+        reg.update_status("test", "error: connection failed");
+        assert!(reg.get("test").unwrap().last_error_time.is_some());
+
+        // When transitioning back to running, timestamp is preserved
+        let error_time = reg.get("test").unwrap().last_error_time;
+        reg.update_status("test", "running: OK");
+        assert_eq!(reg.get("test").unwrap().last_error_time, error_time);
+    }
+
+    #[test]
+    fn providers_returns_sorted_list() {
+        let mut reg = PluginRegistry::new();
+        reg.register_tier1("zzz-plugin", "ZZZ", "desc", "0.1.0", "running", true);
+        reg.register_tier2(BridgePluginInfo {
+            id: "aaa-plugin".to_string(),
+            name: "AAA".to_string(),
+            version: "1.0.0".to_string(),
+            description: "desc".to_string(),
+            has_webapp: false,
+        });
+
+        let providers = reg.providers();
+        assert_eq!(providers.len(), 2);
+        // Sorted by ID
+        assert_eq!(providers[0].id, "aaa-plugin");
+        assert_eq!(providers[0].type_label, "node-bridge");
+        assert!(providers[0].enabled);
+        assert_eq!(providers[1].id, "zzz-plugin");
+        assert_eq!(providers[1].type_label, "signalk-rs");
     }
 }

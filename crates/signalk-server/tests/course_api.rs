@@ -12,8 +12,7 @@ fn test_app_with_course() -> (axum::Router, tempfile::TempDir) {
         data_dir: tmp.path().to_string_lossy().to_string(),
         ..signalk_server::config::ServerConfig::default()
     };
-    let (store, _rx) = signalk_store::store::SignalKStore::new(config.vessel.uuid.clone());
-    let state = signalk_server::ServerState::new(config, store);
+    let state = signalk_server::ServerState::new(config);
     let router = signalk_server::build_router(state, &[]);
     (router, tmp)
 }
@@ -330,8 +329,7 @@ fn test_app_course_state() -> (
         data_dir: tmp.path().to_string_lossy().to_string(),
         ..signalk_server::config::ServerConfig::default()
     };
-    let (store, _rx) = signalk_store::store::SignalKStore::new(config.vessel.uuid.clone());
-    let state = signalk_server::ServerState::new(config, store);
+    let state = signalk_server::ServerState::new(config);
     let router = signalk_server::build_router(state.clone(), &[]);
     (router, state, tmp)
 }

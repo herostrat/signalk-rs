@@ -21,8 +21,8 @@ use tokio_tungstenite::tungstenite::Message as WsMsg;
 /// Bind a random port, spawn axum, return the base WS URL and the store Arc.
 async fn spawn_ws_server() -> (String, Arc<RwLock<SignalKStore>>) {
     let config = ServerConfig::default();
-    let (store, _rx) = SignalKStore::new(config.vessel.uuid.clone());
-    let state = ServerState::new(config, store.clone());
+    let state = ServerState::new(config);
+    let store = state.store.clone();
     let router = build_router(state, &[]);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

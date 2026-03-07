@@ -62,6 +62,10 @@ pub struct SignalKStore {
 
     /// Total number of deltas applied (monotonic counter for rate calculation)
     delta_count: Arc<AtomicU64>,
+
+    /// Per-source delta counts: source label → monotonic counter.
+    /// Used by admin dashboard for per-provider statistics.
+    source_delta_counts: HashMap<String, u64>,
 }
 
 impl SignalKStore {
@@ -88,6 +92,7 @@ impl SignalKStore {
             source_ttls: HashMap::new(),
             tx,
             delta_count: Arc::new(AtomicU64::new(0)),
+            source_delta_counts: HashMap::new(),
         };
         (Arc::new(RwLock::new(store)), rx)
     }
@@ -163,6 +168,13 @@ impl SignalKStore {
             self.sources
                 .entry(source_ref.0.clone())
                 .or_insert_with(|| update.source.clone());
+
+            // Track per-source delta count for admin dashboard
+            let source_label = source_ref.0.split('.').next().unwrap_or(&source_ref.0);
+            *self
+                .source_delta_counts
+                .entry(source_label.to_string())
+                .or_insert(0) += 1;
 
             let mut applied_values: Vec<signalk_types::PathValue> = Vec::new();
 
@@ -419,6 +431,27 @@ impl SignalKStore {
             .get(&self.self_uri)
             .map(|v| v.values.len())
             .unwrap_or(0)
+    }
+
+    /// All dot-separated paths currently stored for the self vessel (sorted).
+    pub fn self_paths(&self) -> Vec<String> {
+        let mut paths: Vec<String> = self
+            .vessels
+            .get(&self.self_uri)
+            .map(|v| v.values.keys().cloned().collect())
+            .unwrap_or_default();
+        paths.sort();
+        paths
+    }
+
+    /// Source priority configuration: source_ref → priority (lower = higher).
+    pub fn source_priorities(&self) -> &HashMap<String, u16> {
+        &self.source_priorities
+    }
+
+    /// Per-source delta counts (source label → monotonic count).
+    pub fn source_delta_counts(&self) -> &HashMap<String, u64> {
+        &self.source_delta_counts
     }
 
     /// Directly set a value in the self vessel (e.g. from internal PUT handler).
@@ -1566,5 +1599,55 @@ mod tests {
             sog["values"]["ttyUSB0.GP"]["timestamp"].is_string(),
             "values entries should have timestamp"
         );
+    }
+
+    #[test]
+    fn self_paths_returns_sorted_keys() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+        store.apply_delta(make_gps_delta(3.5));
+
+        let paths = store.self_paths();
+        assert!(paths.contains(&"navigation.speedOverGround".to_string()));
+        assert!(paths.contains(&"navigation.courseOverGroundTrue".to_string()));
+        // Verify sorted order
+        let mut sorted = paths.clone();
+        sorted.sort();
+        assert_eq!(paths, sorted);
+    }
+
+    #[test]
+    fn source_delta_counts_tracks_per_source() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+
+        // Apply 2 GPS deltas and 1 AIS delta
+        store.apply_delta(make_gps_delta(3.5));
+        store.apply_delta(make_gps_delta(3.6));
+        store.apply_delta(Delta::self_vessel(vec![Update::new(
+            Source::nmea0183("ais", "AI"),
+            vec![PathValue::new(
+                "navigation.speedOverGround",
+                serde_json::json!(3.8),
+            )],
+        )]));
+
+        let counts = store.source_delta_counts();
+        assert_eq!(counts.get("ttyUSB0"), Some(&2));
+        assert_eq!(counts.get("ais"), Some(&1));
+    }
+
+    #[test]
+    fn source_priorities_exposed() {
+        let (store_arc, _rx) = SignalKStore::new("urn:mrn:signalk:uuid:test");
+        let mut store = store_arc.blocking_write();
+        let mut prios = HashMap::new();
+        prios.insert("gps.GP".to_string(), 10);
+        prios.insert("ais".to_string(), 50);
+        store.set_source_priorities(prios);
+
+        let exposed = store.source_priorities();
+        assert_eq!(exposed.get("gps.GP"), Some(&10));
+        assert_eq!(exposed.get("ais"), Some(&50));
     }
 }

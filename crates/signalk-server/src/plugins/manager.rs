@@ -19,6 +19,7 @@ use super::host::{PutHandlerRegistry, RustPluginContext, cleanup_plugin};
 use super::isolation::guarded;
 use super::routes::PluginRouteTable;
 use crate::autopilot::AutopilotManager;
+use crate::config_store::ConfigStore;
 use crate::webapps::WebappRegistry;
 
 /// A registered plugin with its runtime state.
@@ -43,10 +44,11 @@ pub struct PluginManager {
     delta_filter: Arc<DeltaFilterChain>,
     /// Shared webapp registry
     webapp_registry: Arc<RwLock<WebappRegistry>>,
-    config_dir: PathBuf,
     data_dir: PathBuf,
     /// Autopilot provider registry (optional — set after construction)
     autopilot_manager: Option<Arc<AutopilotManager>>,
+    /// Unified config store (optional — set after construction)
+    config_store: Option<Arc<ConfigStore>>,
     /// Shared SQLite database connection (set after construction).
     database: Option<Arc<std::sync::Mutex<signalk_sqlite::rusqlite::Connection>>>,
     /// Resource provider registry (optional — set after construction).
@@ -63,7 +65,6 @@ impl PluginManager {
         plugin_routes: Arc<RwLock<HashMap<String, String>>>,
         delta_filter: Arc<DeltaFilterChain>,
         webapp_registry: Arc<RwLock<WebappRegistry>>,
-        config_dir: PathBuf,
         data_dir: PathBuf,
     ) -> Self {
         PluginManager {
@@ -75,9 +76,9 @@ impl PluginManager {
             plugin_routes,
             delta_filter,
             webapp_registry,
-            config_dir,
             data_dir,
             autopilot_manager: None,
+            config_store: None,
             database: None,
             resource_providers: None,
         }
@@ -94,6 +95,11 @@ impl PluginManager {
         db: Arc<std::sync::Mutex<signalk_sqlite::rusqlite::Connection>>,
     ) {
         self.database = Some(db);
+    }
+
+    /// Set the config store for plugin config persistence.
+    pub fn set_config_store(&mut self, store: Arc<ConfigStore>) {
+        self.config_store = Some(store);
     }
 
     /// Set the resource provider registry so plugins can register via `register_resource_provider()`.
@@ -158,13 +164,13 @@ impl PluginManager {
             self.put_handler_registry.clone(),
             self.put_handlers.clone(),
             self.plugin_routes.clone(),
-            self.config_dir.clone(),
             plugin_data_dir,
             self.delta_filter.clone(),
             self.webapp_registry.clone(),
             self.autopilot_manager.clone(),
             self.database.clone(),
             self.resource_providers.clone(),
+            self.config_store.clone(),
         ));
 
         entry.context = Some(ctx.clone());
@@ -283,19 +289,19 @@ impl PluginManager {
             .is_some_and(|entry| matches!(entry.status, PluginStatus::Running(_)))
     }
 
-    /// Read plugin config from disk.
+    /// Read plugin config from the config store.
     pub fn read_plugin_config(&self, plugin_id: &str) -> Option<serde_json::Value> {
-        let path = self.config_dir.join(format!("{plugin_id}.json"));
-        let data = std::fs::read_to_string(path).ok()?;
-        serde_json::from_str(&data).ok()
+        self.config_store
+            .as_ref()
+            .and_then(|cs| cs.plugin_config(plugin_id))
+            .map(|e| e.config)
     }
 
-    /// Save plugin config to disk.
+    /// Save plugin config to the config store.
     pub fn save_plugin_config(&self, plugin_id: &str, config: &serde_json::Value) {
-        let _ = std::fs::create_dir_all(&self.config_dir);
-        let path = self.config_dir.join(format!("{plugin_id}.json"));
-        let data = serde_json::to_string_pretty(config).unwrap_or_default();
-        let _ = std::fs::write(path, data);
+        if let Some(ref cs) = self.config_store {
+            cs.set_plugin_config(plugin_id, config);
+        }
     }
 
     /// Get statuses with config schema from each plugin.
@@ -397,7 +403,6 @@ mod tests {
             Arc::new(RwLock::new(HashMap::new())),
             Arc::new(DeltaFilterChain::new()),
             Arc::new(RwLock::new(WebappRegistry::new())),
-            PathBuf::from("/tmp/signalk-test/config"),
             PathBuf::from("/tmp/signalk-test/data"),
         )
     }

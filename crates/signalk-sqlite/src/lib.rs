@@ -147,6 +147,7 @@ mod tests {
         assert!(tables.contains(&"history_raw".to_string()));
         assert!(tables.contains(&"history_daily".to_string()));
         assert!(tables.contains(&"track_points".to_string()));
+        assert!(tables.contains(&"config".to_string()));
         assert!(tables.contains(&"schema_version".to_string()));
     }
 

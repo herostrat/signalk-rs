@@ -9,8 +9,7 @@ fn test_app_with_resources() -> (axum::Router, tempfile::TempDir) {
         data_dir: tmp.path().to_string_lossy().to_string(),
         ..signalk_server::config::ServerConfig::default()
     };
-    let (store, _rx) = signalk_store::store::SignalKStore::new(config.vessel.uuid.clone());
-    let state = signalk_server::ServerState::new(config, store);
+    let state = signalk_server::ServerState::new(config);
     let router = signalk_server::build_router(state, &[]);
     (router, tmp)
 }
@@ -26,10 +25,9 @@ async fn test_app_with_delta_rx() -> (
         data_dir: tmp.path().to_string_lossy().to_string(),
         ..signalk_server::config::ServerConfig::default()
     };
-    let (store, _rx) = signalk_store::store::SignalKStore::new(config.vessel.uuid.clone());
-    // Subscribe before building the app so we get all deltas.
-    let rx = store.read().await.subscribe();
-    let state = signalk_server::ServerState::new(config, store);
+    let state = signalk_server::ServerState::new(config);
+    // Subscribe before building the router so we get all deltas.
+    let rx = state.store.read().await.subscribe();
     let router = signalk_server::build_router(state, &[]);
     (router, tmp, rx)
 }

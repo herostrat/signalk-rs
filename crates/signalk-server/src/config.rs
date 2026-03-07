@@ -2,12 +2,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::history::HistoryConfig;
 
-/// Server configuration loaded from TOML file or environment.
+/// Server configuration — bootstrap settings that stay constant at runtime.
+///
+/// Does NOT contain vessel, plugins, source_priorities, or source_ttls.
+/// Those live in `SeedConfig` and are persisted to SQLite on first start.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[schemars(default)]
 pub struct ServerConfig {
     pub server: ServerSettings,
-    pub vessel: VesselSettings,
     pub auth: AuthSettings,
     pub internal: InternalSettings,
     /// History subsystem configuration (time-series recording + retention).
@@ -19,52 +21,22 @@ pub struct ServerConfig {
     /// Path to node_modules directory containing webapps and bridge plugins
     #[serde(default = "default_modules_dir")]
     pub modules_dir: String,
+}
+
+/// Optional seed values — written to SQLite on first start, then ignored.
+///
+/// Remove from TOML after first start, or leave them (they won't overwrite DB).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SeedConfig {
+    #[serde(default)]
+    pub vessel: VesselSettings,
     /// Source priority configuration: source_ref → priority (lower = higher).
-    ///
-    /// When multiple data sources provide the same path, the one with the
-    /// lowest priority number wins. Sources without an entry default to 100.
-    ///
-    /// ```toml
-    /// [source_priorities]
-    /// "gps.GP" = 10
-    /// "ais" = 50
-    /// "sensor-data-simulator" = 200
-    /// ```
     #[serde(default)]
     pub source_priorities: std::collections::HashMap<String, u16>,
-
     /// Source TTL configuration: source_ref → max value age in seconds.
-    ///
-    /// When a source's active value is older than its TTL, it is lazily evicted
-    /// on the next write to the same path, allowing lower-priority sources to take over.
-    /// Sources without an entry have no TTL (values persist indefinitely).
-    ///
-    /// Typical use: set a short TTL for GPS/NMEA sources so that NTP or other
-    /// fallbacks can fill in when the GPS goes offline.
-    ///
-    /// ```toml
-    /// [source_ttls]
-    /// "nmea0183-tcp.GP" = 5   # evict after 5s of silence
-    /// "nmea2000.129033" = 5
-    /// ```
     #[serde(default)]
     pub source_ttls: std::collections::HashMap<String, u64>,
     /// Plugin configurations — everything is a plugin.
-    ///
-    /// ```toml
-    /// [[plugins]]
-    /// id = "nmea0183-tcp"
-    /// config = { addr = "0.0.0.0:10110", source_label = "gps" }
-    ///
-    /// [[plugins]]
-    /// id = "nmea0183-serial"
-    /// config = { path = "/dev/ttyUSB0", baud_rate = 4800, source_label = "depth" }
-    ///
-    /// [[plugins]]
-    /// id = "anchor-alarm"
-    /// enabled = false
-    /// config = { radius = 75.0 }
-    /// ```
     #[serde(default)]
     pub plugins: Vec<PluginConfig>,
 }
@@ -100,9 +72,11 @@ pub struct ServerSettings {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct VesselSettings {
-    /// Vessel UUID — generated on first start if empty
+    /// Vessel UUID — generated on first start if empty.
+    /// Only used as seed; the authoritative UUID lives in ConfigStore (SQLite).
+    #[serde(default)]
     pub uuid: String,
     pub name: Option<String>,
     pub mmsi: Option<String>,
@@ -162,11 +136,6 @@ impl Default for ServerConfig {
                 host: "0.0.0.0".to_string(),
                 name: "signalk-rs".to_string(),
             },
-            vessel: VesselSettings {
-                uuid: format!("urn:mrn:signalk:uuid:{}", uuid::Uuid::new_v4()),
-                name: None,
-                mmsi: None,
-            },
             auth: AuthSettings {
                 jwt_secret: uuid::Uuid::new_v4().to_string(),
                 token_ttl_secs: 604800,
@@ -183,10 +152,17 @@ impl Default for ServerConfig {
                 http_bridge_port: 3002,
                 bridge_token: String::new(),
             },
-            source_priorities: std::collections::HashMap::new(),
-            source_ttls: std::collections::HashMap::new(),
-            plugins: Vec::new(),
             history: HistoryConfig::default(),
         }
     }
+}
+
+/// Combined struct used for TOML parsing and config reference schema generation.
+/// Deserializes into both `ServerConfig` (bootstrap) and `SeedConfig` (first-start seed data).
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct RawConfig {
+    #[serde(flatten)]
+    pub server: ServerConfig,
+    #[serde(flatten)]
+    pub seed: SeedConfig,
 }

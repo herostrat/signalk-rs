@@ -7,7 +7,7 @@ use signalk_server::{
     ServerState,
     autopilot::AutopilotManager,
     build_router,
-    config::ServerConfig,
+    config::{RawConfig, SeedConfig, ServerConfig},
     history::HistoryManager,
     plugins::{
         delta_filter::DeltaFilterChain, host::PutHandlerRegistry, manager::PluginManager,
@@ -27,7 +27,10 @@ use tracing::info;
 /// File path is taken from `SIGNALK_CONFIG_FILE` env var, then the standard
 /// system path `/etc/signalk-rs/config.toml`, then in-tree `signalk-rs.toml`.
 /// Missing files are silently ignored — useful for development without a config.
-fn load_config() -> ServerConfig {
+///
+/// Returns `(ServerConfig, SeedConfig)` — bootstrap settings and optional seed
+/// values that are written to SQLite on first start only.
+fn load_config() -> (ServerConfig, SeedConfig) {
     let paths: &[&str] = &[
         // Explicit override (e.g. Docker container)
         &std::env::var("SIGNALK_CONFIG_FILE").unwrap_or_default(),
@@ -42,13 +45,13 @@ fn load_config() -> ServerConfig {
         let result = config::Config::builder()
             .add_source(config::File::from(std::path::Path::new(path)))
             .build()
-            .and_then(|c| c.try_deserialize::<ServerConfig>());
+            .and_then(|c| c.try_deserialize::<RawConfig>());
 
         match result {
-            Ok(cfg) => {
+            Ok(raw) => {
                 // tracing not yet initialised here, use eprintln
                 eprintln!("signalk-rs: loaded config from {path}");
-                return cfg;
+                return (raw.server, raw.seed);
             }
             Err(e) => {
                 eprintln!("signalk-rs: could not parse {path}: {e} — using defaults");
@@ -56,7 +59,7 @@ fn load_config() -> ServerConfig {
         }
     }
 
-    ServerConfig::default()
+    (ServerConfig::default(), SeedConfig::default())
 }
 
 #[tokio::main]
@@ -70,44 +73,44 @@ async fn main() -> Result<()> {
     };
     tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
-    let config = load_config();
-    info!(config_vessel_uuid = %config.vessel.uuid, "config loaded");
+    let (config, seed) = load_config();
     let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port).parse()?;
 
-    info!(vessel_uri = %config.vessel.uuid, "signalk-rs starting");
+    // ── Shared database (opened early — ConfigStore needs it before the Store) ──
+    let db_path = PathBuf::from(&config.data_dir).join("signalk-rs.db");
+    info!(?db_path, "Opening shared database");
+    let shared_db = {
+        let db = signalk_sqlite::Database::open(&db_path).expect("Failed to open database");
+        Arc::new(std::sync::Mutex::new(db.into_conn()))
+    };
 
-    let (store, _rx) = SignalKStore::new(&config.vessel.uuid);
+    // ── ConfigStore: all runtime-mutable config in SQLite ─────────────────
+    let config_store = Arc::new(signalk_server::config_store::ConfigStore::new(
+        shared_db.clone(),
+        &seed,
+    ));
 
-    // ── Vessel identity (name, mmsi) ────────────────────────────────────────
+    let vessel_uuid = config_store.vessel_uuid();
+    info!(vessel_uuid = %vessel_uuid, "signalk-rs starting");
+
+    let (store, _rx) = SignalKStore::new(&vessel_uuid);
+
+    // Populate the in-memory store from ConfigStore
     {
         let mut s = store.write().await;
-        if let Some(ref name) = config.vessel.name {
-            s.set_vessel_identity(&config.vessel.uuid, Some(name.clone()), None);
-        }
-        if let Some(ref mmsi) = config.vessel.mmsi {
-            s.set_vessel_identity(&config.vessel.uuid, None, Some(mmsi.clone()));
-        }
-    }
-
-    // ── Source priorities ─────────────────────────────────────────────────────
-    if !config.source_priorities.is_empty() {
-        store
-            .write()
-            .await
-            .set_source_priorities(config.source_priorities.clone());
-        info!(
-            count = config.source_priorities.len(),
-            "Source priorities configured"
+        s.set_vessel_identity(
+            &vessel_uuid,
+            config_store.vessel_name(),
+            config_store.vessel_mmsi(),
         );
-    }
-
-    // ── Source TTLs ───────────────────────────────────────────────────────────
-    if !config.source_ttls.is_empty() {
-        store
-            .write()
-            .await
-            .set_source_ttls(config.source_ttls.clone());
-        info!(count = config.source_ttls.len(), "Source TTLs configured");
+        let priorities = config_store.source_priorities();
+        if !priorities.is_empty() {
+            s.set_source_priorities(priorities);
+        }
+        let ttls = config_store.source_ttls();
+        if !ttls.is_empty() {
+            s.set_source_ttls(ttls);
+        }
     }
 
     // ── Internal API (UDS) ────────────────────────────────────────────────────
@@ -227,19 +230,10 @@ async fn main() -> Result<()> {
     let put_handler_registry = Arc::new(PutHandlerRegistry::new());
     let webapp_registry = Arc::new(RwLock::new(signalk_server::webapps::WebappRegistry::new()));
 
-    let config_dir = PathBuf::from(&config.data_dir).join("plugin-config");
     let data_dir = PathBuf::from(&config.data_dir).join("plugin-data");
 
     // ── Autopilot manager ─────────────────────────────────────────────────────
     let autopilot_manager = AutopilotManager::new();
-
-    // ── Shared database ─────────────────────────────────────────────────────
-    let db_path = PathBuf::from(&config.data_dir).join("signalk-rs.db");
-    info!(?db_path, "Opening shared database");
-    let shared_db = {
-        let db = signalk_sqlite::Database::open(&db_path).expect("Failed to open database");
-        Arc::new(std::sync::Mutex::new(db.into_conn()))
-    };
 
     let mut plugin_manager = PluginManager::new(
         store.clone(),
@@ -249,11 +243,11 @@ async fn main() -> Result<()> {
         plugin_routes.clone(),
         delta_filter,
         webapp_registry.clone(),
-        config_dir,
         data_dir,
     );
     plugin_manager.set_autopilot_manager(autopilot_manager.clone());
     plugin_manager.set_database(shared_db.clone());
+    plugin_manager.set_config_store(config_store.clone());
 
     // Resource provider registry — created BEFORE start_all so plugins can register providers
     let resource_providers = Arc::new(signalk_server::resources::ResourceProviderRegistry::new(
@@ -281,12 +275,12 @@ async fn main() -> Result<()> {
     #[cfg(feature = "nmea2000")]
     plugin_manager.register(Box::new(nmea2000_send::Nmea2000SendPlugin::new()));
 
-    // Build plugin configs from [[plugins]] section
-    let plugin_configs: HashMap<String, serde_json::Value> = config
-        .plugins
-        .iter()
-        .filter(|pc| pc.enabled)
-        .map(|pc| (pc.id.clone(), pc.config.clone()))
+    // Build plugin configs from ConfigStore
+    let plugin_configs: HashMap<String, serde_json::Value> = config_store
+        .all_plugin_configs()
+        .into_iter()
+        .filter(|(_, e)| e.enabled)
+        .map(|(id, e)| (id, e.config))
         .collect();
 
     // Start all plugins that have config entries
@@ -340,6 +334,7 @@ async fn main() -> Result<()> {
         history_manager,
         notification_manager,
         unit_preferences,
+        config_store,
     );
 
     // Populate plugin registry with initial Tier 1 statuses

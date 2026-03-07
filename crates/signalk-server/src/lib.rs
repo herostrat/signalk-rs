@@ -8,6 +8,7 @@ pub mod history;
 pub mod notifications;
 pub mod plugins;
 pub mod resources;
+pub mod config_store;
 pub mod unitpreferences;
 pub mod webapps;
 pub mod ws;
@@ -30,6 +31,7 @@ use crate::plugins::manager::PluginManager;
 use crate::plugins::registry::PluginRegistry;
 use crate::plugins::routes::PluginRouteTable;
 use crate::resources::ResourceProviderRegistry;
+use crate::config_store::ConfigStore;
 use crate::unitpreferences::UnitPreferencesManager;
 use crate::webapps::{WebAppInfo, WebappRegistry};
 
@@ -65,6 +67,8 @@ pub struct ServerState {
     pub notification_manager: Arc<NotificationManager>,
     /// Unit preferences manager — resolves display units for metadata enrichment
     pub unit_preferences: Option<Arc<UnitPreferencesManager>>,
+    /// Unified config store — all runtime-mutable config backed by SQLite
+    pub config_store: Arc<ConfigStore>,
     /// Server start time for uptime calculation
     pub start_time: std::time::Instant,
     /// Active WebSocket client count
@@ -72,7 +76,9 @@ pub struct ServerState {
 }
 
 impl ServerState {
-    pub fn new(config: ServerConfig, store: Arc<RwLock<SignalKStore>>) -> Arc<Self> {
+    /// Create a ServerState for tests. Creates an in-memory ConfigStore with
+    /// `SeedConfig::default()` (auto-generates UUID) and builds the store from it.
+    pub fn new(config: ServerConfig) -> Arc<Self> {
         let data_dir = PathBuf::from(&config.data_dir);
         let route_table = Arc::new(PluginRouteTable::new());
         let put_handler_registry = Arc::new(PutHandlerRegistry::new());
@@ -82,6 +88,16 @@ impl ServerState {
         let resource_providers = Arc::new(ResourceProviderRegistry::new(Arc::new(
             resources::FileResourceProvider::new(data_dir.join("resources")),
         )));
+
+        // In-memory DB + ConfigStore (auto-generates UUID)
+        let test_db = signalk_sqlite::Database::open_in_memory().unwrap();
+        let test_conn = Arc::new(std::sync::Mutex::new(test_db.into_conn()));
+        let config_store = Arc::new(ConfigStore::new(
+            test_conn,
+            &crate::config::SeedConfig::default(),
+        ));
+
+        let (store, _rx) = SignalKStore::new(config_store.vessel_uuid());
         let plugin_manager = PluginManager::new(
             store.clone(),
             route_table.clone(),
@@ -90,7 +106,6 @@ impl ServerState {
             plugin_routes.clone(),
             Arc::new(crate::plugins::delta_filter::DeltaFilterChain::new()),
             webapp_registry.clone(),
-            data_dir.join("plugin-config"),
             data_dir.join("plugin-data"),
         );
         let course_manager = Arc::new(CourseManager::new(
@@ -104,7 +119,7 @@ impl ServerState {
         let notification_manager = Arc::new(NotificationManager::new());
         Arc::new(ServerState {
             config,
-            store,
+            store: store.clone(),
             put_handlers,
             plugin_routes,
             put_handler_registry,
@@ -119,6 +134,7 @@ impl ServerState {
             history_manager,
             notification_manager,
             unit_preferences: None,
+            config_store,
             start_time: std::time::Instant::now(),
             ws_client_count: Arc::new(AtomicUsize::new(0)),
         })
@@ -141,6 +157,7 @@ impl ServerState {
         history_manager: Arc<HistoryManager>,
         notification_manager: Arc<NotificationManager>,
         unit_preferences: Option<Arc<UnitPreferencesManager>>,
+        config_store: Arc<ConfigStore>,
     ) -> Arc<Self> {
         let data_dir = PathBuf::from(&config.data_dir);
         let course_manager = Arc::new(CourseManager::new(
@@ -165,6 +182,7 @@ impl ServerState {
             history_manager,
             notification_manager,
             unit_preferences,
+            config_store,
             start_time: std::time::Instant::now(),
             ws_client_count: Arc::new(AtomicUsize::new(0)),
         })
@@ -511,7 +529,10 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
         )
         .route("/skServer/webapps", get(api::server_routes::list_webapps))
         .route("/skServer/settings", get(api::server_routes::get_settings))
-        .route("/skServer/vessel", get(api::server_routes::get_vessel))
+        .route(
+            "/skServer/vessel",
+            get(api::server_routes::get_vessel).put(api::server_routes::put_vessel),
+        )
         .route("/skServer/addons", get(api::server_routes::empty_array))
         .route(
             "/skServer/appstore/available",
@@ -533,14 +554,18 @@ pub fn build_router(state: Arc<ServerState>, webapps: &[WebAppInfo]) -> axum::Ro
             "/skServer/security/devices",
             get(api::server_routes::empty_array),
         )
-        .route("/skServer/providers", get(api::server_routes::empty_array))
+        .route(
+            "/skServer/providers",
+            get(api::server_routes::list_providers),
+        )
         .route(
             "/skServer/availablePaths",
-            get(api::server_routes::empty_array),
+            get(api::server_routes::list_available_paths),
         )
         .route(
             "/skServer/sourcePriorities",
-            get(api::server_routes::empty_object),
+            get(api::server_routes::get_source_priorities)
+                .put(api::server_routes::put_source_priorities),
         )
         .route("/skServer/debugKeys", get(api::server_routes::empty_array))
         .route(

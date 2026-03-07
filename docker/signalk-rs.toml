@@ -29,6 +29,11 @@ uds_rs_socket = "/run/signalk/rs.sock"
 uds_bridge_socket = "/run/signalk/bridge.sock"
 bridge_token = "dev-token-12345"
 
+# ── Seed (only applied on first start, ignored when DB exists) ────────
+# vessel, source_priorities, source_ttls, and [[plugins]] are seed values.
+# They are written to SQLite on first start and then ignored on subsequent starts.
+# To change them later, use the Admin API (PUT /skServer/vessel, etc.).
+
 # --- Source Priorities ---
 # Lower number = higher priority. Default is 100.
 # This lets us verify that when all three paths produce the same data,
